@@ -420,6 +420,7 @@ func launcherModel(t *testing.T, spawn func(string) error) Model {
 			return `claude --resume ` + id + ` --name "queue stall"`, nil
 		},
 		Spawn:     spawn,
+		Terminal:  "tmux",
 		LoadSpine: func(string) ([]graph.Segment, error) { return nil, nil },
 	})
 	m.now = func() time.Time { return now }
@@ -471,16 +472,17 @@ func TestOpenTerminalUsesTheConfiguredLauncher(t *testing.T) {
 	if launched != "abc123def456" {
 		t.Errorf("launcher called with %q", launched)
 	}
-	if !strings.Contains(plain(m.render()), "opened a terminal") {
-		t.Error("expected confirmation")
+	if !strings.Contains(plain(m.render()), "opened abc123de in tmux") {
+		t.Errorf("confirmation should name the terminal:\n%s", plain(m.render()))
 	}
 }
 
 func TestLauncherFailureIsReported(t *testing.T) {
 	m := launcherModel(t, func(string) error { return errors.New("tmux is not running") })
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
-	if !strings.Contains(plain(updated.(Model).render()), "tmux is not running") {
-		t.Error("a failed launch must be reported")
+	out := plain(updated.(Model).render())
+	if !strings.Contains(out, "could not open a terminal") || !strings.Contains(out, "tmux is not running") {
+		t.Errorf("a failed launch must be reported plainly:\n%s", out)
 	}
 }
 
@@ -576,4 +578,33 @@ func TestPasteGoesToWhicheverFieldIsOpen(t *testing.T) {
 			t.Error("a paste with no field open should change nothing")
 		}
 	})
+}
+
+func TestClearingTheLaneFilterKeepsYourPlace(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("a", "gcsfuse density", "app", 5, time.Hour),
+		laneInfo("b", "schema refactor", "app", 5, time.Hour),
+		laneInfo("c", "halt behaviour", "app", 5, time.Hour),
+	}
+	m := newTestModel(t, forestOf(lanes, nil))
+
+	press := func(m Model, keys ...string) Model {
+		for _, k := range keys {
+			updated, _ := m.Update(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
+			m = updated.(Model)
+		}
+		return m
+	}
+	m = press(m, "f", "h", "a", "l", "t")
+	if len(m.visible) != 1 {
+		t.Fatalf("filter left %d lanes, want 1", len(m.visible))
+	}
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(Model)
+	if len(m.visible) != 3 {
+		t.Fatalf("clearing should restore all lanes, got %d", len(m.visible))
+	}
+	if got := m.visible[m.cursor].node.Lane.ID; got != "c" {
+		t.Errorf("cursor on %q after clearing, want the lane that was found", got)
+	}
 }

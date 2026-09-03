@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -23,6 +22,7 @@ import (
 	"github.com/Ashes47/braids/internal/core/store"
 	"github.com/Ashes47/braids/internal/core/store/claudecode"
 	"github.com/Ashes47/braids/internal/core/watch"
+	"github.com/Ashes47/braids/internal/launch"
 	"github.com/Ashes47/braids/internal/tui"
 )
 
@@ -59,8 +59,8 @@ common flags:
 
 environment:
   BRAIDS_SPAWN     command template for 'o' (open a terminal), understanding
-                   {cmd} {id} {name} {dir}. Detected automatically under tmux
-                   and iTerm2; elsewhere 'o' copies the command instead.
+                   {cmd} {name} {dir}. tmux and iTerm2 are driven directly
+                   without one; elsewhere 'o' copies the command instead.
                    e.g. tmux new-window -c {dir} -n {name} '{cmd}'
 `
 
@@ -190,6 +190,7 @@ func cmdMap(args []string, out *printer) error {
 			changes = w.Changes()
 		}
 	}
+	spawn, terminal := spawner(ctx, ix)
 	opts := tui.Options{
 		ASCII:     *ascii,
 		Source:    "claudecode",
@@ -200,7 +201,8 @@ func cmdMap(args []string, out *printer) error {
 		ResumeCommand: func(laneID string) (string, error) {
 			return resumeCommand(ctx, ix, laneID)
 		},
-		Spawn: spawner(ctx, ix),
+		Spawn:    spawn,
+		Terminal: terminal,
 		Search: func(query, scope string) ([]index.Hit, error) {
 			return ix.Search(ctx, index.Query{Text: query, Lane: scope, Limit: 200})
 		},
@@ -415,22 +417,12 @@ func resumeCommand(ctx context.Context, ix *index.Index, laneID string) (string,
 	return command, nil
 }
 
-// spawner builds a launcher from BRAIDS_SPAWN, or reports none.
-//
-// braids does not guess at a terminal. Terminals differ in whether they can be
-// told to run a command at all — Warp exposes no such hook — so the default is
-// to hand over the command and let the user place it.
-//
-// The template understands {cmd}, {id}, {name} and {dir}. For example:
-//
-//	BRAIDS_SPAWN='tmux new-window -c {dir} -n {name} "{cmd}"'
-func spawner(ctx context.Context, ix *index.Index) func(string) error {
-	template := strings.TrimSpace(os.Getenv("BRAIDS_SPAWN"))
-	if template == "" {
-		template = defaultSpawn()
-	}
-	if template == "" {
-		return nil
+// spawner opens a terminal for a lane, or reports that this terminal cannot be
+// driven. The name it goes by is reported too, so the map can say what it used.
+func spawner(ctx context.Context, ix *index.Index) (func(string) error, string) {
+	open, terminal := launch.Detect(launch.Env)
+	if open == nil {
+		return nil, ""
 	}
 	return func(laneID string) error {
 		lane, err := findLane(ctx, ix, laneID)
@@ -445,39 +437,12 @@ func spawner(ctx context.Context, ix *index.Index) func(string) error {
 		if dir == "" {
 			dir = filepath.Dir(lane.Path)
 		}
-		expanded := strings.NewReplacer(
-			"{cmd}", command,
-			"{id}", lane.ID,
-			"{name}", lane.Title,
-			"{dir}", dir,
-		).Replace(template)
-
-		// Started, not run to completion: the launcher opens a window and the
-		// map keeps its own terminal.
-		launch := exec.Command("sh", "-c", expanded)
-		launch.Dir = dir
-		if err := launch.Start(); err != nil {
-			return fmt.Errorf("BRAIDS_SPAWN failed: %w", err)
+		name := lane.Title
+		if name == "" {
+			name = shortID(lane.ID)
 		}
-		go launch.Wait() //nolint:errcheck // reaped so it cannot become a zombie
-		return nil
-	}
-}
-
-// defaultSpawn detects a terminal braids can drive without being told how.
-//
-// Only terminals that can be scripted qualify. Warp, for one, offers no way to
-// open a tab running a command, so there the honest answer is to hand over the
-// command rather than pretend.
-func defaultSpawn() string {
-	if os.Getenv("TMUX") != "" {
-		return `tmux new-window -c {dir} -n {name} '{cmd}'`
-	}
-	if os.Getenv("TERM_PROGRAM") == "iTerm.app" {
-		return `osascript -e 'tell application "iTerm2" to tell current window to create tab with default profile ` +
-			`command "cd {dir} && {cmd}"'`
-	}
-	return ""
+		return open(ctx, dir, name, command)
+	}, terminal
 }
 
 // findLane resolves a lane by ID prefix, refusing an ambiguous one rather than

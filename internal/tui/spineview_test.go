@@ -397,3 +397,35 @@ func TestDescribeBranches(t *testing.T) {
 		}
 	}
 }
+
+func TestFilteringThenClearingKeepsYourPlace(t *testing.T) {
+	segs := []graph.Segment{
+		{Kind: graph.SegTurn, Seq: 1, Role: model.RoleUser, Preview: "start here"},
+		{Kind: graph.SegRun, Seq: 2, Count: 40},
+		{Kind: graph.SegTurn, Seq: 284, Role: model.RoleUser, Preview: "i want this in zsh instead of export PATH"},
+		{Kind: graph.SegTurn, Seq: 285, Role: model.RoleAssistant, Preview: "after"},
+	}
+	m := spineModel(t, segs, nil)
+	m = m.openSpine()
+
+	m, _ = m.spineKey("f")
+	for _, k := range []string{"p", "a", "t", "h"} {
+		m, _ = m.spineKey(k)
+	}
+	if len(m.spine.visible) != 1 {
+		t.Fatalf("filter left %d rows, want 1", len(m.spine.visible))
+	}
+
+	// Clearing the filter must leave the cursor on the turn that was found —
+	// otherwise it has to be hunted for a second time.
+	m, _ = m.spineKey("esc")
+	if m.spine.filter.on() {
+		t.Fatal("esc should clear the filter")
+	}
+	if len(m.spine.visible) != len(segs) {
+		t.Fatalf("the whole spine should be back, got %d rows", len(m.spine.visible))
+	}
+	if got := m.spine.visible[m.spine.cursor].seg.Seq; got != 284 {
+		t.Errorf("cursor on t%d after clearing, want t284", got)
+	}
+}

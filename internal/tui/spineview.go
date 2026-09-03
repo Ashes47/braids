@@ -80,17 +80,54 @@ func childrenOf(n *graph.Node) []*graph.Node {
 
 // apply narrows the spine to rows matching the filter. A run is matched on its
 // summary, so filtering for a tool finds the stretches that used it.
+//
+// The selected row is followed across the change. Filtering down to one turn
+// and then clearing the filter should leave you on that turn in the full spine
+// — that is the whole reason to filter — and losing the place would mean
+// finding it twice.
 func (s *spineState) apply() {
-	if !s.filter.on() {
+	held := s.selectedKey()
+	switch {
+	case !s.filter.on():
 		s.visible = s.rows
-		return
-	}
-	s.visible = nil
-	for _, r := range s.rows {
-		if s.filter.matches(r.haystack()) {
-			s.visible = append(s.visible, r)
+	default:
+		s.visible = nil
+		for _, r := range s.rows {
+			if s.filter.matches(r.haystack()) {
+				s.visible = append(s.visible, r)
+			}
 		}
 	}
+	s.restore(held)
+}
+
+// selectedKey identifies the current row so it can be found again.
+func (s *spineState) selectedKey() string {
+	if s.cursor < 0 || s.cursor >= len(s.visible) {
+		return ""
+	}
+	return rowKey(s.visible[s.cursor])
+}
+
+// restore puts the cursor back on a row, or at the top if it is gone.
+func (s *spineState) restore(key string) {
+	s.cursor = 0
+	if key == "" {
+		return
+	}
+	for i, r := range s.visible {
+		if rowKey(r) == key {
+			s.cursor = i
+			return
+		}
+	}
+}
+
+func rowKey(r spineRow) string {
+	if r.fork != nil {
+		return "fork:" + r.fork.Lane.ID
+	}
+	return fmt.Sprintf("turn:%d", r.seg.Seq)
 }
 
 func (r spineRow) haystack() string {

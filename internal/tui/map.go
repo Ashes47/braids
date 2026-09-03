@@ -61,6 +61,9 @@ type Options struct {
 	// user has configured no way to launch one, which is the default: braids
 	// copies the command instead of guessing at their terminal.
 	Spawn func(laneID string) error
+	// Terminal names what Spawn drives, so the map can say so instead of
+	// claiming a window opened somewhere unspecified.
+	Terminal string
 	// Search runs a full-text query over every indexed message and tool call.
 	// An empty scope searches everywhere; a lane ID narrows to one.
 	Search func(query, scope string) ([]index.Hit, error)
@@ -91,6 +94,7 @@ type Model struct {
 	changes   <-chan struct{}
 	resumeCmd func(string) (string, error)
 	spawn     func(string) error
+	terminal  string
 	searchFn  func(string, string) ([]index.Hit, error)
 
 	notice string
@@ -133,6 +137,7 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		changes:   opts.Changes,
 		resumeCmd: opts.ResumeCommand,
 		spawn:     opts.Spawn,
+		terminal:  opts.Terminal,
 		searchFn:  opts.Search,
 		now:       time.Now,
 		width:     80,
@@ -375,9 +380,9 @@ func (m Model) openTerminal() (tea.Model, tea.Cmd) {
 			"no terminal configured — command copied; set BRAIDS_SPAWN to open one", true), cmd
 	}
 	if err := m.spawn(lane); err != nil {
-		return m.withNotice(err.Error(), true), nil
+		return m.withNotice("could not open a terminal — "+err.Error(), true), nil
 	}
-	return m.withNotice("opened a terminal for "+shortID(lane), false), nil
+	return m.withNotice(fmt.Sprintf("opened %s in %s", shortID(lane), m.terminal), false), nil
 }
 
 // withNotice records a one-line outcome for whichever screen is showing.
@@ -406,15 +411,28 @@ func (m Model) editing() bool {
 // apply narrows the visible rows to those matching the filter. Filtering drops
 // the tree art: a partial forest with dangling connectors reads as corruption.
 func (m *Model) apply() {
+	held := ""
+	if m.cursor >= 0 && m.cursor < len(m.visible) {
+		held = m.visible[m.cursor].node.Lane.ID
+	}
 	if !m.filter.on() {
 		m.visible = m.all
-		return
+	} else {
+		m.visible = nil
+		for _, r := range m.all {
+			l := r.node.Lane
+			if m.filter.matches(l.Title + " " + l.Project + " " + l.ID) {
+				m.visible = append(m.visible, row{node: r.node})
+			}
+		}
 	}
-	m.visible = nil
-	for _, r := range m.all {
-		l := r.node.Lane
-		if m.filter.matches(l.Title + " " + l.Project + " " + l.ID) {
-			m.visible = append(m.visible, row{node: r.node})
+	// Follow the selected lane across the change, so clearing a filter leaves
+	// you where you were rather than back at the top.
+	m.cursor = 0
+	for i, r := range m.visible {
+		if r.node.Lane.ID == held {
+			m.cursor = i
+			break
 		}
 	}
 }

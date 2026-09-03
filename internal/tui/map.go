@@ -222,12 +222,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.clamp()
 		m.clampSpine()
+	case tea.PasteMsg:
+		return m.pasted(msg.Content), nil
 	case changedMsg:
 		return m.catchUp(), awaitChange(m.changes)
 	case tea.KeyPressMsg:
 		return m.key(msg)
 	}
 	return m, nil
+}
+
+// pasted routes pasted text to whichever field is taking input. Without this a
+// paste is dropped silently, which is worse than not supporting it.
+func (m Model) pasted(text string) Model {
+	switch {
+	case m.mode == searchMode && m.search != nil:
+		m.search.input.paste(text)
+		m.runSearch()
+		m.clampSearch()
+	case m.mode == spineMode && m.spine != nil && m.spine.naming.active:
+		m.spine.naming.paste(text)
+	case m.mode == spineMode && m.spine != nil && m.spine.filter.active:
+		m.spine.filter.paste(text)
+		m.spine.apply()
+		m.clampSpine()
+	case m.filter.active:
+		m.filter.paste(text)
+		m.apply()
+		m.clamp()
+	}
+	return m
 }
 
 // catchUp re-syncs after something moved on disk. A failure is left silent:

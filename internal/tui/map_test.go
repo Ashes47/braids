@@ -528,3 +528,52 @@ func TestSlashSearchesAndFFilters(t *testing.T) {
 		t.Errorf("filter left %d lanes, want the schema one", len(m.visible))
 	}
 }
+
+func TestPasteGoesToWhicheverFieldIsOpen(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("a", "gcsfuse density", "app", 5, time.Hour),
+		laneInfo("b", "schema refactor", "app", 5, time.Hour),
+	}
+	newModel := func() Model {
+		m := NewModel(forestOf(lanes, nil), Options{
+			ASCII: true,
+			LoadSpine: func(string) ([]graph.Segment, error) {
+				return []graph.Segment{{Kind: graph.SegTurn, Seq: 1, Preview: "schema work"}}, nil
+			},
+			Branch: func(string, int, string) (string, error) { return "x", nil },
+		})
+		m.now = func() time.Time { return now }
+		m.width, m.height = 90, 20
+		return m
+	}
+
+	t.Run("lane filter", func(t *testing.T) {
+		m := newModel()
+		updated, _ := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+		m = updated.(Model)
+		updated, _ = m.Update(tea.PasteMsg{Content: "schema"})
+		m = updated.(Model)
+		if len(m.visible) != 1 || m.visible[0].node.Lane.ID != "b" {
+			t.Errorf("paste did not narrow the list: %d lanes", len(m.visible))
+		}
+	})
+
+	t.Run("branch name", func(t *testing.T) {
+		m := newModel().openSpine()
+		m, _ = m.spineKey("b")
+		m.spine.naming.text = ""
+		updated, _ := m.Update(tea.PasteMsg{Content: "pasted-name"})
+		m = updated.(Model)
+		if got := m.spine.naming.text; got != "pasted-name" {
+			t.Errorf("branch name = %q", got)
+		}
+	})
+
+	t.Run("nothing open", func(t *testing.T) {
+		m := newModel()
+		updated, _ := m.Update(tea.PasteMsg{Content: "stray"})
+		if len(updated.(Model).visible) != 2 {
+			t.Error("a paste with no field open should change nothing")
+		}
+	})
+}

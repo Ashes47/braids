@@ -62,6 +62,12 @@ func (f *filterInput) edit(k string) bool {
 	return false
 }
 
+// paste appends pasted text, flattened to one line: a text field is one line,
+// and a newline in the middle of a query is never what was meant.
+func (f *filterInput) paste(text string) {
+	f.text += strings.Join(strings.Fields(text), " ")
+}
+
 // on reports whether anything is being filtered out.
 func (f filterInput) on() bool { return f.text != "" }
 

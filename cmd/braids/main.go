@@ -59,7 +59,8 @@ common flags:
 
 environment:
   BRAIDS_SPAWN     command template for 'o' (open a terminal), understanding
-                   {cmd} {id} {name} {dir}. Unset, 'o' copies the command.
+                   {cmd} {id} {name} {dir}. Detected automatically under tmux
+                   and iTerm2; elsewhere 'o' copies the command instead.
                    e.g. tmux new-window -c {dir} -n {name} '{cmd}'
 `
 
@@ -424,8 +425,11 @@ func resumeCommand(ctx context.Context, ix *index.Index, laneID string) (string,
 //
 //	BRAIDS_SPAWN='tmux new-window -c {dir} -n {name} "{cmd}"'
 func spawner(ctx context.Context, ix *index.Index) func(string) error {
-	template := os.Getenv("BRAIDS_SPAWN")
-	if strings.TrimSpace(template) == "" {
+	template := strings.TrimSpace(os.Getenv("BRAIDS_SPAWN"))
+	if template == "" {
+		template = defaultSpawn()
+	}
+	if template == "" {
 		return nil
 	}
 	return func(laneID string) error {
@@ -458,6 +462,22 @@ func spawner(ctx context.Context, ix *index.Index) func(string) error {
 		go launch.Wait() //nolint:errcheck // reaped so it cannot become a zombie
 		return nil
 	}
+}
+
+// defaultSpawn detects a terminal braids can drive without being told how.
+//
+// Only terminals that can be scripted qualify. Warp, for one, offers no way to
+// open a tab running a command, so there the honest answer is to hand over the
+// command rather than pretend.
+func defaultSpawn() string {
+	if os.Getenv("TMUX") != "" {
+		return `tmux new-window -c {dir} -n {name} '{cmd}'`
+	}
+	if os.Getenv("TERM_PROGRAM") == "iTerm.app" {
+		return `osascript -e 'tell application "iTerm2" to tell current window to create tab with default profile ` +
+			`command "cd {dir} && {cmd}"'`
+	}
+	return ""
 }
 
 // findLane resolves a lane by ID prefix, refusing an ambiguous one rather than

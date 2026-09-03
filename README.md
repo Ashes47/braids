@@ -77,6 +77,10 @@ export PATH="$(go env GOPATH)/bin:$PATH"  # add to ~/.zshrc if not already there
 braids
 ```
 
+Re-run `make install` after every change — `make build` only updates `./braids`
+in the repo. `braids version` prints the commit it was built from, so a stale
+binary is visible rather than mysterious.
+
 Other commands: `braids search QUERY [--kind text,tool_use] [--limit N]`,
 `braids lanes`, `braids map --ascii`, `braids version`.
 

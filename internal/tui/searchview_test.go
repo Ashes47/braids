@@ -191,3 +191,20 @@ func TestTypingQIntoSearchDoesNotQuit(t *testing.T) {
 		t.Errorf("query = %q", got)
 	}
 }
+
+func TestPasteIntoSearch(t *testing.T) {
+	m, queries := searchModel(t, demoHits(), nil)
+	m = m.openSearch()
+	m = typeSearch(m, "g")
+
+	updated, _ := m.Update(tea.PasteMsg{Content: "csfuse\ndensity  "})
+	m = updated.(Model)
+
+	// A pasted newline must not become part of the query.
+	if got := m.search.input.text; got != "gcsfuse density" {
+		t.Errorf("query = %q, want %q", got, "gcsfuse density")
+	}
+	if len(*queries) == 0 || !strings.HasPrefix((*queries)[len(*queries)-1], "gcsfuse density|") {
+		t.Errorf("paste did not re-run the search: %v", *queries)
+	}
+}

@@ -1,5 +1,8 @@
 GO      ?= go
 BIN     := braids
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 PKGS    := ./...
 
 .PHONY: all build install run reindex test race lint vet fmt tidy cover clean ci
@@ -7,11 +10,11 @@ PKGS    := ./...
 all: build
 
 build:
-	$(GO) build -trimpath -o $(BIN) ./cmd/braids
+	$(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/braids
 
 # install puts braids on your PATH (needs $(shell $(GO) env GOPATH)/bin in PATH).
 install:
-	$(GO) install ./cmd/braids
+	$(GO) install -trimpath -ldflags "$(LDFLAGS)" ./cmd/braids
 
 # run builds and opens the map without installing.
 run: build

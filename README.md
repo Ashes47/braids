@@ -1,0 +1,44 @@
+# braids
+
+Claude Code works best on one linear thread doing one thing. Humans don't work
+that way — a task forks, doubles back, and spawns three side quests. Today the
+only way to cope is to run N terminals and hold the map in your head.
+
+**braids is that map.** One TUI window alongside your N terminals. It shows every
+conversation and every branch as a graph, searches all of them in microseconds,
+and turns any message into the start of a new branch.
+
+It never talks to Claude. It arranges the conversations you have with Claude.
+
+## Status
+
+Design complete, implementation not started. See [SPEC.md](SPEC.md).
+
+## Design in one screen
+
+```
+┌ braids ─────────────────────────────────────────────────────────── microagi ──┐
+│  ◆ 1 needs you    ● 3 running    ○ 11 idle                    392 MB on disk  │
+│                                                                               │
+│  ● nvidia-delivery                            412 turns    running     2m ago │
+│  ├─◆ try-option-c                    ← t412   38 turns    needs you    0m ago │
+│  │ └─● cache-gate-probe              ← t31     7 turns    idle          3h ago│
+│  ├─● gcsfuse-density                 ← t288   63 turns    done          2d ago│
+│  └─● mdt-contention                  ← t104   21 turns    idle         14d ago│
+├───────────────────────────────────────────────────────────────────────────────┤
+│ / search   n needs-you   ↵ open   b branch   o terminal   a archive   ? help   │
+└───────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Principles
+
+1. **Files are the truth.** Everything is derived from `~/.claude/`. Delete
+   braids and you lose a view, never a conversation.
+2. **One writer per file, always.** Every branch is its own session file.
+3. **The graph is for humans; each path is linear for the model.**
+4. **Search is the front door; the graph is the confirmation.**
+5. **A window you glance at, not a place you live.**
+
+## License
+
+MIT

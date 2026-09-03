@@ -52,7 +52,7 @@ func collect(t *testing.T, s *Source, lane model.Lane) []model.Message {
 	return got
 }
 
-func TestLanesDiscoversTranscriptsAndTitles(t *testing.T) {
+func TestLanesDiscoversTranscripts(t *testing.T) {
 	root := writeLanes(t, "-Users-me-src-app", map[string][]string{
 		"a.jsonl": {
 			`{"type":"ai-title","aiTitle":"model wrote this","sessionId":"a"}`,
@@ -72,7 +72,8 @@ func TestLanesDiscoversTranscriptsAndTitles(t *testing.T) {
 		t.Fatalf("write sub: %v", err)
 	}
 
-	lanes, err := New(root).Lanes(context.Background())
+	src := New(root)
+	lanes, err := src.Lanes(context.Background())
 	if err != nil {
 		t.Fatalf("Lanes: %v", err)
 	}
@@ -80,14 +81,25 @@ func TestLanesDiscoversTranscriptsAndTitles(t *testing.T) {
 		t.Fatalf("want 2 lanes (subagent excluded), got %d", len(lanes))
 	}
 	a := laneByID(t, lanes, "a")
-	if a.Title != "user wrote this" {
-		t.Errorf("custom title must win: got %q", a.Title)
-	}
 	if a.Project != "app" {
 		t.Errorf("project = %q, want %q", a.Project, "app")
 	}
-	if b := laneByID(t, lanes, "b"); b.Title != "fallback name" {
-		t.Errorf("agent name fallback: got %q", b.Title)
+	// Listing must stay a directory scan: finding a title means reading a whole
+	// transcript, so Lanes deliberately leaves it empty.
+	if a.Title != "" {
+		t.Errorf("Lanes should not read titles, got %q", a.Title)
+	}
+
+	title, err := src.Title(context.Background(), a)
+	if err != nil {
+		t.Fatalf("Title: %v", err)
+	}
+	if title != "user wrote this" {
+		t.Errorf("a title the user set must win over one the model wrote: got %q", title)
+	}
+	b := laneByID(t, lanes, "b")
+	if title, err := src.Title(context.Background(), b); err != nil || title != "fallback name" {
+		t.Errorf("agent name fallback: got %q, %v", title, err)
 	}
 }
 

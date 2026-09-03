@@ -184,3 +184,58 @@ func TestBuildMatch(t *testing.T) {
 		})
 	}
 }
+
+func TestOverlapsFindSharedMessages(t *testing.T) {
+	ctx := context.Background()
+	ix := openIndex(t)
+
+	now := time.Unix(1_700_000_000, 0)
+	shared := model.Message{ID: "shared", Role: model.RoleUser, At: now,
+		Parts: []model.Part{{Kind: model.PartText, Text: "common ancestor turn"}}}
+	src := &fakeSource{
+		lanes: []model.Lane{{ID: "parent"}, {ID: "child"}, {ID: "unrelated"}},
+		messages: map[string][]model.Message{
+			// A fork copies the parent's records verbatim, IDs included.
+			"parent": {
+				withLane(shared, "parent"),
+				{ID: "p2", LaneID: "parent", Parts: []model.Part{{Kind: model.PartText, Text: "parent continued"}}},
+			},
+			"child": {
+				withLane(shared, "child"),
+				{ID: "c2", LaneID: "child", Parts: []model.Part{{Kind: model.PartText, Text: "child diverged"}}},
+			},
+			"unrelated": {
+				{ID: "u1", LaneID: "unrelated", Parts: []model.Part{{Kind: model.PartText, Text: "nothing in common"}}},
+			},
+		},
+	}
+	if _, err := ix.Rebuild(ctx, src); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	overlaps, err := ix.Overlaps(ctx)
+	if err != nil {
+		t.Fatalf("Overlaps: %v", err)
+	}
+	if len(overlaps) != 2 {
+		t.Fatalf("want the shared message reported once per lane, got %+v", overlaps)
+	}
+	lanes := map[string]bool{}
+	for _, o := range overlaps {
+		if o.MessageID != "shared" {
+			t.Errorf("unexpected overlap %+v", o)
+		}
+		if o.Seq != 1 {
+			t.Errorf("seq = %d, want 1", o.Seq)
+		}
+		lanes[o.LaneID] = true
+	}
+	if !lanes["parent"] || !lanes["child"] || lanes["unrelated"] {
+		t.Errorf("overlap lanes = %v", lanes)
+	}
+}
+
+func withLane(m model.Message, lane string) model.Message {
+	m.LaneID = lane
+	return m
+}

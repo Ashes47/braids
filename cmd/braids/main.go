@@ -18,6 +18,7 @@ import (
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/model"
 	"github.com/Ashes47/braids/internal/core/store/claudecode"
+	"github.com/Ashes47/braids/internal/tui"
 )
 
 // Set by the release build.
@@ -29,10 +30,15 @@ var (
 const usage = `braids — manage Claude Code conversations as a graph
 
 usage:
+  braids                                 open the map
   braids index [--root DIR]              rebuild the index from local transcripts
   braids search [flags] QUERY            search every indexed message
   braids lanes                           list indexed conversations
   braids version
+
+map flags:
+  --ascii          use narrow ASCII glyphs (for terminals that draw
+                   box characters double-wide)
 
 search flags:
   --lane ID        restrict to one conversation
@@ -53,10 +59,11 @@ func main() {
 func run(args []string, w io.Writer) error {
 	out := newPrinter(w)
 	if len(args) == 0 {
-		out.printf("%s", usage)
-		return out.Err()
+		return cmdMap(nil)
 	}
 	switch args[0] {
+	case "map":
+		return cmdMap(args[1:])
 	case "index":
 		return cmdIndex(args[1:], out)
 	case "search":
@@ -119,6 +126,22 @@ func openIndex(dbFlag string) (*index.Index, error) {
 		}
 	}
 	return index.Open(path)
+}
+
+func cmdMap(args []string) error {
+	fs := flag.NewFlagSet("map", flag.ContinueOnError)
+	ascii := fs.Bool("ascii", os.Getenv("BRAIDS_ASCII") != "", "use narrow ASCII glyphs")
+	db := fs.String("db", "", "index location")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ix, err := openIndex(*db)
+	if err != nil {
+		return err
+	}
+	defer ix.Close() //nolint:errcheck // read-only
+
+	return tui.Run(context.Background(), ix, *ascii)
 }
 
 func cmdIndex(args []string, out *printer) error {

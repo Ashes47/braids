@@ -1,0 +1,256 @@
+package tui
+
+import (
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/Ashes47/braids/internal/core/graph"
+	"github.com/Ashes47/braids/internal/core/index"
+)
+
+var ansi = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func plain(s string) string { return ansi.ReplaceAllString(s, "") }
+
+var now = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+
+func laneInfo(id, title, project string, msgs int, age time.Duration) index.LaneInfo {
+	li := index.LaneInfo{Messages: msgs}
+	li.ID = id
+	li.Title = title
+	li.Project = project
+	li.Updated = now.Add(-age)
+	return li
+}
+
+// forestOf builds a forest with explicit parent links, bypassing detection.
+func forestOf(lanes []index.LaneInfo, parents map[string]string) *graph.Forest {
+	f := &graph.Forest{ByID: map[string]*graph.Node{}}
+	for _, l := range lanes {
+		f.ByID[l.ID] = &graph.Node{Lane: l}
+	}
+	for child, parent := range parents {
+		f.ByID[child].ParentID = parent
+		f.ByID[child].ForkSeq = 12
+	}
+	for _, n := range f.ByID {
+		if p, ok := f.ByID[n.ParentID]; ok {
+			p.Children = append(p.Children, n)
+			n.Depth = 1
+		} else {
+			f.Roots = append(f.Roots, n)
+		}
+	}
+	return f
+}
+
+func newTestModel(t *testing.T, f *graph.Forest) Model {
+	t.Helper()
+	m := NewModel(f, true) // ASCII glyphs keep assertions width-stable
+	m.now = func() time.Time { return now }
+	m.width, m.height = 90, 20
+	return m
+}
+
+func TestLayoutDrawsTreeConnectors(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("root", "main work", "app", 100, time.Hour),
+		laneInfo("a", "first branch", "app", 10, time.Hour),
+		laneInfo("b", "second branch", "app", 10, 2*time.Hour),
+	}
+	f := forestOf(lanes, map[string]string{"a": "root", "b": "root"})
+	rows := layout(f, glyphsFor(true))
+
+	if len(rows) != 3 {
+		t.Fatalf("want 3 rows, got %d", len(rows))
+	}
+	if rows[0].prefix != "" {
+		t.Errorf("root prefix = %q, want empty", rows[0].prefix)
+	}
+	prefixes := []string{rows[1].prefix, rows[2].prefix}
+	if prefixes[0] != "|-" || prefixes[1] != "`-" {
+		t.Errorf("child prefixes = %v, want a branch then a last-child connector", prefixes)
+	}
+}
+
+func TestRenderShowsLanesAndChrome(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("root", "main work", "app", 100, 2*time.Minute),
+		laneInfo("kid", "a branch", "app", 8, 30*time.Hour),
+	}
+	m := newTestModel(t, forestOf(lanes, map[string]string{"kid": "root"}))
+	out := plain(m.render())
+
+	for _, want := range []string{"braids", "2 conversations", "1 active", "main work", "a branch", "q quit"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render missing %q:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "< t12") {
+		t.Errorf("fork column should appear when a fork exists:\n%s", out)
+	}
+	if !strings.Contains(out, "1d") {
+		t.Errorf("expected an age of 1d for the branch:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if w := len([]rune(line)); w > m.width {
+			t.Errorf("line exceeds width %d (%d): %q", m.width, w, line)
+		}
+	}
+}
+
+func TestOptionalColumnsAppearOnlyWhenUseful(t *testing.T) {
+	t.Run("no forks means no fork column", func(t *testing.T) {
+		lanes := []index.LaneInfo{laneInfo("a", "one", "app", 5, time.Hour), laneInfo("b", "two", "app", 5, time.Hour)}
+		m := newTestModel(t, forestOf(lanes, nil))
+		if m.showFork {
+			t.Error("showFork should be false with no forks")
+		}
+		if strings.Contains(plain(m.render()), "<") {
+			t.Error("fork glyph rendered without any fork")
+		}
+	})
+
+	t.Run("one project means no project column", func(t *testing.T) {
+		lanes := []index.LaneInfo{laneInfo("a", "one", "app", 5, time.Hour)}
+		if newTestModel(t, forestOf(lanes, nil)).showProject {
+			t.Error("showProject should be false for a single project")
+		}
+	})
+
+	t.Run("several projects earn the column", func(t *testing.T) {
+		lanes := []index.LaneInfo{
+			laneInfo("a", "one", "app", 5, time.Hour),
+			laneInfo("b", "two", "infra", 5, time.Hour),
+		}
+		m := newTestModel(t, forestOf(lanes, nil))
+		if !m.showProject {
+			t.Fatal("showProject should be true for two projects")
+		}
+		if !strings.Contains(plain(m.render()), "infra") {
+			t.Error("project column missing")
+		}
+	})
+}
+
+func TestDuplicateTitlesGetTheirLaneID(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("9419fd9cxxxx", "Debug pipeline", "app", 100, time.Hour),
+		laneInfo("106997f5yyyy", "Debug pipeline", "app", 50, time.Hour),
+		laneInfo("uniqueaaaa", "Something else", "app", 5, time.Hour),
+	}
+	m := newTestModel(t, forestOf(lanes, nil))
+	out := plain(m.render())
+	if !strings.Contains(out, "9419fd9c") || !strings.Contains(out, "106997f5") {
+		t.Errorf("ambiguous titles must show their lane ID:\n%s", out)
+	}
+	if strings.Contains(out, "uniqueaa") {
+		t.Errorf("unambiguous title should not be cluttered with an ID:\n%s", out)
+	}
+}
+
+func TestFilterNarrowsAndClears(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("a", "gcsfuse density", "app", 5, time.Hour),
+		laneInfo("b", "schema refactor", "app", 5, time.Hour),
+	}
+	m := newTestModel(t, forestOf(lanes, nil))
+
+	press := func(m Model, keys ...string) Model {
+		for _, k := range keys {
+			updated, _ := m.Update(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
+			m = updated.(Model)
+		}
+		return m
+	}
+
+	m = press(m, "/", "s", "c", "h")
+	if len(m.visible) != 1 || m.visible[0].node.Lane.ID != "b" {
+		t.Fatalf("filter left %d lanes, want just the schema one", len(m.visible))
+	}
+	if out := plain(m.render()); !strings.Contains(out, "/sch") {
+		t.Errorf("filter should be visible in the header:\n%s", out)
+	}
+
+	esc, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = esc.(Model)
+	if len(m.visible) != 2 {
+		t.Errorf("escape should clear the filter, got %d lanes", len(m.visible))
+	}
+}
+
+func TestFilterWithNoMatchesExplainsItself(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("a", "gcsfuse", "app", 5, time.Hour)}
+	m := newTestModel(t, forestOf(lanes, nil))
+	m.filter = "zzz"
+	m.apply()
+	if out := plain(m.render()); !strings.Contains(out, `nothing matches "zzz"`) {
+		t.Errorf("expected an empty-state message:\n%s", out)
+	}
+}
+
+func TestCursorStaysInRange(t *testing.T) {
+	var lanes []index.LaneInfo
+	for i := range 5 {
+		lanes = append(lanes, laneInfo(string(rune('a'+i)), "lane", "app", 1, time.Hour))
+	}
+	m := newTestModel(t, forestOf(lanes, nil))
+	m.height = 6 // room for two rows
+
+	for range 20 {
+		m.cursor++
+		m.clamp()
+	}
+	if m.cursor != len(m.visible)-1 {
+		t.Errorf("cursor = %d, want clamped to %d", m.cursor, len(m.visible)-1)
+	}
+	if m.cursor < m.offset || m.cursor >= m.offset+m.bodyHeight() {
+		t.Errorf("cursor %d outside the visible window [%d,%d)", m.cursor, m.offset, m.offset+m.bodyHeight())
+	}
+	for range 20 {
+		m.cursor--
+		m.clamp()
+	}
+	if m.cursor != 0 || m.offset != 0 {
+		t.Errorf("cursor/offset = %d/%d, want 0/0", m.cursor, m.offset)
+	}
+}
+
+func TestTruncateMeasuresDisplayWidth(t *testing.T) {
+	tests := []struct {
+		in, want string
+		w        int
+	}{
+		{"short", "short", 10},
+		{"truncate me here", "truncate…", 9},
+		{"", "", 5},
+		{"日本語テキスト", "日本…", 6}, // wide runes must not overflow the column
+	}
+	for _, tt := range tests {
+		got := truncate(tt.in, tt.w)
+		if got != tt.want {
+			t.Errorf("truncate(%q,%d) = %q, want %q", tt.in, tt.w, got, tt.want)
+		}
+	}
+}
+
+func TestHumanAge(t *testing.T) {
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Second, "now"},
+		{5 * time.Minute, "5m"},
+		{3 * time.Hour, "3h"},
+		{50 * time.Hour, "2d"},
+	}
+	for _, tt := range tests {
+		if got := humanAge(tt.d); got != tt.want {
+			t.Errorf("humanAge(%v) = %q, want %q", tt.d, got, tt.want)
+		}
+	}
+}

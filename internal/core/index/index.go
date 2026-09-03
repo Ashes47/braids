@@ -27,6 +27,16 @@ CREATE TABLE IF NOT EXISTS lanes (
 	msg_count  INTEGER NOT NULL DEFAULT 0,
 	part_count INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS messages (
+	lane_id   TEXT    NOT NULL,
+	seq       INTEGER NOT NULL,
+	msg_id    TEXT    NOT NULL,
+	parent_id TEXT    NOT NULL,
+	role      TEXT    NOT NULL,
+	at        INTEGER NOT NULL,
+	PRIMARY KEY (lane_id, seq)
+);
+CREATE INDEX IF NOT EXISTS messages_by_msg_id ON messages(msg_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS parts USING fts5(
 	body,
 	lane_id UNINDEXED,
@@ -66,6 +76,15 @@ type LaneInfo struct {
 	model.Lane
 	Messages int
 	Parts    int
+}
+
+// Overlap records one message that appears in more than one lane. Claude Code
+// forks copy the parent's records verbatim, so a shared message ID is exact
+// evidence of a fork — no fingerprinting needed.
+type Overlap struct {
+	MessageID string
+	LaneID    string
+	Seq       int
 }
 
 // Hit is one search result, carrying enough context to render a row without a
@@ -121,7 +140,7 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
 
-	for _, stmt := range []string{`DELETE FROM parts`, `DELETE FROM lanes`} {
+	for _, stmt := range []string{`DELETE FROM parts`, `DELETE FROM messages`, `DELETE FROM lanes`} {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return Stats{}, fmt.Errorf("clear index: %w", err)
 		}
@@ -139,6 +158,12 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 		return Stats{}, fmt.Errorf("prepare part insert: %w", err)
 	}
 	defer insertPart.Close() //nolint:errcheck // tx-scoped
+	insertMsg, err := tx.PrepareContext(ctx,
+		`INSERT INTO messages (lane_id,seq,msg_id,parent_id,role,at) VALUES (?,?,?,?,?,?)`)
+	if err != nil {
+		return Stats{}, fmt.Errorf("prepare message insert: %w", err)
+	}
+	defer insertMsg.Close() //nolint:errcheck // tx-scoped
 
 	stats := Stats{Lanes: len(lanes)}
 	for _, lane := range lanes {
@@ -146,6 +171,10 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 		err := src.Messages(ctx, lane, func(m model.Message) error {
 			stats.Messages++
 			laneMsgs++
+			if _, err := insertMsg.ExecContext(ctx, m.LaneID, laneMsgs, m.ID,
+				m.ParentID, string(m.Role), m.At.Unix()); err != nil {
+				return fmt.Errorf("insert message: %w", err)
+			}
 			for _, p := range m.Parts {
 				if strings.TrimSpace(p.Text) == "" {
 					continue
@@ -234,6 +263,60 @@ func (ix *Index) Search(ctx context.Context, q Query) ([]Hit, error) {
 		return nil, fmt.Errorf("iterate hits: %w", err)
 	}
 	return hits, nil
+}
+
+// Overlaps returns every message that appears in more than one lane, which is
+// the raw material for fork detection.
+func (ix *Index) Overlaps(ctx context.Context) ([]Overlap, error) {
+	rows, err := ix.db.QueryContext(ctx, `
+		SELECT msg_id, lane_id, seq FROM messages
+		WHERE msg_id IN (
+			SELECT msg_id FROM messages GROUP BY msg_id HAVING count(DISTINCT lane_id) > 1
+		)
+		ORDER BY msg_id, seq`)
+	if err != nil {
+		return nil, fmt.Errorf("find overlaps: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only
+
+	var out []Overlap
+	for rows.Next() {
+		var o Overlap
+		if err := rows.Scan(&o.MessageID, &o.LaneID, &o.Seq); err != nil {
+			return nil, fmt.Errorf("scan overlap: %w", err)
+		}
+		out = append(out, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate overlaps: %w", err)
+	}
+	return out, nil
+}
+
+// Timelines returns each lane's message timestamps ordered by sequence. It is
+// small enough to hold entirely (tens of thousands of int64s) and lets the
+// graph decide fork direction exactly rather than by heuristic.
+func (ix *Index) Timelines(ctx context.Context) (map[string][]time.Time, error) {
+	rows, err := ix.db.QueryContext(ctx,
+		`SELECT lane_id, at FROM messages ORDER BY lane_id, seq`)
+	if err != nil {
+		return nil, fmt.Errorf("read timelines: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only
+
+	out := make(map[string][]time.Time)
+	for rows.Next() {
+		var lane string
+		var at int64
+		if err := rows.Scan(&lane, &at); err != nil {
+			return nil, fmt.Errorf("scan timeline: %w", err)
+		}
+		out[lane] = append(out[lane], time.Unix(at, 0))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate timelines: %w", err)
+	}
+	return out, nil
 }
 
 // Lanes returns every indexed lane, most recently updated first.

@@ -12,8 +12,19 @@ It never talks to Claude. It arranges the conversations you have with Claude.
 
 ## Status
 
-Early. The index and search are working; the TUI is next. See [SPEC.md](SPEC.md)
-for the full design and [§11](SPEC.md#11-build-order) for the build order.
+Early. The index, search and the Map are working; the Spine is next. See
+[SPEC.md](SPEC.md) for the full design and [§11](SPEC.md#11-build-order) for the
+build order.
+
+```
+$ braids
+   CONVERSATION                                              TURNS      AGE
+ ● Agent observability and branching conversations             297      30m
+ ● Clarify halt vs force halt behavior                         279      52m
+ ● Debug annotation pipeline dataset issue        9419fd9c   25571      52m
+ ● Review AMI customer data delivery runbook      cec6177b   18264      52m
+ j/k move   g/G ends   / filter   esc clear   q quit
+```
 
 ```
 $ braids index

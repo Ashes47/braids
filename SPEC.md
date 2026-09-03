@@ -590,7 +590,6 @@ needs-you — are declared as optional `Capabilities`, never assumed.
 5. ~~**Live.**~~ **Done** for the watcher and in-place refresh: the map follows
    sessions as they are written, and a branch appears without any command.
    Hooks and the needs-you queue still to come. ← *next*
-5. **Live.** Watcher, byte-offset tailing, hooks, needs-you queue.
 6. **Subagents.** Nested lanes, promote.
 7. **Housekeeping.** Archive, sweep, trash, undo.
 8. **Merge.** Splice with preview.

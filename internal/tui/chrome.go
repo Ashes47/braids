@@ -34,15 +34,15 @@ func (m Model) facts() []fact {
 		{"Source", source},
 		{"Index", shorten(m.indexPath)},
 		{"Lanes", fmt.Sprintf("%d", len(m.all))},
-		{"Active", fmt.Sprintf("%d", m.activeCount())},
+		{"Waiting on you", fmt.Sprintf("%d", m.waitingCount())},
 	}
 }
 
 func hints() []hint {
 	return []hint{
 		{"j/k", "move"}, {"↵", "open spine"},
-		{"/", "search"}, {"f", "filter lanes"},
-		{"y/o", "copy / open"}, {"q", "quit"},
+		{"n/N", "next waiting"}, {"/", "search"},
+		{"f", "filter"}, {"y/o", "copy / open"},
 	}
 }
 

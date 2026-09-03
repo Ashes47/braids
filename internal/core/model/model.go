@@ -87,6 +87,22 @@ type Origin struct {
 	ForkSeq int    `json:"forkSeq"`
 }
 
+// Activity is what a conversation was doing when it was last written to.
+//
+// It is derived from the last turn alone, which is enough to tell the states
+// that matter: a conversation whose last turn is the assistant answering is
+// waiting on a person, while one whose last turn is the assistant calling a
+// tool has no result yet — the harness appends the result as a later turn, so
+// its absence means the call is still outstanding.
+type Activity struct {
+	// LastRole is who spoke last.
+	LastRole Role
+	// LastWasToolCall reports whether that turn ended in an unanswered tool
+	// call. Files cannot say whether it is running or waiting for permission:
+	// both look identical until a hook says otherwise.
+	LastWasToolCall bool
+}
+
 // Lane is one linear conversation as a harness stores it. A branch is simply
 // another Lane; braids never treats them as different things.
 type Lane struct {
@@ -106,4 +122,6 @@ type Lane struct {
 	Created time.Time
 	Updated time.Time
 	Size    int64
+	// Activity is what the conversation was doing when last written to.
+	Activity Activity
 }

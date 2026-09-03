@@ -11,6 +11,7 @@ import (
 
 	"github.com/Ashes47/braids/internal/core/graph"
 	"github.com/Ashes47/braids/internal/core/index"
+	"github.com/Ashes47/braids/internal/core/model"
 )
 
 var ansi = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -103,9 +104,9 @@ func TestRenderShowsLanesAndChrome(t *testing.T) {
 	out := plain(m.render())
 
 	for _, want := range []string{
-		"Source:", "claudecode", "Lanes:", "Active:",
+		"Source:", "claudecode", "Lanes:", "Waiting on you:",
 		"Conversations(all)[2]", "CONVERSATION", "STATUS",
-		"main work", "a branch", "<j/k>", "active", "idle",
+		"main work", "a branch", "<j/k>",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render missing %q:\n%s", want, out)
@@ -606,5 +607,29 @@ func TestClearingTheLaneFilterKeepsYourPlace(t *testing.T) {
 	}
 	if got := m.visible[m.cursor].node.Lane.ID; got != "c" {
 		t.Errorf("cursor on %q after clearing, want the lane that was found", got)
+	}
+}
+
+func TestNextWaitingSkipsWhatIsNotOwed(t *testing.T) {
+	quiet := laneInfo("a", "finished long ago", "app", 5, 30*24*time.Hour)
+	quiet.Activity = model.Activity{LastRole: model.RoleAssistant}
+	owed := laneInfo("b", "answered just now", "app", 5, time.Minute)
+	owed.Activity = model.Activity{LastRole: model.RoleAssistant}
+	busy := laneInfo("c", "mid tool call", "app", 5, time.Second)
+	busy.Activity = model.Activity{LastRole: model.RoleAssistant, LastWasToolCall: true}
+
+	m := newTestModel(t, forestOf([]index.LaneInfo{quiet, owed, busy}, nil))
+	if got := m.waitingCount(); got != 1 {
+		t.Errorf("waitingCount = %d, want 1", got)
+	}
+	if got := m.nextWaiting(0, 1); got != 1 {
+		t.Errorf("next waiting = %d, want the answered lane at 1", got)
+	}
+	// Wraps rather than stopping at the end.
+	if got := m.nextWaiting(1, 1); got != 1 {
+		t.Errorf("with one waiting lane the cursor should stay, got %d", got)
+	}
+	if !strings.Contains(plain(m.render()), "your turn") {
+		t.Error("the status column should name the state")
 	}
 }

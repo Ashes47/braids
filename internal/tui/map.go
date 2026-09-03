@@ -14,10 +14,6 @@ import (
 	"github.com/Ashes47/braids/internal/core/model"
 )
 
-// activeWindow is how recently a lane must have changed to read as alive.
-// Until hooks land, recency is the only liveness braids can honestly claim.
-const activeWindow = 10 * time.Minute
-
 // Column widths for the right-hand block. Everything left of it flexes.
 const (
 	forkWidth    = 7
@@ -25,7 +21,7 @@ const (
 	msgsWidth    = 7
 	sizeWidth    = 8
 	ageWidth     = 5
-	statusWidth  = 6
+	statusWidth  = 10
 )
 
 // row is one lane placed on screen together with the tree art leading to it.
@@ -322,6 +318,10 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.openSpine(), nil
 	case "f":
 		m.filter.active = true
+	case "n":
+		m.cursor = m.nextWaiting(m.cursor, 1)
+	case "N":
+		m.cursor = m.nextWaiting(m.cursor, -1)
 	case "y":
 		return m.copyResume()
 	case "o":
@@ -514,18 +514,26 @@ func (m Model) emptyMessage() string {
 	return "no conversations indexed yet — run: braids index"
 }
 
-func (m Model) activeCount() int {
+// waitingCount is how many conversations are owed something by a person.
+func (m Model) waitingCount() int {
 	n := 0
 	for _, r := range m.all {
-		if m.isActive(r.node) {
+		if waiting(r.node.Lane, m.now()) {
 			n++
 		}
 	}
 	return n
 }
 
-func (m Model) isActive(n *graph.Node) bool {
-	return m.now().Sub(n.Lane.Updated) < activeWindow
+// nextWaiting finds the next conversation owed a reply, wrapping around.
+func (m Model) nextWaiting(from, step int) int {
+	for i := 1; i <= len(m.visible); i++ {
+		at := (from + i*step + len(m.visible)*i) % len(m.visible)
+		if waiting(m.visible[at].node.Lane, m.now()) {
+			return at
+		}
+	}
+	return from
 }
 
 // renderRow draws one lane. A selected row is painted as a single flat band so
@@ -543,10 +551,8 @@ func (m Model) rowParts(r row) (plain, styled string) {
 	g := m.theme.Glyphs
 	lane := r.node.Lane
 
-	glyphStyle := m.theme.Faint
-	if m.isActive(r.node) {
-		glyphStyle = m.theme.Alive
-	}
+	state := stateOf(lane, m.now())
+	glyphStyle := m.styleFor(lane, state)
 
 	title := lane.Title
 	if title == "" {
@@ -580,11 +586,8 @@ func (m Model) rowParts(r row) (plain, styled string) {
 	msgs := padLeft(fmt.Sprintf("%d", lane.Messages), msgsWidth)
 	size := padLeft(humanBytes(lane.Size), sizeWidth)
 	age := padLeft(humanAge(m.now().Sub(lane.Updated)), ageWidth)
-	status, statusStyle := "idle", m.theme.Faint
-	if m.isActive(r.node) {
-		status, statusStyle = "active", m.theme.Alive
-	}
-	status = padLeft(status, statusWidth)
+	status := padLeft(string(state), statusWidth)
+	statusStyle := m.styleFor(lane, state)
 	rightPlain += msgs + "  " + size + "  " + age + "  " + status
 	rightStyled += m.theme.Value.Render(msgs) + "  " + m.theme.Faint.Render(size) + "  " +
 		m.theme.Dim.Render(age) + "  " + statusStyle.Render(status)

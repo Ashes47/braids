@@ -59,6 +59,8 @@ Every design decision below rests on something measured on this machine
 | `parentUuid` names bookkeeping, not turns | A message's parent is usually an `attachment`; resolving through them is what makes a chain reconstruct at all |
 | In-file branching is the common case | One real 25,571-turn lane: **220 junctions, 228 departing branches** — none of them visible in Claude Code |
 | A tool result wears the user role | Treating every user record as a landmark left a long spine 85% uncollapsed; requiring text cut 20,506 segments to 3,015 |
+| A conversation's state is in its last turn | Assistant text ⇒ owed a reply; an assistant tool call with no result ⇒ outstanding, since the harness appends the result as a later turn |
+| …but files cannot see a permission prompt | A running tool and one waiting for approval are the same record. Only a hook separates them |
 | Identical prefixes make forks ambiguous | A lane cut from a fork shares the same turns with the fork *and* its parent; only a record of what braids did can tell them apart |
 | Incremental sync is worth having | 9.2 s full rebuild vs **47 ms** when only one transcript moved |
 | Stored mtimes are second-precision | Comparing a raw `ModTime` marks every lane changed forever, turning an incremental sync silently into a full one |
@@ -353,26 +355,26 @@ conversation, `f` narrows the list already in front of you.
 
 ### 6.4 Needs-you — the switchboard
 
-```
-┌ needs you ─────────────────────────────────────────────────────── 3 waiting ──┐
-│                                                                               │
-│ ▸ try-option-c       permission    Bash(kubectl delete job dispatch-…)  0:42  │
-│     window "try-option-c"                                                     │
-│                                                                               │
-│   schema-refactor    permission    Edit(models/session.ts)              3:15  │
-│     window "schema-refactor"                                                  │
-│                                                                               │
-│   htx-delivery       notification  plan ready for review                8:01  │
-│     window "htx-delivery"                                                     │
-│                                                                               │
-├───────────────────────────────────────────────────────────────────────────────┤
-│ ↵ show me where   y copy resume cmd   esc back                                │
-└───────────────────────────────────────────────────────────────────────────────┘
-```
+Partly answered already, without hooks. A conversation's state is readable from
+its last turn, so the map names it rather than guessing from file times:
 
-With six agents running, this is worth more than the graph. Every row names the
-terminal window title, because `--name` makes titles reliable where focus APIs
-are not.
+| State | Meaning |
+|---|---|
+| `working` | a tool call is outstanding and the file is still moving |
+| `thinking` | the last turn is yours and a reply is in flight |
+| `your turn` | the assistant answered; nobody has replied |
+| `stopped` | a tool call is outstanding but nothing has moved since — interrupted mid-call |
+| `unanswered` | a prompt nobody ever answered, which is what cutting a branch at a question leaves |
+
+`n` / `N` step between the conversations owed something by a person — a recent
+`your turn`, a `stopped` call, an `unanswered` branch — and the facts block
+counts them. That is the switchboard for everything except one case.
+
+**What files cannot say** is whether an outstanding tool call is *running* or
+*waiting for permission*: both are an assistant turn with no result yet. Naming
+it `working` is the honest reading. A `PermissionRequest` or `Notification` hook
+is what would let braids say `needs you` and mean it — and that, plus the
+ordered queue below, is what remains of this screen.
 
 ### 6.5 Branch — inline at the junction, never a modal
 
@@ -614,9 +616,12 @@ needs-you — are declared as optional `Capabilities`, never assumed.
    Hooks and the needs-you queue still to come. ← *next*
 6. ~~**Search screen.**~~ **Done**: full text across every conversation, with
    `↵` jumping to the turn it found.
-7. **Subagents.** Nested lanes, promote.
-8. **Housekeeping.** Archive, sweep, trash, undo.
-9. **Merge.** Splice with preview.
+7. ~~**Lane state.**~~ **Done** from files: working, thinking, your turn,
+   stopped, unanswered, with `n`/`N` stepping between what is owed. Hooks
+   would add the running-versus-blocked distinction.
+8. **Subagents.** Nested lanes, promote.
+9. **Housekeeping.** Archive, sweep, trash, undo.
+10. **Merge.** Splice with preview.
 
 Steps 1–2 are already a tool worth opening.
 

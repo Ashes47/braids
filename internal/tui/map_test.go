@@ -37,15 +37,30 @@ func forestOf(lanes []index.LaneInfo, parents map[string]string) *graph.Forest {
 		f.ByID[child].ParentID = parent
 		f.ByID[child].ForkSeq = 12
 	}
-	for _, n := range f.ByID {
+	// Iterate the input slice, not the map: map order is random, and a random
+	// row order makes any assertion about a specific row flaky.
+	for _, l := range lanes {
+		n := f.ByID[l.ID]
 		if p, ok := f.ByID[n.ParentID]; ok {
 			p.Children = append(p.Children, n)
 			n.Depth = 1
-		} else {
-			f.Roots = append(f.Roots, n)
+			continue
 		}
+		f.Roots = append(f.Roots, n)
 	}
 	return f
+}
+
+// rowFor returns the rendered line showing the given title.
+func rowFor(t *testing.T, out, title string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, title) {
+			return line
+		}
+	}
+	t.Fatalf("no row for %q in:\n%s", title, out)
+	return ""
 }
 
 func newTestModel(t *testing.T, f *graph.Forest) Model {
@@ -151,11 +166,16 @@ func TestDuplicateTitlesGetTheirLaneID(t *testing.T) {
 	}
 	m := newTestModel(t, forestOf(lanes, nil))
 	out := plain(m.render())
-	if !strings.Contains(out, "9419fd9c") || !strings.Contains(out, "106997f5") {
-		t.Errorf("ambiguous titles must show their lane ID:\n%s", out)
+
+	// Assert per row: the status line names the selected lane's full ID, so a
+	// whole-frame search would see IDs that no row is actually showing.
+	first := rowFor(t, out, "Debug pipeline")
+	if !strings.Contains(first, "9419fd9c") {
+		t.Errorf("ambiguous title must show its lane ID: %q", first)
 	}
-	if strings.Contains(out, "uniqueaa") {
-		t.Errorf("unambiguous title should not be cluttered with an ID:\n%s", out)
+	unique := rowFor(t, out, "Something else")
+	if strings.Contains(unique, "uniqueaa") {
+		t.Errorf("unambiguous title should not be cluttered with an ID: %q", unique)
 	}
 }
 

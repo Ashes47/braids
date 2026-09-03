@@ -265,9 +265,21 @@ for. Archived lanes collapse to one line.
 │ ⋯  t117         10 turns · 4 Bash                                              │
 │ ●  t127 you     what's the long term fix for this?                             │
 │ ●  t128 claude  Long-term, this breaks into five fixes. Ordered by lev…        │
+│   └─● try another way  (9 turns)                                          ← t128│
 │ ●  t138 claude  Bash                                                      ├─ 2 │
 ╰────────────────────────────────────────────────────────────────────────────────╯
 ```
+
+**A branch appears in both places, because they answer different questions.**
+The map says *what exists*; the spine says *where this thread split*. A branch
+that left at turn 128 is drawn inline there, indented under the turn it left
+from — so reading a conversation shows you every point it diverged, without
+going back to the map. `↵` descends into a branch and `esc` walks back up the
+way you came, so the graph is navigable in both directions.
+
+Two kinds of split share one vocabulary: a branch kept inside the transcript
+(`├─ 2`, from a rewind) and one given its own file (`← t128`, from a fork). They
+are the same event, and `n` / `N` steps through both.
 
 The active path is the parent chain walked back from the **last** record, which
 is exactly how the harness reconstructs context — so the spine shows the
@@ -555,8 +567,10 @@ needs-you — are declared as optional `Capabilities`, never assumed.
    from mtime, k9s-style chrome.
 3. ~~**The Spine.**~~ **Done** for runs and junctions; compaction seams,
    subagent lanes and error marks still to come.
-4. ~~**Branch.**~~ **Done** for file synthesis, naming and the `b` key.
-   `--worktree` and spawning a terminal still to come. ← *next*
+4. ~~**Branch.**~~ **Done** for file synthesis, naming, the `b` key, and
+   navigating into a branch from its parent. `--worktree` and spawning a
+   terminal still to come.
+   ← *next: live updates, so a new branch appears without `braids index`*
 5. **Live.** Watcher, byte-offset tailing, hooks, needs-you queue.
 6. **Subagents.** Nested lanes, promote.
 7. **Housekeeping.** Archive, sweep, trash, undo.

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -11,11 +12,22 @@ import (
 	"github.com/Ashes47/braids/internal/core/model"
 )
 
+// spineRow is one line of the spine: either a turn, or a lane that forked away
+// at this point. Showing forks inline is the whole reason the spine exists —
+// otherwise a branch is only visible from the map, and a conversation gives no
+// hint that it ever split.
+type spineRow struct {
+	seg  graph.Segment
+	fork *graph.Node
+}
+
 // spineState is one conversation opened for reading.
 type spineState struct {
 	lane    index.LaneInfo
+	node    *graph.Node
 	segs    []graph.Segment
-	visible []graph.Segment
+	rows    []spineRow
+	visible []spineRow
 	filter  filterInput
 	// naming is the branch-name field, opened with `b` on a turn.
 	naming filterInput
@@ -26,21 +38,66 @@ type spineState struct {
 	err    error
 }
 
-// apply narrows the spine to segments matching the filter. A run is matched on
-// its summary, so filtering for a tool finds the stretches that used it.
+// build interleaves the lane's turns with the branches that left it, each at the
+// turn it forked from.
+func (s *spineState) build() {
+	children := append([]*graph.Node(nil), childrenOf(s.node)...)
+	sort.SliceStable(children, func(i, j int) bool { return children[i].ForkSeq < children[j].ForkSeq })
+
+	s.rows = nil
+	next := 0
+	emitForksUpTo := func(seq int) {
+		for next < len(children) && children[next].ForkSeq <= seq {
+			s.rows = append(s.rows, spineRow{fork: children[next]})
+			next++
+		}
+	}
+	for _, seg := range s.segs {
+		s.rows = append(s.rows, spineRow{seg: seg})
+		emitForksUpTo(seg.Seq)
+	}
+	for ; next < len(children); next++ {
+		s.rows = append(s.rows, spineRow{fork: children[next]})
+	}
+	s.apply()
+}
+
+// current is the row under the cursor, or a zero row when there is none.
+func (s *spineState) current() spineRow {
+	if s.cursor < 0 || s.cursor >= len(s.visible) {
+		return spineRow{}
+	}
+	return s.visible[s.cursor]
+}
+
+func childrenOf(n *graph.Node) []*graph.Node {
+	if n == nil {
+		return nil
+	}
+	return n.Children
+}
+
+// apply narrows the spine to rows matching the filter. A run is matched on its
+// summary, so filtering for a tool finds the stretches that used it.
 func (s *spineState) apply() {
 	if !s.filter.on() {
-		s.visible = s.segs
+		s.visible = s.rows
 		return
 	}
 	s.visible = nil
-	for _, seg := range s.segs {
-		hay := fmt.Sprintf("t%d %s %s %s %s",
-			seg.Seq, seg.Role, seg.Preview, strings.Join(seg.Tools, " "), summarise(seg))
-		if s.filter.matches(hay) {
-			s.visible = append(s.visible, seg)
+	for _, r := range s.rows {
+		if s.filter.matches(r.haystack()) {
+			s.visible = append(s.visible, r)
 		}
 	}
+}
+
+func (r spineRow) haystack() string {
+	if r.fork != nil {
+		return r.fork.Lane.Title + " " + r.fork.Lane.ID
+	}
+	return fmt.Sprintf("t%d %s %s %s %s",
+		r.seg.Seq, r.seg.Role, r.seg.Preview, strings.Join(r.seg.Tools, " "), summarise(r.seg))
 }
 
 // openSpine loads the selected lane. Failure is shown in place rather than
@@ -49,11 +106,35 @@ func (m Model) openSpine() Model {
 	if len(m.visible) == 0 || m.loadSpine == nil {
 		return m
 	}
-	lane := m.visible[m.cursor].node.Lane
-	segs, err := m.loadSpine(lane.ID)
-	m.spine = &spineState{lane: lane, segs: segs, err: err}
-	m.spine.apply()
+	return m.openNode(m.visible[m.cursor].node, false)
+}
+
+// openNode reads one lane. push keeps the current spine on a stack so that esc
+// walks back down the branch you came in through.
+func (m Model) openNode(n *graph.Node, push bool) Model {
+	if m.loadSpine == nil {
+		return m
+	}
+	segs, err := m.loadSpine(n.Lane.ID)
+	next := &spineState{lane: n.Lane, node: n, segs: segs, err: err}
+	next.build()
+	if push && m.spine != nil {
+		m.stack = append(m.stack, m.spine)
+	}
+	m.spine = next
 	m.mode = spineMode
+	return m
+}
+
+// closeSpine steps back: to the lane we descended from, or to the map.
+func (m Model) closeSpine() Model {
+	if n := len(m.stack); n > 0 {
+		m.spine = m.stack[n-1]
+		m.stack = m.stack[:n-1]
+		return m
+	}
+	m.mode = mapMode
+	m.spine = nil
 	return m
 }
 
@@ -69,9 +150,11 @@ func (m Model) spineKey(key string) Model {
 	}
 	switch key {
 	case "esc", "backspace", "h", "left":
-		m.mode = mapMode
-		m.spine = nil
-		return m
+		return m.closeSpine()
+	case "enter", "l", "right":
+		if row := s.current(); row.fork != nil {
+			return m.openNode(row.fork, true)
+		}
 	case "j", "down":
 		s.cursor++
 	case "k", "up":
@@ -145,7 +228,7 @@ func (m Model) renderSpine() string {
 	default:
 		end := min(s.offset+m.bodyHeight(), len(s.visible))
 		for i := s.offset; i < end; i++ {
-			b.WriteString(m.framed(m.renderSegment(s.visible[i], i == s.cursor)))
+			b.WriteString(m.framed(m.renderRowLine(s.visible[i], i == s.cursor)))
 			b.WriteString("\n")
 		}
 		for range m.bodyHeight() - (end - s.offset) {
@@ -207,17 +290,18 @@ func (m Model) spineInfo() string {
 			alternates += len(seg.Alternates)
 		}
 	}
+	forks := len(childrenOf(m.spine.node))
 	facts := []fact{
 		{"Lane", shortID(m.spine.lane.ID)},
 		{"Turns", fmt.Sprintf("%d", m.spine.lane.Messages)},
 		{"Junctions", fmt.Sprintf("%d", junctions)},
-		{"Branches", fmt.Sprintf("%d", alternates)},
+		{"Branches", fmt.Sprintf("%d / %d forked out", alternates, forks)},
 	}
 	keys := []hint{
 		{"j/k", "move"},
 		{"b", "branch here"},
-		{"/", "filter"},
-		{"n/N", "next junction"},
+		{"↵", "open branch"},
+		{"n/N", "next split"},
 	}
 	return m.factsBlock(facts, keys)
 }
@@ -237,12 +321,40 @@ const (
 	branchesWidth = 10
 )
 
-func (m Model) renderSegment(seg graph.Segment, selected bool) string {
-	plain, styled := m.segmentParts(seg)
+func (m Model) renderRowLine(row spineRow, selected bool) string {
+	var plain, styled string
+	if row.fork != nil {
+		plain, styled = m.forkParts(row.fork)
+	} else {
+		plain, styled = m.segmentParts(row.seg)
+	}
 	if selected {
 		return m.theme.Selected.Width(m.contentWidth()).Render(plain)
 	}
 	return styled
+}
+
+// forkParts draws a branch that left this conversation, indented under the turn
+// it left from so the split reads as part of the thread.
+func (m Model) forkParts(n *graph.Node) (plain, styled string) {
+	g := m.theme.Glyphs
+	name := n.Lane.Title
+	if name == "" {
+		name = shortID(n.Lane.ID)
+	}
+	lead := "  " + g.Last + g.Lane + " "
+	right := padLeft(fmt.Sprintf("%s t%d", g.Fork, n.ForkSeq), branchesWidth)
+
+	textWidth := m.contentWidth() - lipgloss.Width(lead) - 1 - branchesWidth - 1
+	if textWidth < 8 {
+		textWidth = 8
+	}
+	body := padRight(truncate(name+fmt.Sprintf("  (%d turns)", n.Lane.Messages), textWidth), textWidth)
+
+	plain = " " + lead + body + " " + right
+	styled = " " + m.theme.Rail.Render("  "+g.Last) + m.theme.Alive.Render(g.Lane) + " " +
+		m.theme.Value.Render(body) + " " + m.theme.Column.Render(right)
+	return plain, styled
 }
 
 func (m Model) segmentParts(seg graph.Segment) (plain, styled string) {
@@ -298,7 +410,12 @@ func (m Model) startBranch() Model {
 		s.notice, s.failed = "branching is unavailable for this source", true
 		return m
 	}
-	seg := s.visible[s.cursor]
+	row := s.current()
+	if row.fork != nil {
+		s.notice, s.failed = "press enter to open that branch, or branch from a turn instead", true
+		return m
+	}
+	seg := row.seg
 	if seg.Kind == graph.SegRun {
 		s.notice, s.failed = "pick a single turn to branch from, not a collapsed run", true
 		return m
@@ -326,7 +443,7 @@ func (m Model) namingKey(key string) Model {
 // every branch would discourage the one action the tool exists for.
 func (m Model) commitBranch() Model {
 	s := m.spine
-	seg := s.visible[s.cursor]
+	seg := s.current().seg
 	name := strings.TrimSpace(s.naming.text)
 	s.naming = filterInput{}
 
@@ -371,13 +488,13 @@ var stopWords = map[string]bool{
 	"from": true, "into": true, "your": true, "than": true, "then": true,
 }
 
-// nextJunction finds the next turn that a branch leaves from, wrapping around.
-// With hundreds of junctions in a long conversation, stepping between them is
-// the only practical way to find where the thread split.
-func nextJunction(segs []graph.Segment, from, step int) int {
-	for i := 1; i <= len(segs); i++ {
-		at := (from + i*step + len(segs)*i) % len(segs)
-		if len(segs[at].Alternates) > 0 {
+// nextJunction finds the next place the thread splits, wrapping around. Both an
+// in-file branch point and a lane that forked away count: they are the same
+// event, one kept inside the transcript and one given its own file.
+func nextJunction(rows []spineRow, from, step int) int {
+	for i := 1; i <= len(rows); i++ {
+		at := (from + i*step + len(rows)*i) % len(rows)
+		if rows[at].fork != nil || len(rows[at].seg.Alternates) > 0 {
 			return at
 		}
 	}

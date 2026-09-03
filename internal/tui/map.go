@@ -66,6 +66,7 @@ type Model struct {
 
 	mode  mode
 	spine *spineState
+	stack []*spineState
 
 	all     []row
 	visible []row

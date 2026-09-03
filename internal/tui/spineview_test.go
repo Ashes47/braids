@@ -100,11 +100,11 @@ func TestSpineEmptyLane(t *testing.T) {
 }
 
 func TestNextJunctionWrapsBothWays(t *testing.T) {
-	segs := []graph.Segment{
-		{Kind: graph.SegTurn},
-		{Kind: graph.SegTurn, Alternates: []int{1}},
-		{Kind: graph.SegTurn},
-		{Kind: graph.SegTurn, Alternates: []int{2}},
+	segs := []spineRow{
+		{seg: graph.Segment{Kind: graph.SegTurn}},
+		{seg: graph.Segment{Kind: graph.SegTurn, Alternates: []int{1}}},
+		{seg: graph.Segment{Kind: graph.SegTurn}},
+		{seg: graph.Segment{Kind: graph.SegTurn, Alternates: []int{2}}},
 	}
 	if got := nextJunction(segs, 0, 1); got != 1 {
 		t.Errorf("forward from 0 = %d, want 1", got)
@@ -118,7 +118,7 @@ func TestNextJunctionWrapsBothWays(t *testing.T) {
 	if got := nextJunction(segs, 0, -1); got != 3 {
 		t.Errorf("backward from 0 should wrap to 3, got %d", got)
 	}
-	if got := nextJunction([]graph.Segment{{Kind: graph.SegTurn}}, 0, 1); got != 0 {
+	if got := nextJunction([]spineRow{{seg: graph.Segment{Kind: graph.SegTurn}}}, 0, 1); got != 0 {
 		t.Errorf("with no junctions the cursor must not move, got %d", got)
 	}
 }
@@ -143,7 +143,7 @@ func TestSpineFilterNarrowsAndTitles(t *testing.T) {
 		m = m.spineKey(k)
 	}
 	if len(m.spine.visible) != 1 {
-		t.Fatalf("filter left %d segments, want 1", len(m.spine.visible))
+		t.Fatalf("filter left %d rows, want 1", len(m.spine.visible))
 	}
 	out := plain(m.renderSpine())
 	if !strings.Contains(out, "Spine(queue stall)(/option)[1]") {
@@ -159,7 +159,7 @@ func TestSpineFilterNarrowsAndTitles(t *testing.T) {
 	for _, k := range []string{"b", "a", "s", "h"} {
 		m = m.spineKey(k)
 	}
-	if len(m.spine.visible) != 1 || m.spine.visible[0].Kind != graph.SegRun {
+	if len(m.spine.visible) != 1 || m.spine.visible[0].seg.Kind != graph.SegRun {
 		t.Errorf("filtering by tool should find the run, got %+v", m.spine.visible)
 	}
 }
@@ -281,5 +281,102 @@ func TestSuggestName(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("suggestName(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+// forkChild attaches a child lane to a node, as the forest would.
+func forkChild(parent *graph.Node, id, title string, msgs, forkSeq int) *graph.Node {
+	li := laneInfo(id, title, "app", msgs, time.Hour)
+	child := &graph.Node{Lane: li, ParentID: parent.Lane.ID, ForkSeq: forkSeq, Depth: 1}
+	parent.Children = append(parent.Children, child)
+	return child
+}
+
+func TestSpineShowsForksInlineAtTheirTurn(t *testing.T) {
+	m := spineModel(t, demoSegments(), nil)
+	node := m.visible[0].node
+	forkChild(node, "kid00000001", "try another way", 9, 1)
+
+	m = m.openSpine()
+	out := plain(m.renderSpine())
+	if !strings.Contains(out, "try another way") {
+		t.Fatalf("a branch that left this lane must appear in it:\n%s", out)
+	}
+	if !strings.Contains(out, "(9 turns)") || !strings.Contains(out, "< t1") {
+		t.Errorf("fork row should carry its size and fork point:\n%s", out)
+	}
+
+	// It belongs directly after the turn it left from, not at the end.
+	rows := m.spine.rows
+	if rows[0].fork != nil || rows[1].fork == nil {
+		t.Errorf("fork placed at row %d, want immediately after t1", indexOfFork(rows))
+	}
+	if !strings.Contains(out, "2 / 1 forked out") {
+		t.Errorf("facts should count lanes that forked out:\n%s", out)
+	}
+}
+
+func indexOfFork(rows []spineRow) int {
+	for i, r := range rows {
+		if r.fork != nil {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestEnterDescendsIntoABranchAndEscapeComesBack(t *testing.T) {
+	m := spineModel(t, demoSegments(), nil)
+	node := m.visible[0].node
+	forkChild(node, "kid00000001", "the branch", 9, 1)
+
+	m = m.openSpine()
+	m = m.spineKey("j") // onto the fork row
+	if m.spine.current().fork == nil {
+		t.Fatal("expected the cursor on the fork row")
+	}
+
+	m = m.spineKey("enter")
+	if m.spine.lane.ID != "kid00000001" {
+		t.Fatalf("enter should open the branch, got lane %q", m.spine.lane.ID)
+	}
+	if len(m.stack) != 1 {
+		t.Fatalf("descending should remember where we came from, stack = %d", len(m.stack))
+	}
+
+	m = m.spineKey("esc")
+	if m.spine == nil || m.spine.lane.ID != "lane1234abcd" {
+		t.Fatal("esc should return to the parent conversation, not the map")
+	}
+	m = m.spineKey("esc")
+	if m.mode != mapMode {
+		t.Error("a second esc should return to the map")
+	}
+}
+
+func TestBranchingFromAForkRowExplainsItself(t *testing.T) {
+	m := spineModel(t, demoSegments(), nil)
+	forkChild(m.visible[0].node, "kid00000001", "the branch", 9, 1)
+	m.branch = func(string, int, string) (string, error) { return "x", nil }
+
+	m = m.openSpine()
+	m = m.spineKey("j")
+	m = m.spineKey("b")
+	if m.spine.naming.active {
+		t.Error("b on a fork row should not open the name field")
+	}
+	if !strings.Contains(plain(m.renderSpine()), "press enter to open that branch") {
+		t.Error("expected guidance towards enter")
+	}
+}
+
+func TestNextSplitFindsForksAsWellAsJunctions(t *testing.T) {
+	rows := []spineRow{
+		{seg: graph.Segment{Kind: graph.SegTurn}},
+		{fork: &graph.Node{}},
+		{seg: graph.Segment{Kind: graph.SegTurn}},
+	}
+	if got := nextJunction(rows, 0, 1); got != 1 {
+		t.Errorf("next split = %d, want the fork row at 1", got)
 	}
 }

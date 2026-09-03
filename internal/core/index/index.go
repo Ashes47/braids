@@ -203,6 +203,7 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 
 	stats := Stats{Lanes: len(lanes)}
 	for _, lane := range lanes {
+		lane.Title = titleOf(ctx, src, lane)
 		var laneMsgs, laneParts int
 		err := src.Messages(ctx, lane, func(m model.Message) error {
 			stats.Messages++
@@ -238,6 +239,143 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 	}
 	stats.Duration = time.Since(start)
 	return stats, nil
+}
+
+// Sync brings the index up to date, re-reading only what changed.
+//
+// A lane is re-read when its size or modification time differs from what was
+// stored, and dropped when its file is gone. A full rebuild takes seconds; this
+// takes milliseconds when nothing moved, which is what makes it usable after
+// every branch rather than something the user has to remember to run.
+func (ix *Index) Sync(ctx context.Context, src store.Source) (Stats, error) {
+	start := time.Now()
+	lanes, err := src.Lanes(ctx)
+	if err != nil {
+		return Stats{}, fmt.Errorf("list lanes: %w", err)
+	}
+	known, err := ix.Lanes(ctx)
+	if err != nil {
+		return Stats{}, err
+	}
+	stored := make(map[string]LaneInfo, len(known))
+	for _, l := range known {
+		stored[l.ID] = l
+	}
+
+	tx, err := ix.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Stats{}, fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once committed
+
+	stats := Stats{Lanes: len(lanes)}
+	seen := make(map[string]bool, len(lanes))
+	for _, lane := range lanes {
+		seen[lane.ID] = true
+		// Compare at second precision: that is what the index stores, so
+		// comparing the raw ModTime would mark every lane changed, every time.
+		if was, ok := stored[lane.ID]; ok && was.Size == lane.Size && was.Updated.Unix() == lane.Updated.Unix() {
+			stats.Messages += was.Messages
+			stats.Parts += was.Parts
+			continue
+		}
+		msgs, parts, err := replaceLane(ctx, tx, src, lane)
+		if err != nil {
+			return Stats{}, err
+		}
+		stats.Messages += msgs
+		stats.Parts += parts
+	}
+	for id := range stored {
+		if !seen[id] {
+			if err := deleteLane(ctx, tx, id); err != nil {
+				return Stats{}, err
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Stats{}, fmt.Errorf("commit: %w", err)
+	}
+	stats.Duration = time.Since(start)
+	return stats, nil
+}
+
+// titleOf asks the Source for a lane's title, falling back to none. A missing
+// title is cosmetic, so it must never fail an index.
+func titleOf(ctx context.Context, src store.Source, lane model.Lane) string {
+	titler, ok := src.(store.Titler)
+	if !ok {
+		return lane.Title
+	}
+	title, err := titler.Title(ctx, lane)
+	if err != nil {
+		return lane.Title
+	}
+	return title
+}
+
+func deleteLane(ctx context.Context, tx *sql.Tx, laneID string) error {
+	for _, stmt := range []string{
+		`DELETE FROM parts WHERE lane_id = ?`,
+		`DELETE FROM messages WHERE lane_id = ?`,
+		`DELETE FROM lanes WHERE id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt, laneID); err != nil {
+			return fmt.Errorf("drop lane %s: %w", laneID, err)
+		}
+	}
+	return nil
+}
+
+// replaceLane re-reads one lane into the index, replacing whatever was there.
+func replaceLane(ctx context.Context, tx *sql.Tx, src store.Source, lane model.Lane) (msgs, parts int, err error) {
+	if err := deleteLane(ctx, tx, lane.ID); err != nil {
+		return 0, 0, err
+	}
+	lane.Title = titleOf(ctx, src, lane)
+	insertPart, err := tx.PrepareContext(ctx,
+		`INSERT INTO parts (body,lane_id,msg_id,kind,role,tool,at) VALUES (?,?,?,?,?,?,?)`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("prepare part insert: %w", err)
+	}
+	defer insertPart.Close() //nolint:errcheck // tx-scoped
+	insertMsg, err := tx.PrepareContext(ctx,
+		`INSERT INTO messages (lane_id,seq,msg_id,parent_id,role,at,preview,tools) `+
+			`VALUES (?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("prepare message insert: %w", err)
+	}
+	defer insertMsg.Close() //nolint:errcheck // tx-scoped
+
+	err = src.Messages(ctx, lane, func(m model.Message) error {
+		msgs++
+		if _, err := insertMsg.ExecContext(ctx, m.LaneID, msgs, m.ID,
+			m.ParentID, string(m.Role), m.At.Unix(), previewOf(m), toolsOf(m)); err != nil {
+			return fmt.Errorf("insert message: %w", err)
+		}
+		for _, p := range m.Parts {
+			if strings.TrimSpace(p.Text) == "" {
+				continue
+			}
+			if _, err := insertPart.ExecContext(ctx, p.Text, m.LaneID, m.ID,
+				string(p.Kind), string(m.Role), p.Tool, m.At.Unix()); err != nil {
+				return fmt.Errorf("insert part: %w", err)
+			}
+			parts++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, 0, fmt.Errorf("index lane %s: %w", lane.ID, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO lanes (id,source,project,path,title,created,updated,size,msg_count,part_count) `+
+			`VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		lane.ID, lane.Source, lane.Project, lane.Path, lane.Title,
+		unixOrZero(lane.Created), lane.Updated.Unix(), lane.Size, msgs, parts); err != nil {
+		return 0, 0, fmt.Errorf("insert lane %s: %w", lane.ID, err)
+	}
+	return msgs, parts, nil
 }
 
 // Search returns hits ranked by FTS5 relevance.

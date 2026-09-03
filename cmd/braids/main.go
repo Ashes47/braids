@@ -15,8 +15,10 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/Ashes47/braids/internal/core/graph"
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/model"
+	"github.com/Ashes47/braids/internal/core/origins"
 	"github.com/Ashes47/braids/internal/core/store"
 	"github.com/Ashes47/braids/internal/core/store/claudecode"
 	"github.com/Ashes47/braids/internal/tui"
@@ -32,7 +34,7 @@ const usage = `braids — manage Claude Code conversations as a graph
 
 usage:
   braids                                 open the map
-  braids index [--root DIR]              rebuild the index from local transcripts
+  braids index [--full]                  index new and changed transcripts
   braids search [flags] QUERY            search every indexed message
   braids lanes                           list indexed conversations
   braids branch --lane ID --at TURN      cut a new conversation at that turn
@@ -162,19 +164,34 @@ func cmdMap(args []string, out *printer) error {
 	defer ix.Close() //nolint:errcheck // read-only
 
 	ctx := context.Background()
+	provenance, err := origins.Load(originsPath(dbPath))
+	if err != nil {
+		return err
+	}
 	opts := tui.Options{
 		ASCII:     *ascii,
 		Source:    "claudecode",
 		IndexPath: dbPath,
 		LoadSpine: tui.SpineLoader(ctx, ix),
+		Origins:   provenance.All(),
 		Branch: func(laneID string, turn int, name string) (string, error) {
-			return branchAt(ctx, ix, laneID, turn, name)
+			return branchAt(ctx, ix, provenance, laneID, turn, name)
+		},
+		Refresh: func() (*graph.Forest, error) {
+			root, err := claudecode.DefaultRoot()
+			if err != nil {
+				return nil, err
+			}
+			if _, err := ix.Sync(ctx, claudecode.New(root)); err != nil {
+				return nil, err
+			}
+			return tui.Forest(ctx, ix, provenance.All())
 		},
 	}
 	if !*print {
 		return tui.Run(ctx, ix, opts)
 	}
-	forest, err := tui.Forest(ctx, ix)
+	forest, err := tui.Forest(ctx, ix, provenance.All())
 	if err != nil {
 		return err
 	}
@@ -187,6 +204,7 @@ func cmdIndex(args []string, out *printer) error {
 	fs.SetOutput(out)
 	root := fs.String("root", "", "transcript root (default ~/.claude/projects)")
 	db := fs.String("db", "", "index location")
+	full := fs.Bool("full", false, "re-read every transcript instead of only what changed")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -204,7 +222,12 @@ func cmdIndex(args []string, out *printer) error {
 	}
 	defer ix.Close() //nolint:errcheck // reported by Rebuild failure instead
 
-	stats, err := ix.Rebuild(context.Background(), claudecode.New(dir))
+	src := claudecode.New(dir)
+	sync := ix.Sync
+	if *full {
+		sync = ix.Rebuild
+	}
+	stats, err := sync(context.Background(), src)
 	if err != nil {
 		return err
 	}
@@ -277,14 +300,22 @@ func cmdBranch(args []string, out *printer) error {
 		return errors.New("branch needs --lane and --at (try: braids branch --lane abc123 --at 12)")
 	}
 
-	ix, err := openIndex(*db)
+	dbPath, err := resolveDB(*db)
+	if err != nil {
+		return err
+	}
+	ix, err := index.Open(dbPath)
 	if err != nil {
 		return err
 	}
 	defer ix.Close() //nolint:errcheck // read-only
 
 	ctx := context.Background()
-	newID, err := branchAt(ctx, ix, *laneRef, *at, *name)
+	provenance, err := origins.Load(originsPath(dbPath))
+	if err != nil {
+		return err
+	}
+	newID, err := branchAt(ctx, ix, provenance, *laneRef, *at, *name)
 	if err != nil {
 		return err
 	}
@@ -296,7 +327,7 @@ func cmdBranch(args []string, out *printer) error {
 
 // branchAt cuts a lane at a turn number and returns the new lane's ID. Shared
 // by the CLI and the map so both take exactly the same path.
-func branchAt(ctx context.Context, ix *index.Index, laneRef string, turn int, name string) (string, error) {
+func branchAt(ctx context.Context, ix *index.Index, provenance *origins.Store, laneRef string, turn int, name string) (string, error) {
 	lane, err := findLane(ctx, ix, laneRef)
 	if err != nil {
 		return "", err
@@ -325,7 +356,17 @@ func branchAt(ctx context.Context, ix *index.Index, laneRef string, turn int, na
 	if err != nil {
 		return "", err
 	}
+	// Record where it came from: two lanes can hold identical prefixes, so
+	// inference alone would sometimes attach it to the wrong parent.
+	if err := provenance.Record(branch.ID, model.Origin{Parent: lane.ID, ForkSeq: turn}); err != nil {
+		return "", err
+	}
 	return branch.ID, nil
+}
+
+// originsPath keeps provenance next to the index it describes.
+func originsPath(dbPath string) string {
+	return filepath.Join(filepath.Dir(dbPath), "origins.json")
 }
 
 func nameFlag(name string) string {

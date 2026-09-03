@@ -15,6 +15,9 @@ import (
 type fakeSource struct {
 	lanes    []model.Lane
 	messages map[string][]model.Message
+	// reads counts how many lanes were actually streamed, so a test can assert
+	// that an incremental sync skipped the rest.
+	reads int
 }
 
 func (f *fakeSource) Name() string                     { return "fake" }
@@ -23,6 +26,7 @@ func (f *fakeSource) Capabilities() store.Capabilities { return store.Capabiliti
 func (f *fakeSource) Lanes(context.Context) ([]model.Lane, error) { return f.lanes, nil }
 
 func (f *fakeSource) Messages(_ context.Context, lane model.Lane, visit store.Visit) error {
+	f.reads++
 	for _, m := range f.messages[lane.ID] {
 		if err := visit(m); err != nil {
 			return err
@@ -272,5 +276,115 @@ func TestOpenDiscardsAStaleSchema(t *testing.T) {
 	}
 	if len(lanes) != 2 {
 		t.Fatalf("got %d lanes after rebuild, want 2", len(lanes))
+	}
+}
+
+func TestSyncOnlyRereadsWhatChanged(t *testing.T) {
+	ctx := context.Background()
+	ix := openIndex(t)
+	src := newFixture()
+
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatalf("first Sync: %v", err)
+	}
+
+	// Nothing changed: a second Sync must not re-read a single lane.
+	src.reads = 0
+	stats, err := ix.Sync(ctx, src)
+	if err != nil {
+		t.Fatalf("second Sync: %v", err)
+	}
+	if src.reads != 0 {
+		t.Errorf("Sync re-read %d unchanged lanes, want 0", src.reads)
+	}
+	if stats.Messages != 3 || stats.Parts != 4 {
+		t.Errorf("stats = %+v, want the counts carried forward", stats)
+	}
+
+	// A lane whose size and mtime moved is re-read; its siblings are not.
+	src.lanes[1].Size = 999
+	src.lanes[1].Updated = src.lanes[1].Updated.Add(time.Minute)
+	src.reads = 0
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatalf("third Sync: %v", err)
+	}
+	if src.reads != 1 {
+		t.Errorf("Sync re-read %d lanes, want only the changed one", src.reads)
+	}
+}
+
+func TestSyncToleratesSubSecondModTimes(t *testing.T) {
+	// The index stores mtime at second precision. Comparing the raw ModTime
+	// marks every lane changed on every run, which silently turns an
+	// incremental sync back into a full rebuild.
+	ctx := context.Background()
+	ix := openIndex(t)
+	src := newFixture()
+	for i := range src.lanes {
+		src.lanes[i].Updated = src.lanes[i].Updated.Add(750 * time.Millisecond)
+	}
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatalf("first Sync: %v", err)
+	}
+	src.reads = 0
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatalf("second Sync: %v", err)
+	}
+	if src.reads != 0 {
+		t.Errorf("sub-second mtimes caused %d needless re-reads", src.reads)
+	}
+}
+
+func TestSyncDropsVanishedLanes(t *testing.T) {
+	ctx := context.Background()
+	ix := openIndex(t)
+	src := newFixture()
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	src.lanes = src.lanes[:1] // the branch lane is deleted from disk
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatalf("Sync after deletion: %v", err)
+	}
+	lanes, err := ix.Lanes(ctx)
+	if err != nil {
+		t.Fatalf("Lanes: %v", err)
+	}
+	if len(lanes) != 1 || lanes[0].ID != "main" {
+		t.Fatalf("lanes = %+v, want only main", lanes)
+	}
+	hits, err := ix.Search(ctx, Query{Text: "gcsfuse"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Errorf("a deleted lane left %d hits behind, want 1", len(hits))
+	}
+}
+
+func TestSyncPicksUpANewLane(t *testing.T) {
+	ctx := context.Background()
+	ix := openIndex(t)
+	src := newFixture()
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	fresh := model.Lane{ID: "fresh", Source: "fake", Project: "app", Title: "just branched"}
+	src.lanes = append(src.lanes, fresh)
+	src.messages["fresh"] = []model.Message{{
+		ID: "f1", LaneID: "fresh", Role: model.RoleUser,
+		Parts: []model.Part{{Kind: model.PartText, Text: "a brand new conversation"}},
+	}}
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatalf("Sync after branch: %v", err)
+	}
+	hits, err := ix.Search(ctx, Query{Text: "brand new"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(hits) != 1 || hits[0].LaneID != "fresh" {
+		t.Errorf("a new lane was not indexed: %+v", hits)
 	}
 }

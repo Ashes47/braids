@@ -36,6 +36,15 @@ type BranchRequest struct {
 	Name string
 }
 
+// Titler reports a lane's display title.
+//
+// It is separate from Lanes because finding a title means reading the whole
+// transcript, while listing lanes should cost a directory scan. Callers fetch a
+// title only when they are already re-reading the lane.
+type Titler interface {
+	Title(ctx context.Context, lane model.Lane) (string, error)
+}
+
 // Brancher creates a new lane from a prefix of an existing one.
 //
 // Implementations must never modify the source lane: a branch is a new file, so

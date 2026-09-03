@@ -10,6 +10,7 @@ import (
 
 	"github.com/Ashes47/braids/internal/core/graph"
 	"github.com/Ashes47/braids/internal/core/index"
+	"github.com/Ashes47/braids/internal/core/model"
 )
 
 // Run assembles the forest from the index and starts the Map.
@@ -17,7 +18,7 @@ func Run(ctx context.Context, ix *index.Index, opts Options) error {
 	if opts.LoadSpine == nil {
 		opts.LoadSpine = SpineLoader(ctx, ix)
 	}
-	forest, err := Forest(ctx, ix)
+	forest, err := Forest(ctx, ix, opts.Origins)
 	if err != nil {
 		return err
 	}
@@ -66,7 +67,7 @@ func SpineLoader(ctx context.Context, ix *index.Index) func(string) ([]graph.Seg
 
 // Forest reads everything the map needs and arranges it. Kept exported and
 // separate from Run so the same assembly is reusable by a future web frontend.
-func Forest(ctx context.Context, ix *index.Index) (*graph.Forest, error) {
+func Forest(ctx context.Context, ix *index.Index, recorded map[string]model.Origin) (*graph.Forest, error) {
 	lanes, err := ix.Lanes(ctx)
 	if err != nil {
 		return nil, err
@@ -79,5 +80,5 @@ func Forest(ctx context.Context, ix *index.Index) (*graph.Forest, error) {
 	if err != nil {
 		return nil, err
 	}
-	return graph.Build(lanes, overlaps, timelines), nil
+	return graph.Build(lanes, overlaps, timelines, recorded), nil
 }

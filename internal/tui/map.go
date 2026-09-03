@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/Ashes47/braids/internal/core/graph"
+	"github.com/Ashes47/braids/internal/core/model"
 )
 
 // activeWindow is how recently a lane must have changed to read as alive.
@@ -44,6 +45,12 @@ type Options struct {
 	// Branch cuts a new conversation from a lane at a turn, returning the new
 	// lane's ID. Nil disables branching, which is what a read-only Source gets.
 	Branch func(laneID string, turn int, name string) (string, error)
+	// Origins is recorded branch provenance, preferred over inference.
+	Origins map[string]model.Origin
+	// Refresh brings the index up to date and rebuilds the forest. Called
+	// after a branch so the new lane appears at once instead of after a
+	// remembered command.
+	Refresh func() (*graph.Forest, error)
 }
 
 // mode is which screen the map is showing.
@@ -63,6 +70,7 @@ type Model struct {
 	now       func() time.Time
 	loadSpine func(string) ([]graph.Segment, error)
 	branch    func(string, int, string) (string, error)
+	refresh   func() (*graph.Forest, error)
 
 	mode  mode
 	spine *spineState
@@ -95,6 +103,7 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		indexPath: opts.IndexPath,
 		loadSpine: opts.LoadSpine,
 		branch:    opts.Branch,
+		refresh:   opts.Refresh,
 		now:       time.Now,
 		width:     80,
 		height:    24,
@@ -102,6 +111,35 @@ func NewModel(f *graph.Forest, opts Options) Model {
 	m.all = layout(f, m.theme.Glyphs)
 	m.visible = m.all
 	m.measure()
+	return m
+}
+
+// adopt swaps in a rebuilt forest, holding the reader's place: the selected
+// lane stays selected, and an open spine keeps reading the same conversation.
+func (m Model) adopt(f *graph.Forest) Model {
+	selected := ""
+	if m.cursor < len(m.visible) {
+		selected = m.visible[m.cursor].node.Lane.ID
+	}
+	m.all = layout(f, m.theme.Glyphs)
+	m.measure()
+	m.apply()
+	for i, r := range m.visible {
+		if r.node.Lane.ID == selected {
+			m.cursor = i
+			break
+		}
+	}
+	m.clamp()
+
+	if m.spine != nil {
+		if node, ok := f.ByID[m.spine.lane.ID]; ok {
+			m.spine.node = node
+			m.spine.lane = node.Lane
+			m.spine.build()
+			m.clampSpine()
+		}
+	}
 	return m
 }
 
@@ -151,8 +189,21 @@ func (m Model) View() tea.View {
 	return tea.View{Content: m.render(), AltScreen: true}
 }
 
+// normalizeKey folds the spellings a terminal may use for the same key. Return
+// arrives as CR on most terminals but as LF on some configurations, and only
+// the CR form is named "enter".
+func normalizeKey(k string) string {
+	switch k {
+	case "\n", "return", "ctrl+m":
+		return "enter"
+	case "ctrl+j":
+		return "enter"
+	}
+	return k
+}
+
 func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
+	key := normalizeKey(msg.String())
 	if key == "ctrl+c" || (key == "q" && !m.editing()) {
 		return m, tea.Quit
 	}

@@ -59,6 +59,8 @@ Every design decision below rests on something measured on this machine
 | `parentUuid` names bookkeeping, not turns | A message's parent is usually an `attachment`; resolving through them is what makes a chain reconstruct at all |
 | In-file branching is the common case | One real 25,571-turn lane: **220 junctions, 228 departing branches** — none of them visible in Claude Code |
 | A tool result wears the user role | Treating every user record as a landmark left a long spine 85% uncollapsed; requiring text cut 20,506 segments to 3,015 |
+| Identical prefixes make forks ambiguous | A lane cut from a fork shares the same turns with the fork *and* its parent; only a record of what braids did can tell them apart |
+| Incremental sync is worth having | 9.2 s full rebuild vs **47 ms** when only one transcript moved |
 | Fork files are standalone | Child holds a full copy of the prefix ⇒ **deletion never cascades** |
 | Stale reads are guarded | Edit after external change: *"has been modified on disk since I read it"* |
 | Local search is trivial | 60,616 units · 1.8 s full rebuild · 74.5 MB · **0.1–0.3 ms** queries |
@@ -92,13 +94,24 @@ Every design decision below rests on something measured on this machine
 and parses only the delta. A 145 MB file costs nothing to follow. Full rebuild
 (1.8 s) is the cold start and the panic button.
 
-**Index.** One SQLite file, stamped with a schema version. FTS5 over
+**Index.** One SQLite file, stamped with a schema version. `Sync` re-reads only
+lanes whose size or mtime moved and drops ones whose file is gone — 47 ms
+against a 9.2 s full rebuild — which is what lets a branch appear immediately
+instead of after a remembered command. Listing lanes costs a directory scan:
+titles mean reading a whole transcript, so they are fetched only for lanes being
+re-read. FTS5 over
 `text | thinking | tool_use | tool_result`, plus a `messages` table carrying the
 parent chain that the graph and the spine are derived from. Rebuildable from
 scratch at any time; a version mismatch drops and recreates it.
 
-**Sidecar.** Names, colors, archive flags, worktree paths. Topology is *not*
-stored — it is derived from shared uuids, so it survives losing the sidecar.
+**Sidecar.** Names, colors, archive flags, worktree paths, and the provenance of
+branches braids made itself (`origins.json`). Topology is still *derived* — the
+sidecar only overrides it where inference cannot win, because two lanes can hold
+byte-identical prefixes and a third cut from either is indistinguishable by
+content. Losing the sidecar costs accuracy on those ties, never data.
+
+braids does not write into a transcript. Provenance could have been a record
+inside the new file; a sidecar keeps someone else's format untouched.
 
 **Hooks.** braids installs its own hook entries (merging with existing ones, never
 replacing) that POST session id + event to localhost. This is how liveness works
@@ -567,10 +580,10 @@ needs-you — are declared as optional `Capabilities`, never assumed.
    from mtime, k9s-style chrome.
 3. ~~**The Spine.**~~ **Done** for runs and junctions; compaction seams,
    subagent lanes and error marks still to come.
-4. ~~**Branch.**~~ **Done** for file synthesis, naming, the `b` key, and
-   navigating into a branch from its parent. `--worktree` and spawning a
-   terminal still to come.
-   ← *next: live updates, so a new branch appears without `braids index`*
+4. ~~**Branch.**~~ **Done**: file synthesis, naming, the `b` key, navigating
+   into a branch from its parent, recorded provenance, and an immediate
+   in-place refresh. `--worktree` and spawning a terminal still to come.
+5. **Live.** Watcher, byte-offset tailing, hooks, needs-you queue. ← *next*
 5. **Live.** Watcher, byte-offset tailing, hooks, needs-you queue.
 6. **Subagents.** Nested lanes, promote.
 7. **Housekeeping.** Archive, sweep, trash, undo.

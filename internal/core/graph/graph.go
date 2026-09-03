@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Ashes47/braids/internal/core/index"
+	"github.com/Ashes47/braids/internal/core/model"
 )
 
 // Node is one lane placed in the forest.
@@ -40,6 +41,9 @@ type key struct{ a, b string } // a < b, so each unordered pair appears once
 // records verbatim into a fork, so a shared message ID proves a shared prefix
 // and the last shared turn is the fork point.
 //
+// Where braids made the branch itself, the recorded origin is used instead of
+// any of this: it is the only evidence that cannot be wrong.
+//
 // Direction — which lane is the parent — is decided by file creation time,
 // because nothing inside the files can settle it: a fork copies the parent's
 // records verbatim, timestamps included, and people routinely fork and *then*
@@ -47,7 +51,7 @@ type key struct{ a, b string } // a < b, so each unordered pair appears once
 // Where the platform reports no birth time, weaker evidence is used in order:
 // a lane that is a strict prefix of another is its parent, then the longer
 // lane is taken as the parent.
-func Build(lanes []index.LaneInfo, overlaps []index.Overlap, timelines map[string][]time.Time) *Forest {
+func Build(lanes []index.LaneInfo, overlaps []index.Overlap, timelines map[string][]time.Time, recorded map[string]model.Origin) *Forest {
 	forest := &Forest{ByID: make(map[string]*Node, len(lanes))}
 	for _, l := range lanes {
 		forest.ByID[l.ID] = &Node{Lane: l}
@@ -57,6 +61,20 @@ func Build(lanes []index.LaneInfo, overlaps []index.Overlap, timelines map[strin
 		node := forest.ByID[child]
 		node.ParentID = c.parent
 		node.ForkSeq = c.forkSeq
+	}
+
+	// Recorded provenance wins: when braids made the branch it knows where it
+	// came from, and no amount of inference can beat that.
+	for child, origin := range recorded {
+		node, ok := forest.ByID[child]
+		if !ok {
+			continue
+		}
+		if _, parentExists := forest.ByID[origin.Parent]; !parentExists {
+			continue // the parent was deleted; fall back to what was inferred
+		}
+		node.ParentID = origin.Parent
+		node.ForkSeq = origin.ForkSeq
 	}
 
 	link(forest)

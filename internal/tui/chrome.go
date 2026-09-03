@@ -36,10 +36,9 @@ func (m Model) facts() []fact {
 
 func hints() []hint {
 	return []hint{
-		{"j/k", "move"},
-		{"↵", "open spine"},
-		{"/", "filter"},
-		{"q", "quit"},
+		{"j/k", "move"}, {"↵", "open spine"},
+		{"/", "filter"}, {"g/G", "first/last"},
+		{"esc", "clear filter"}, {"q", "quit"},
 	}
 }
 
@@ -58,6 +57,12 @@ func (m Model) factsBlock(facts []fact, keys []hint) string {
 	for _, f := range facts {
 		labelWidth = max(labelWidth, lipgloss.Width(f.label)+2)
 	}
+	// Two columns of hints: one column cannot hold everything a screen binds,
+	// and a legend that omits a working key is worse than no legend.
+	rows := (len(keys) + 1) / 2
+	if rows > infoLines {
+		rows = infoLines
+	}
 
 	lines := make([]string, 0, infoLines)
 	for i := range infoLines {
@@ -66,14 +71,21 @@ func (m Model) factsBlock(facts []fact, keys []hint) string {
 			left = m.theme.Label.Render(padRight(facts[i].label+":", labelWidth)) +
 				m.theme.Value.Render(facts[i].value)
 		}
-		right := strings.Repeat(" ", hintWidth)
-		if i < len(keys) {
-			right = m.theme.Column.Render(padRight("<"+keys[i].key+">", hintCol)) +
-				m.theme.Label.Render(padRight(keys[i].action, hintWidth-hintCol))
+		right := strings.Repeat(" ", hintWidth*2+1)
+		if i < rows {
+			right = m.hintCell(keys, i, hintWidth) + " " + m.hintCell(keys, i+rows, hintWidth)
 		}
 		lines = append(lines, " "+spread(left, right, m.width-2))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m Model) hintCell(keys []hint, i, width int) string {
+	if i >= len(keys) {
+		return strings.Repeat(" ", width)
+	}
+	return m.theme.Column.Render(padRight("<"+keys[i].key+">", hintCol)) +
+		m.theme.Label.Render(padRight(keys[i].action, width-hintCol))
 }
 
 // panelTitle names what the table is showing, k9s style: Conversations(all)[21].

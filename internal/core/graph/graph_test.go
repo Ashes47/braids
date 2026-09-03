@@ -49,7 +49,7 @@ func TestBuildDetectsForkAndDirection(t *testing.T) {
 		"fork": {at(0), at(10), at(15)}, // diverges before main does
 	}
 
-	f := Build(lanes, overlaps, timelines)
+	f := Build(lanes, overlaps, timelines, nil)
 	if len(f.Roots) != 1 || f.Roots[0].Lane.ID != "main" {
 		t.Fatalf("roots = %v, want just main", ids(f.Roots))
 	}
@@ -77,7 +77,7 @@ func TestBuildTreatsStrictPrefixAsParent(t *testing.T) {
 		"grown": {at(0), at(5), at(30), at(40)},
 	}
 
-	f := Build(lanes, overlaps, timelines)
+	f := Build(lanes, overlaps, timelines, nil)
 	if got := f.ByID["grown"].ParentID; got != "stub" {
 		t.Errorf("a lane with no divergence must be the parent; got parent %q", got)
 	}
@@ -106,7 +106,7 @@ func TestBuildChoosesNearestAncestor(t *testing.T) {
 		"leaf": {at(0), at(5), at(30), at(35), at(50)},
 	}
 
-	f := Build(lanes, overlaps, timelines)
+	f := Build(lanes, overlaps, timelines, nil)
 	if got := f.ByID["mid"].ParentID; got != "root" {
 		t.Errorf("mid parent = %q, want root", got)
 	}
@@ -126,7 +126,7 @@ func TestBuildLeavesUnrelatedLanesAsRoots(t *testing.T) {
 	f := Build(lanes, nil, map[string][]time.Time{
 		"a": {at(0), at(1)},
 		"b": {at(0), at(1)},
-	})
+	}, nil)
 	if len(f.Roots) != 2 {
 		t.Fatalf("want both lanes as roots, got %v", ids(f.Roots))
 	}
@@ -170,7 +170,7 @@ func TestBuildBreaksAmbiguousTiesTowardsTheShallowestAncestor(t *testing.T) {
 
 	// Repeat: the pair map iterates randomly, so a tie must not flip between runs.
 	for range 25 {
-		f := Build(lanes, overlaps, timelines)
+		f := Build(lanes, overlaps, timelines, nil)
 		if got := f.ByID["leaf"].ParentID; got != "root" {
 			t.Fatalf("leaf parent = %q, want root (shallowest ancestor on a tie)", got)
 		}

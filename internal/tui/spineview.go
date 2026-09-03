@@ -152,9 +152,12 @@ func (m Model) spineKey(key string) Model {
 	case "esc", "backspace", "h", "left":
 		return m.closeSpine()
 	case "enter", "l", "right":
-		if row := s.current(); row.fork != nil {
-			return m.openNode(row.fork, true)
+		row := s.current()
+		if row.fork == nil {
+			s.notice, s.failed = "no branch on this line — press b to make one, or n to find the next split", true
+			return m
 		}
+		return m.openNode(row.fork, true)
 	case "j", "down":
 		s.cursor++
 	case "k", "up":
@@ -226,12 +229,21 @@ func (m Model) renderSpine() string {
 			b.WriteString(m.framed(blank) + "\n")
 		}
 	default:
+		drawn := 0
 		end := min(s.offset+m.bodyHeight(), len(s.visible))
-		for i := s.offset; i < end; i++ {
+		for i := s.offset; i < end && drawn < m.bodyHeight(); i++ {
 			b.WriteString(m.framed(m.renderRowLine(s.visible[i], i == s.cursor)))
 			b.WriteString("\n")
+			drawn++
+			// The name field appears where the branch will be cut, not in some
+			// corner of the screen: the point of the action is the turn.
+			if s.naming.active && i == s.cursor && drawn < m.bodyHeight() {
+				b.WriteString(m.framed(m.namePrompt()))
+				b.WriteString("\n")
+				drawn++
+			}
 		}
-		for range m.bodyHeight() - (end - s.offset) {
+		for range m.bodyHeight() - drawn {
 			b.WriteString(m.framed(blank) + "\n")
 		}
 	}
@@ -241,14 +253,29 @@ func (m Model) renderSpine() string {
 	return b.String()
 }
 
+// namePrompt is the inline branch-name field, drawn under the turn it will cut.
+func (m Model) namePrompt() string {
+	g := m.theme.Glyphs
+	label := "branch from t" + fmt.Sprintf("%d", m.spine.current().seg.Seq) + ": "
+	hint := "enter create · esc cancel"
+	field := m.spine.naming.text
+
+	width := m.contentWidth() - 4 - lipgloss.Width(g.Last) - lipgloss.Width(label) -
+		lipgloss.Width(hint) - 2
+	if width < 8 {
+		width = 8
+	}
+	return " " + m.theme.Rail.Render("  "+g.Last) + " " +
+		m.theme.Accent.Render(label) +
+		m.theme.Value.Render(padRight(truncate(field, width)+"▏", width+1)) + " " +
+		m.theme.Label.Render(hint)
+}
+
 // spineStatus is the bottom line: the field being typed, the last outcome, or
 // the lane's identity.
 func (m Model) spineStatus() string {
 	s := m.spine
 	switch {
-	case s.naming.active:
-		return " " + m.theme.Column.Render("branch name ") + m.theme.Value.Render(s.naming.text) +
-			m.theme.Column.Render("▏") + "  " + m.theme.Label.Render("enter create · esc cancel")
 	case s.filter.active:
 		return m.typingLine(s.filter)
 	case s.notice != "":
@@ -298,10 +325,9 @@ func (m Model) spineInfo() string {
 		{"Branches", fmt.Sprintf("%d / %d forked out", alternates, forks)},
 	}
 	keys := []hint{
-		{"j/k", "move"},
-		{"b", "branch here"},
-		{"↵", "open branch"},
-		{"n/N", "next split"},
+		{"j/k", "move"}, {"b", "branch here"},
+		{"/", "filter"}, {"↵", "open branch"},
+		{"n/N", "next split"}, {"esc", "back"},
 	}
 	return m.factsBlock(facts, keys)
 }
@@ -438,9 +464,9 @@ func (m Model) namingKey(key string) Model {
 	return m
 }
 
-// commitBranch writes the new lane and reports what to do with it. The index is
-// deliberately not rebuilt here: it takes seconds, and a screen that freezes on
-// every branch would discourage the one action the tool exists for.
+// commitBranch writes the new lane, then refreshes so it appears immediately.
+// Only what changed is re-read, so this costs milliseconds rather than the
+// seconds a full rebuild takes.
 func (m Model) commitBranch() Model {
 	s := m.spine
 	seg := s.current().seg
@@ -452,8 +478,16 @@ func (m Model) commitBranch() Model {
 		s.notice, s.failed = err.Error(), true
 		return m
 	}
-	s.notice, s.failed = fmt.Sprintf("branched at t%d → %s · run `braids index` to see it on the map",
-		seg.Seq, shortID(id)), false
+	notice := fmt.Sprintf("branched at t%d → %s", seg.Seq, shortID(id))
+	if m.refresh != nil {
+		forest, err := m.refresh()
+		if err != nil {
+			s.notice, s.failed = notice+" · but the refresh failed: "+err.Error(), true
+			return m
+		}
+		m = m.adopt(forest)
+	}
+	m.spine.notice, m.spine.failed = notice, false
 	return m
 }
 

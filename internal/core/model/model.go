@@ -77,6 +77,16 @@ func containsKind(kinds []PartKind, k PartKind) bool {
 	return false
 }
 
+// Origin records where a lane actually came from.
+//
+// Inference cannot always tell: two lanes can hold byte-identical prefixes, so
+// a third cut from either is indistinguishable by content. When braids makes
+// the branch itself it knows the answer, and recording it beats guessing.
+type Origin struct {
+	Parent  string `json:"parent"`
+	ForkSeq int    `json:"forkSeq"`
+}
+
 // Lane is one linear conversation as a harness stores it. A branch is simply
 // another Lane; braids never treats them as different things.
 type Lane struct {

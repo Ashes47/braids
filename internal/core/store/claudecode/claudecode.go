@@ -55,9 +55,13 @@ func (s *Source) Capabilities() store.Capabilities {
 	}
 }
 
-// Lanes enumerates every transcript under the root. Subagent transcripts, which
-// live one directory deeper, are deliberately excluded: they are attached to
-// their parent lane rather than listed alongside it.
+// Lanes enumerates every transcript under the root, costing one directory scan
+// and a stat per file. Titles are deliberately not read here — that means
+// opening every transcript — and are fetched through Title when a lane is
+// actually being re-read.
+//
+// Subagent transcripts, which live one directory deeper, are excluded: they are
+// attached to their parent lane rather than listed alongside it.
 func (s *Source) Lanes(ctx context.Context) ([]model.Lane, error) {
 	projects, err := os.ReadDir(s.root)
 	if err != nil {
@@ -94,13 +98,16 @@ func (s *Source) Lanes(ctx context.Context) ([]model.Lane, error) {
 				Updated: info.ModTime(),
 				Size:    info.Size(),
 			}
-			if title, err := readTitle(path); err == nil {
-				lane.Title = title
-			}
 			lanes = append(lanes, lane)
 		}
 	}
 	return lanes, nil
+}
+
+// Title reads a lane's display title, preferring one the user set over one the
+// model generated.
+func (s *Source) Title(_ context.Context, lane model.Lane) (string, error) {
+	return readTitle(lane.Path)
 }
 
 // Messages streams a lane's messages in file order, skipping the bookkeeping
@@ -369,4 +376,7 @@ func flatten(raw json.RawMessage) string {
 }
 
 // compile-time check that Source satisfies the port.
-var _ store.Source = (*Source)(nil)
+var (
+	_ store.Source = (*Source)(nil)
+	_ store.Titler = (*Source)(nil)
+)

@@ -79,8 +79,8 @@ func (m Model) factsBlock(facts []fact, keys []hint) string {
 // panelTitle names what the table is showing, k9s style: Conversations(all)[21].
 func (m Model) panelTitle() string {
 	scope := "all"
-	if m.filter != "" {
-		scope = "/" + m.filter
+	if m.filter.on() {
+		scope = m.filter.label()
 	}
 	return fmt.Sprintf("Conversations(%s)[%d]", scope, len(m.visible))
 }
@@ -110,15 +110,19 @@ func (m Model) framed(content string) string {
 
 // statusLine is the bottom line: what is being typed, or what is selected.
 func (m Model) statusLine() string {
-	if m.filtering {
-		return " " + m.theme.Column.Render("/") + m.theme.Value.Render(m.filter) +
-			m.theme.Column.Render("▏") + "  " + m.theme.Label.Render("enter keep · esc clear")
+	if m.filter.active {
+		return m.typingLine(m.filter)
 	}
 	if len(m.visible) == 0 {
 		return ""
 	}
-	lane := m.visible[m.cursor].node.Lane
-	return " " + m.theme.Label.Render(lane.ID)
+	return " " + m.theme.Label.Render(m.visible[m.cursor].node.Lane.ID)
+}
+
+// typingLine shows the filter being typed, on either screen.
+func (m Model) typingLine(f filterInput) string {
+	return " " + m.theme.Column.Render("/") + m.theme.Value.Render(f.text) +
+		m.theme.Column.Render("▏") + "  " + m.theme.Label.Render("enter keep · esc clear")
 }
 
 // shorten replaces the home directory with ~ so a path fits the facts block.

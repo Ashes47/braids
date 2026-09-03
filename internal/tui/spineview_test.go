@@ -133,3 +133,76 @@ func TestQuitWorksFromEitherScreen(t *testing.T) {
 		t.Error("q should quit from the spine")
 	}
 }
+
+func TestSpineFilterNarrowsAndTitles(t *testing.T) {
+	m := spineModel(t, demoSegments(), nil)
+	m = m.openSpine()
+
+	m = m.spineKey("/")
+	for _, k := range []string{"o", "p", "t", "i", "o", "n"} {
+		m = m.spineKey(k)
+	}
+	if len(m.spine.visible) != 1 {
+		t.Fatalf("filter left %d segments, want 1", len(m.spine.visible))
+	}
+	out := plain(m.renderSpine())
+	if !strings.Contains(out, "Spine(queue stall)(/option)[1]") {
+		t.Errorf("panel title should carry the filter:\n%s", out)
+	}
+	if strings.Contains(out, "why is the queue stalling") {
+		t.Error("filtered-out segment still drawn")
+	}
+
+	// Runs are matched on their summary, so a tool name finds them.
+	m = m.spineKey("esc")
+	m = m.spineKey("/")
+	for _, k := range []string{"b", "a", "s", "h"} {
+		m = m.spineKey(k)
+	}
+	if len(m.spine.visible) != 1 || m.spine.visible[0].Kind != graph.SegRun {
+		t.Errorf("filtering by tool should find the run, got %+v", m.spine.visible)
+	}
+}
+
+func TestSpineEscapePeelsFilterBeforeLeaving(t *testing.T) {
+	m := spineModel(t, demoSegments(), nil)
+	m = m.openSpine()
+	m = m.spineKey("/")
+	m = m.spineKey("o")
+
+	m = m.spineKey("esc")
+	if m.mode != spineMode {
+		t.Fatal("the first esc should clear the filter, not leave the spine")
+	}
+	if m.spine.filter.on() {
+		t.Error("filter should be cleared")
+	}
+	m = m.spineKey("esc")
+	if m.mode != mapMode {
+		t.Error("the second esc should return to the map")
+	}
+}
+
+func TestTypingQInAFilterDoesNotQuit(t *testing.T) {
+	m := spineModel(t, demoSegments(), nil)
+	m = m.openSpine()
+	m = m.spineKey("/")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	if cmd != nil {
+		t.Fatal("q while filtering must type a letter, not quit")
+	}
+	if got := updated.(Model).spine.filter.text; got != "q" {
+		t.Errorf("filter text = %q, want %q", got, "q")
+	}
+}
+
+func TestSpineFilterWithNoMatchesExplainsItself(t *testing.T) {
+	m := spineModel(t, demoSegments(), nil)
+	m = m.openSpine()
+	m.spine.filter.text = "zzzz"
+	m.spine.apply()
+	if !strings.Contains(plain(m.renderSpine()), `nothing matches "zzzz"`) {
+		t.Error("expected an empty-state message in the spine")
+	}
+}

@@ -282,6 +282,12 @@ tally, and a junction is always a landmark however dull the turn.
 `n` / `N` step between junctions. With 220 of them in one lane, that is the only
 practical way to find where a thread split.
 
+`/` filters the spine, matching a turn's text, its tools, its turn number and —
+for a collapsed run — its summary, so filtering for `bash` finds the stretches
+that used it. The field is the same one the map uses, so `/` behaves identically
+on both screens, and `esc` peels one layer at a time: leave the field, clear the
+text, then leave the screen.
+
 Not yet drawn: compaction seams (§5.1), subagent lanes (§6.6), and error marks.
 
 ### 6.3 Search — the front door
@@ -406,6 +412,7 @@ full copy of its prefix.
 | `⇥` | switch pane | `u` | undo |
 | `esc` | zoom out one level | `f` | filter (incl. project) |
 | `r` | rename lane | `m` | mark / multi-select |
+| `n` `N` | next / previous junction | | *(spine)* |
 | `1`–`9` | jump to lane | `?` | help |
 | `q` | quit | `r` | rebuild index |
 

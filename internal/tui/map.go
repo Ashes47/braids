@@ -63,10 +63,9 @@ type Model struct {
 	mode  mode
 	spine *spineState
 
-	all       []row
-	visible   []row
-	filter    string
-	filtering bool
+	all     []row
+	visible []row
+	filter  filterInput
 
 	// Columns that earn their space only sometimes: a fork column is dead
 	// weight until a fork exists, and a project column until there is more
@@ -147,17 +146,19 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.filtering {
-		return m.filterKey(msg)
-	}
-	if msg.String() == "q" || msg.String() == "ctrl+c" {
+	key := msg.String()
+	if key == "ctrl+c" || (key == "q" && !m.editing()) {
 		return m, tea.Quit
 	}
 	if m.mode == spineMode {
-		updated, _ := m.spineKey(msg.String())
-		return updated, nil
+		return m.spineKey(key), nil
 	}
-	switch msg.String() {
+	if m.filter.key(key) {
+		m.apply()
+		m.clamp()
+		return m, nil
+	}
+	switch key {
 	case "enter", "l", "right":
 		return m.openSpine(), nil
 	case "j", "down":
@@ -172,51 +173,31 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.cursor += m.bodyHeight() / 2
 	case "ctrl+u", "pgup":
 		m.cursor -= m.bodyHeight() / 2
-	case "/":
-		m.filtering = true
-	case "esc":
-		m.filter = ""
-		m.apply()
 	}
 	m.clamp()
 	return m, nil
 }
 
-func (m Model) filterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.filtering, m.filter = false, ""
-	case "enter":
-		m.filtering = false
-	case "ctrl+c":
-		return m, tea.Quit
-	case "backspace":
-		if r := []rune(m.filter); len(r) > 0 {
-			m.filter = string(r[:len(r)-1])
-		}
-	default:
-		if s := msg.String(); len(s) == 1 {
-			m.filter += s
-		}
+// editing reports whether a text field currently owns typed keys, so that "q"
+// types a letter instead of quitting.
+func (m Model) editing() bool {
+	if m.mode == spineMode && m.spine != nil {
+		return m.spine.filter.active
 	}
-	m.apply()
-	m.clamp()
-	return m, nil
+	return m.filter.active
 }
 
 // apply narrows the visible rows to those matching the filter. Filtering drops
 // the tree art: a partial forest with dangling connectors reads as corruption.
 func (m *Model) apply() {
-	if m.filter == "" {
+	if !m.filter.on() {
 		m.visible = m.all
 		return
 	}
-	needle := strings.ToLower(m.filter)
 	m.visible = nil
 	for _, r := range m.all {
 		l := r.node.Lane
-		hay := strings.ToLower(l.Title + " " + l.Project + " " + l.ID)
-		if strings.Contains(hay, needle) {
+		if m.filter.matches(l.Title + " " + l.Project + " " + l.ID) {
 			m.visible = append(m.visible, row{node: r.node})
 		}
 	}
@@ -293,8 +274,8 @@ func (m Model) render() string {
 }
 
 func (m Model) emptyMessage() string {
-	if m.filter != "" {
-		return fmt.Sprintf("nothing matches %q", m.filter)
+	if m.filter.on() {
+		return fmt.Sprintf("nothing matches %q", m.filter.text)
 	}
 	return "no conversations indexed yet — run: braids index"
 }

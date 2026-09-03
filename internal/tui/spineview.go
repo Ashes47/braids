@@ -13,11 +13,30 @@ import (
 
 // spineState is one conversation opened for reading.
 type spineState struct {
-	lane   index.LaneInfo
-	segs   []graph.Segment
-	cursor int
-	offset int
-	err    error
+	lane    index.LaneInfo
+	segs    []graph.Segment
+	visible []graph.Segment
+	filter  filterInput
+	cursor  int
+	offset  int
+	err     error
+}
+
+// apply narrows the spine to segments matching the filter. A run is matched on
+// its summary, so filtering for a tool finds the stretches that used it.
+func (s *spineState) apply() {
+	if !s.filter.on() {
+		s.visible = s.segs
+		return
+	}
+	s.visible = nil
+	for _, seg := range s.segs {
+		hay := fmt.Sprintf("t%d %s %s %s %s",
+			seg.Seq, seg.Role, seg.Preview, strings.Join(seg.Tools, " "), summarise(seg))
+		if s.filter.matches(hay) {
+			s.visible = append(s.visible, seg)
+		}
+	}
 }
 
 // openSpine loads the selected lane. Failure is shown in place rather than
@@ -29,16 +48,23 @@ func (m Model) openSpine() Model {
 	lane := m.visible[m.cursor].node.Lane
 	segs, err := m.loadSpine(lane.ID)
 	m.spine = &spineState{lane: lane, segs: segs, err: err}
+	m.spine.apply()
 	m.mode = spineMode
 	return m
 }
 
-func (m Model) spineKey(key string) (Model, bool) {
+func (m Model) spineKey(key string) Model {
 	s := m.spine
+	if s.filter.key(key) {
+		s.apply()
+		m.clampSpine()
+		return m
+	}
 	switch key {
 	case "esc", "backspace", "h", "left":
 		m.mode = mapMode
 		m.spine = nil
+		return m
 	case "j", "down":
 		s.cursor++
 	case "k", "up":
@@ -46,20 +72,18 @@ func (m Model) spineKey(key string) (Model, bool) {
 	case "g", "home":
 		s.cursor = 0
 	case "G", "end":
-		s.cursor = len(s.segs) - 1
+		s.cursor = len(s.visible) - 1
 	case "ctrl+d", "pgdown":
 		s.cursor += m.bodyHeight() / 2
 	case "ctrl+u", "pgup":
 		s.cursor -= m.bodyHeight() / 2
 	case "n":
-		s.cursor = nextJunction(s.segs, s.cursor, 1)
+		s.cursor = nextJunction(s.visible, s.cursor, 1)
 	case "N":
-		s.cursor = nextJunction(s.segs, s.cursor, -1)
-	default:
-		return m, false
+		s.cursor = nextJunction(s.visible, s.cursor, -1)
 	}
 	m.clampSpine()
-	return m, true
+	return m
 }
 
 func (m *Model) clampSpine() {
@@ -67,8 +91,8 @@ func (m *Model) clampSpine() {
 	if s == nil {
 		return
 	}
-	if s.cursor >= len(s.segs) {
-		s.cursor = len(s.segs) - 1
+	if s.cursor >= len(s.visible) {
+		s.cursor = len(s.visible) - 1
 	}
 	if s.cursor < 0 {
 		s.cursor = 0
@@ -103,16 +127,16 @@ func (m Model) renderSpine() string {
 		for range m.bodyHeight() - 1 {
 			b.WriteString(m.framed(blank) + "\n")
 		}
-	case len(s.segs) == 0:
-		b.WriteString(m.framed(padRight(" "+m.theme.Empty.Render("this conversation has no turns"), m.contentWidth())))
+	case len(s.visible) == 0:
+		b.WriteString(m.framed(padRight(" "+m.theme.Empty.Render(m.spineEmptyMessage()), m.contentWidth())))
 		b.WriteString("\n")
 		for range m.bodyHeight() - 1 {
 			b.WriteString(m.framed(blank) + "\n")
 		}
 	default:
-		end := min(s.offset+m.bodyHeight(), len(s.segs))
+		end := min(s.offset+m.bodyHeight(), len(s.visible))
 		for i := s.offset; i < end; i++ {
-			b.WriteString(m.framed(m.renderSegment(s.segs[i], i == s.cursor)))
+			b.WriteString(m.framed(m.renderSegment(s.visible[i], i == s.cursor)))
 			b.WriteString("\n")
 		}
 		for range m.bodyHeight() - (end - s.offset) {
@@ -121,8 +145,19 @@ func (m Model) renderSpine() string {
 	}
 	b.WriteString(m.panelBottom())
 	b.WriteString("\n")
-	b.WriteString(" " + m.theme.Label.Render(s.lane.ID))
+	if s.filter.active {
+		b.WriteString(m.typingLine(s.filter))
+	} else {
+		b.WriteString(" " + m.theme.Label.Render(s.lane.ID))
+	}
 	return b.String()
+}
+
+func (m Model) spineEmptyMessage() string {
+	if m.spine.filter.on() {
+		return fmt.Sprintf("nothing matches %q", m.spine.filter.text)
+	}
+	return "this conversation has no turns"
 }
 
 func (m Model) spineTitle() string {
@@ -130,7 +165,11 @@ func (m Model) spineTitle() string {
 	if name == "" {
 		name = shortID(m.spine.lane.ID)
 	}
-	return fmt.Sprintf("Spine(%s)[%d]", truncate(name, 40), len(m.spine.segs))
+	scope := ""
+	if m.spine.filter.on() {
+		scope = "(" + m.spine.filter.label() + ")"
+	}
+	return fmt.Sprintf("Spine(%s)%s[%d]", truncate(name, 40), scope, len(m.spine.visible))
 }
 
 // spineInfo swaps the map's facts for the ones that matter inside a lane.
@@ -150,7 +189,7 @@ func (m Model) spineInfo() string {
 	}
 	keys := []hint{
 		{"j/k", "move"},
-		{"g/G", "first/last"},
+		{"/", "filter"},
 		{"n/N", "next junction"},
 		{"esc", "back to map"},
 	}

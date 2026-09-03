@@ -212,7 +212,7 @@ func TestFilterNarrowsAndClears(t *testing.T) {
 func TestFilterWithNoMatchesExplainsItself(t *testing.T) {
 	lanes := []index.LaneInfo{laneInfo("a", "gcsfuse", "app", 5, time.Hour)}
 	m := newTestModel(t, forestOf(lanes, nil))
-	m.filter = "zzz"
+	m.filter.text = "zzz"
 	m.apply()
 	if out := plain(m.render()); !strings.Contains(out, `nothing matches "zzz"`) {
 		t.Errorf("expected an empty-state message:\n%s", out)

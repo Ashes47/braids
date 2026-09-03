@@ -18,7 +18,7 @@ import (
 // schemaVersion is bumped whenever the tables change. The index holds no unique
 // state — it rebuilds from the transcripts in seconds — so an old schema is
 // dropped and recreated rather than migrated.
-const schemaVersion = 3
+const schemaVersion = 4
 
 const dropAll = `
 DROP TABLE IF EXISTS parts;
@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS lanes (
 	project TEXT NOT NULL,
 	path    TEXT NOT NULL,
 	title   TEXT NOT NULL,
+	cwd     TEXT NOT NULL DEFAULT '',
 	created INTEGER NOT NULL DEFAULT 0,
 	updated INTEGER NOT NULL,
 	size    INTEGER NOT NULL,
@@ -181,8 +182,8 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 		}
 	}
 	insertLane, err := tx.PrepareContext(ctx,
-		`INSERT INTO lanes (id,source,project,path,title,created,updated,size,msg_count,part_count) `+
-			`VALUES (?,?,?,?,?,?,?,?,?,?)`)
+		`INSERT INTO lanes (id,source,project,path,title,cwd,created,updated,size,msg_count,part_count) `+
+			`VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return Stats{}, fmt.Errorf("prepare lane insert: %w", err)
 	}
@@ -203,7 +204,7 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 
 	stats := Stats{Lanes: len(lanes)}
 	for _, lane := range lanes {
-		lane.Title = titleOf(ctx, src, lane)
+		lane = enrich(ctx, src, lane)
 		var laneMsgs, laneParts int
 		err := src.Messages(ctx, lane, func(m model.Message) error {
 			stats.Messages++
@@ -229,7 +230,7 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 			return Stats{}, fmt.Errorf("index lane %s: %w", lane.ID, err)
 		}
 		if _, err := insertLane.ExecContext(ctx, lane.ID, lane.Source, lane.Project,
-			lane.Path, lane.Title, unixOrZero(lane.Created), lane.Updated.Unix(),
+			lane.Path, lane.Title, lane.Cwd, unixOrZero(lane.Created), lane.Updated.Unix(),
 			lane.Size, laneMsgs, laneParts); err != nil {
 			return Stats{}, fmt.Errorf("insert lane %s: %w", lane.ID, err)
 		}
@@ -300,18 +301,18 @@ func (ix *Index) Sync(ctx context.Context, src store.Source) (Stats, error) {
 	return stats, nil
 }
 
-// titleOf asks the Source for a lane's title, falling back to none. A missing
-// title is cosmetic, so it must never fail an index.
-func titleOf(ctx context.Context, src store.Source, lane model.Lane) string {
-	titler, ok := src.(store.Titler)
+// enrich fills in the details that need the transcript open. They are cosmetic
+// or convenience, so a failure must never fail an index.
+func enrich(ctx context.Context, src store.Source, lane model.Lane) model.Lane {
+	enricher, ok := src.(store.Enricher)
 	if !ok {
-		return lane.Title
+		return lane
 	}
-	title, err := titler.Title(ctx, lane)
+	enriched, err := enricher.Enrich(ctx, lane)
 	if err != nil {
-		return lane.Title
+		return lane
 	}
-	return title
+	return enriched
 }
 
 func deleteLane(ctx context.Context, tx *sql.Tx, laneID string) error {
@@ -332,7 +333,7 @@ func replaceLane(ctx context.Context, tx *sql.Tx, src store.Source, lane model.L
 	if err := deleteLane(ctx, tx, lane.ID); err != nil {
 		return 0, 0, err
 	}
-	lane.Title = titleOf(ctx, src, lane)
+	lane = enrich(ctx, src, lane)
 	insertPart, err := tx.PrepareContext(ctx,
 		`INSERT INTO parts (body,lane_id,msg_id,kind,role,tool,at) VALUES (?,?,?,?,?,?,?)`)
 	if err != nil {
@@ -369,9 +370,9 @@ func replaceLane(ctx context.Context, tx *sql.Tx, src store.Source, lane model.L
 		return 0, 0, fmt.Errorf("index lane %s: %w", lane.ID, err)
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO lanes (id,source,project,path,title,created,updated,size,msg_count,part_count) `+
-			`VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		lane.ID, lane.Source, lane.Project, lane.Path, lane.Title,
+		`INSERT INTO lanes (id,source,project,path,title,cwd,created,updated,size,msg_count,part_count) `+
+			`VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		lane.ID, lane.Source, lane.Project, lane.Path, lane.Title, lane.Cwd,
 		unixOrZero(lane.Created), lane.Updated.Unix(), lane.Size, msgs, parts); err != nil {
 		return 0, 0, fmt.Errorf("insert lane %s: %w", lane.ID, err)
 	}
@@ -569,7 +570,7 @@ func (ix *Index) Timelines(ctx context.Context) (map[string][]time.Time, error) 
 // Lanes returns every indexed lane, most recently updated first.
 func (ix *Index) Lanes(ctx context.Context) ([]LaneInfo, error) {
 	rows, err := ix.db.QueryContext(ctx,
-		`SELECT id,source,project,path,title,created,updated,size,msg_count,part_count FROM lanes ORDER BY updated DESC`)
+		`SELECT id,source,project,path,title,cwd,created,updated,size,msg_count,part_count FROM lanes ORDER BY updated DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list lanes: %w", err)
 	}
@@ -579,7 +580,7 @@ func (ix *Index) Lanes(ctx context.Context) ([]LaneInfo, error) {
 	for rows.Next() {
 		var l LaneInfo
 		var created, updated int64
-		if err := rows.Scan(&l.ID, &l.Source, &l.Project, &l.Path, &l.Title,
+		if err := rows.Scan(&l.ID, &l.Source, &l.Project, &l.Path, &l.Title, &l.Cwd,
 			&created, &updated, &l.Size, &l.Messages, &l.Parts); err != nil {
 			return nil, fmt.Errorf("scan lane: %w", err)
 		}

@@ -57,7 +57,7 @@ func TestLanesDiscoversTranscripts(t *testing.T) {
 		"a.jsonl": {
 			`{"type":"ai-title","aiTitle":"model wrote this","sessionId":"a"}`,
 			`{"type":"custom-title","customTitle":"user wrote this","sessionId":"a"}`,
-			`{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"hi"}}`,
+			`{"type":"user","uuid":"u1","parentUuid":null,"cwd":"/Users/me/src/app","message":{"role":"user","content":"hi"}}`,
 		},
 		"b.jsonl": {
 			`{"type":"agent-name","agentName":"fallback name","sessionId":"b"}`,
@@ -90,16 +90,19 @@ func TestLanesDiscoversTranscripts(t *testing.T) {
 		t.Errorf("Lanes should not read titles, got %q", a.Title)
 	}
 
-	title, err := src.Title(context.Background(), a)
+	enriched, err := src.Enrich(context.Background(), a)
 	if err != nil {
-		t.Fatalf("Title: %v", err)
+		t.Fatalf("Enrich: %v", err)
 	}
-	if title != "user wrote this" {
-		t.Errorf("a title the user set must win over one the model wrote: got %q", title)
+	if enriched.Title != "user wrote this" {
+		t.Errorf("a title the user set must win over one the model wrote: got %q", enriched.Title)
+	}
+	if enriched.Cwd != "/Users/me/src/app" {
+		t.Errorf("Cwd = %q, want the directory the conversation ran in", enriched.Cwd)
 	}
 	b := laneByID(t, lanes, "b")
-	if title, err := src.Title(context.Background(), b); err != nil || title != "fallback name" {
-		t.Errorf("agent name fallback: got %q, %v", title, err)
+	if got, err := src.Enrich(context.Background(), b); err != nil || got.Title != "fallback name" {
+		t.Errorf("agent name fallback: got %q, %v", got.Title, err)
 	}
 }
 

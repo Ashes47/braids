@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/Ashes47/braids/internal/core/graph"
@@ -138,26 +139,26 @@ func (m Model) closeSpine() Model {
 	return m
 }
 
-func (m Model) spineKey(key string) Model {
+func (m Model) spineKey(key string) (Model, tea.Cmd) {
 	s := m.spine
 	if s.naming.active {
-		return m.namingKey(key)
+		return m.namingKey(key), nil
 	}
 	if s.filter.key(key) {
 		s.apply()
 		m.clampSpine()
-		return m
+		return m, nil
 	}
 	switch key {
 	case "esc", "backspace", "h", "left":
-		return m.closeSpine()
+		return m.closeSpine(), nil
 	case "enter", "l", "right":
 		row := s.current()
 		if row.fork == nil {
 			s.notice, s.failed = "no branch on this line — press b to make one, or n to find the next split", true
-			return m
+			return m, nil
 		}
-		return m.openNode(row.fork, true)
+		return m.openNode(row.fork, true), nil
 	case "j", "down":
 		s.cursor++
 	case "k", "up":
@@ -171,14 +172,20 @@ func (m Model) spineKey(key string) Model {
 	case "ctrl+u", "pgup":
 		s.cursor -= m.bodyHeight() / 2
 	case "b":
-		return m.startBranch()
+		return m.startBranch(), nil
+	case "y":
+		updated, cmd := m.copyResume()
+		return updated.(Model), cmd
+	case "o":
+		updated, cmd := m.openTerminal()
+		return updated.(Model), cmd
 	case "n":
 		s.cursor = nextJunction(s.visible, s.cursor, 1)
 	case "N":
 		s.cursor = nextJunction(s.visible, s.cursor, -1)
 	}
 	m.clampSpine()
-	return m
+	return m, nil
 }
 
 func (m *Model) clampSpine() {
@@ -327,7 +334,7 @@ func (m Model) spineInfo() string {
 	keys := []hint{
 		{"j/k", "move"}, {"b", "branch here"},
 		{"/", "filter"}, {"↵", "open branch"},
-		{"n/N", "next split"}, {"esc", "back"},
+		{"n/N", "next split"}, {"y/o", "copy / open"},
 	}
 	return m.factsBlock(facts, keys)
 }

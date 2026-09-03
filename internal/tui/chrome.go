@@ -41,8 +41,8 @@ func (m Model) facts() []fact {
 func hints() []hint {
 	return []hint{
 		{"j/k", "move"}, {"↵", "open spine"},
-		{"/", "filter"}, {"g/G", "first/last"},
-		{"esc", "clear filter"}, {"q", "quit"},
+		{"/", "filter"}, {"y", "copy resume"},
+		{"o", "open terminal"}, {"q", "quit"},
 	}
 }
 
@@ -129,10 +129,21 @@ func (m Model) statusLine() string {
 	if m.filter.active {
 		return m.typingLine(m.filter)
 	}
+	if m.notice != "" {
+		return " " + m.noticeStyle(m.failed).Render(truncate(m.notice, m.width-2))
+	}
 	if len(m.visible) == 0 {
 		return ""
 	}
 	return " " + m.theme.Label.Render(m.visible[m.cursor].node.Lane.ID)
+}
+
+// noticeStyle distinguishes an outcome that worked from one that did not.
+func (m Model) noticeStyle(failed bool) lipgloss.Style {
+	if failed {
+		return m.theme.Column
+	}
+	return m.theme.Alive
 }
 
 // typingLine shows the filter being typed, on either screen.

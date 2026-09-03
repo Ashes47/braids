@@ -95,6 +95,9 @@ type Lane struct {
 	Project string
 	Path    string
 	Title   string
+	// Cwd is the directory the conversation ran in. Resuming from anywhere else
+	// files the transcript under a different project, so a launcher needs it.
+	Cwd string
 	// Created is when the transcript file itself came into existence. It is
 	// the only reliable evidence of which of two lanes forked from the other,
 	// because a fork copies the parent's records — timestamps included — so

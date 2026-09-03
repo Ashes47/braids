@@ -138,9 +138,9 @@ func TestSpineFilterNarrowsAndTitles(t *testing.T) {
 	m := spineModel(t, demoSegments(), nil)
 	m = m.openSpine()
 
-	m = m.spineKey("/")
+	m, _ = m.spineKey("/")
 	for _, k := range []string{"o", "p", "t", "i", "o", "n"} {
-		m = m.spineKey(k)
+		m, _ = m.spineKey(k)
 	}
 	if len(m.spine.visible) != 1 {
 		t.Fatalf("filter left %d rows, want 1", len(m.spine.visible))
@@ -154,10 +154,10 @@ func TestSpineFilterNarrowsAndTitles(t *testing.T) {
 	}
 
 	// Runs are matched on their summary, so a tool name finds them.
-	m = m.spineKey("esc")
-	m = m.spineKey("/")
+	m, _ = m.spineKey("esc")
+	m, _ = m.spineKey("/")
 	for _, k := range []string{"b", "a", "s", "h"} {
-		m = m.spineKey(k)
+		m, _ = m.spineKey(k)
 	}
 	if len(m.spine.visible) != 1 || m.spine.visible[0].seg.Kind != graph.SegRun {
 		t.Errorf("filtering by tool should find the run, got %+v", m.spine.visible)
@@ -167,17 +167,17 @@ func TestSpineFilterNarrowsAndTitles(t *testing.T) {
 func TestSpineEscapePeelsFilterBeforeLeaving(t *testing.T) {
 	m := spineModel(t, demoSegments(), nil)
 	m = m.openSpine()
-	m = m.spineKey("/")
-	m = m.spineKey("o")
+	m, _ = m.spineKey("/")
+	m, _ = m.spineKey("o")
 
-	m = m.spineKey("esc")
+	m, _ = m.spineKey("esc")
 	if m.mode != spineMode {
 		t.Fatal("the first esc should clear the filter, not leave the spine")
 	}
 	if m.spine.filter.on() {
 		t.Error("filter should be cleared")
 	}
-	m = m.spineKey("esc")
+	m, _ = m.spineKey("esc")
 	if m.mode != mapMode {
 		t.Error("the second esc should return to the map")
 	}
@@ -186,7 +186,7 @@ func TestSpineEscapePeelsFilterBeforeLeaving(t *testing.T) {
 func TestTypingQInAFilterDoesNotQuit(t *testing.T) {
 	m := spineModel(t, demoSegments(), nil)
 	m = m.openSpine()
-	m = m.spineKey("/")
+	m, _ = m.spineKey("/")
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 	if cmd != nil {
@@ -216,15 +216,15 @@ func TestBranchFromASpineTurn(t *testing.T) {
 		return "newlane01234", nil
 	}
 	m = m.openSpine()
-	m = m.spineKey("j") // move to the collapsed run
+	m, _ = m.spineKey("j") // move to the collapsed run
 
-	m = m.spineKey("b")
+	m, _ = m.spineKey("b")
 	if !strings.Contains(plain(m.renderSpine()), "collapsed run") {
 		t.Error("branching from a run should explain why it cannot")
 	}
 
-	m = m.spineKey("k") // back to the first turn
-	m = m.spineKey("b")
+	m, _ = m.spineKey("k") // back to the first turn
+	m, _ = m.spineKey("b")
 	if !m.spine.naming.active {
 		t.Fatal("b should open the name field")
 	}
@@ -232,9 +232,9 @@ func TestBranchFromASpineTurn(t *testing.T) {
 		t.Errorf("suggested name = %q", got)
 	}
 	// The suggestion is editable.
-	m = m.spineKey("backspace")
-	m = m.spineKey("!")
-	m = m.spineKey("enter")
+	m, _ = m.spineKey("backspace")
+	m, _ = m.spineKey("!")
+	m, _ = m.spineKey("enter")
 
 	if gotLane != "lane1234abcd" || gotTurn != 1 || gotName != "queue-stallin!" {
 		t.Errorf("branch called with (%q, %d, %q)", gotLane, gotTurn, gotName)
@@ -249,8 +249,8 @@ func TestBranchFailureIsShown(t *testing.T) {
 	m := spineModel(t, demoSegments(), nil)
 	m.branch = func(string, int, string) (string, error) { return "", errors.New("disk is full") }
 	m = m.openSpine()
-	m = m.spineKey("b")
-	m = m.spineKey("enter")
+	m, _ = m.spineKey("b")
+	m, _ = m.spineKey("enter")
 	if !strings.Contains(plain(m.renderSpine()), "disk is full") {
 		t.Error("a failed branch must be reported")
 	}
@@ -260,7 +260,7 @@ func TestBranchUnavailableWithoutASource(t *testing.T) {
 	m := spineModel(t, demoSegments(), nil)
 	m.branch = nil
 	m = m.openSpine()
-	m = m.spineKey("b")
+	m, _ = m.spineKey("b")
 	if m.spine.naming.active {
 		t.Error("the name field should not open when branching is unavailable")
 	}
@@ -331,12 +331,12 @@ func TestEnterDescendsIntoABranchAndEscapeComesBack(t *testing.T) {
 	forkChild(node, "kid00000001", "the branch", 9, 1)
 
 	m = m.openSpine()
-	m = m.spineKey("j") // onto the fork row
+	m, _ = m.spineKey("j") // onto the fork row
 	if m.spine.current().fork == nil {
 		t.Fatal("expected the cursor on the fork row")
 	}
 
-	m = m.spineKey("enter")
+	m, _ = m.spineKey("enter")
 	if m.spine.lane.ID != "kid00000001" {
 		t.Fatalf("enter should open the branch, got lane %q", m.spine.lane.ID)
 	}
@@ -344,11 +344,11 @@ func TestEnterDescendsIntoABranchAndEscapeComesBack(t *testing.T) {
 		t.Fatalf("descending should remember where we came from, stack = %d", len(m.stack))
 	}
 
-	m = m.spineKey("esc")
+	m, _ = m.spineKey("esc")
 	if m.spine == nil || m.spine.lane.ID != "lane1234abcd" {
 		t.Fatal("esc should return to the parent conversation, not the map")
 	}
-	m = m.spineKey("esc")
+	m, _ = m.spineKey("esc")
 	if m.mode != mapMode {
 		t.Error("a second esc should return to the map")
 	}
@@ -360,8 +360,8 @@ func TestBranchingFromAForkRowExplainsItself(t *testing.T) {
 	m.branch = func(string, int, string) (string, error) { return "x", nil }
 
 	m = m.openSpine()
-	m = m.spineKey("j")
-	m = m.spineKey("b")
+	m, _ = m.spineKey("j")
+	m, _ = m.spineKey("b")
 	if m.spine.naming.active {
 		t.Error("b on a fork row should not open the name field")
 	}

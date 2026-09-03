@@ -472,6 +472,17 @@ Topology reassembles itself, because forks are detected by shared uuids.
 **Merge (later).** Splice a sibling's unique nodes onto the current leaf with
 fresh uuids. Real messages, not a summary. Gated behind a preview.
 
+**Continue a conversation.** `y` copies `claude --resume <id> --name <title>`
+through the terminal's own copy escape (OSC 52), so it works over SSH with no
+helper binary. `o` opens a terminal when `BRAIDS_SPAWN` names one — a template
+understanding `{cmd} {id} {name} {dir}` — and otherwise copies the command and
+says how to configure a launcher.
+
+braids does not guess at a terminal. Terminals differ in whether they can be
+told to run a command at all, and the working directory matters: resuming from
+elsewhere files the transcript under a different project, so a lane carries the
+`cwd` its conversation ran in.
+
 **Delete.** Move files to trash. Never cascades. Never allowed on a running lane.
 
 **Branch a running lane — allowed.** Forking writes a new file, so the running

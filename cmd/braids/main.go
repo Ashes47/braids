@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -55,6 +56,11 @@ search flags:
 
 common flags:
   --db PATH        index location (default $BRAIDS_DB or ~/.braids/index.db)
+
+environment:
+  BRAIDS_SPAWN     command template for 'o' (open a terminal), understanding
+                   {cmd} {id} {name} {dir}. Unset, 'o' copies the command.
+                   e.g. tmux new-window -c {dir} -n {name} '{cmd}'
 `
 
 func main() {
@@ -189,6 +195,10 @@ func cmdMap(args []string, out *printer) error {
 		LoadSpine: tui.SpineLoader(ctx, ix),
 		Origins:   provenance.All(),
 		Changes:   changes,
+		ResumeCommand: func(laneID string) (string, error) {
+			return resumeCommand(ctx, ix, laneID)
+		},
+		Spawn: spawner(ctx, ix),
 		Branch: func(laneID string, turn int, name string) (string, error) {
 			return branchAt(ctx, ix, provenance, laneID, turn, name)
 		},
@@ -385,6 +395,65 @@ func nameFlag(name string) string {
 		return ""
 	}
 	return fmt.Sprintf(" --name %q", name)
+}
+
+// resumeCommand is what the user would type to continue a conversation.
+func resumeCommand(ctx context.Context, ix *index.Index, laneID string) (string, error) {
+	lane, err := findLane(ctx, ix, laneID)
+	if err != nil {
+		return "", err
+	}
+	command := "claude --resume " + lane.ID
+	if lane.Title != "" {
+		command += fmt.Sprintf(" --name %q", lane.Title)
+	}
+	return command, nil
+}
+
+// spawner builds a launcher from BRAIDS_SPAWN, or reports none.
+//
+// braids does not guess at a terminal. Terminals differ in whether they can be
+// told to run a command at all — Warp exposes no such hook — so the default is
+// to hand over the command and let the user place it.
+//
+// The template understands {cmd}, {id}, {name} and {dir}. For example:
+//
+//	BRAIDS_SPAWN='tmux new-window -c {dir} -n {name} "{cmd}"'
+func spawner(ctx context.Context, ix *index.Index) func(string) error {
+	template := os.Getenv("BRAIDS_SPAWN")
+	if strings.TrimSpace(template) == "" {
+		return nil
+	}
+	return func(laneID string) error {
+		lane, err := findLane(ctx, ix, laneID)
+		if err != nil {
+			return err
+		}
+		command, err := resumeCommand(ctx, ix, laneID)
+		if err != nil {
+			return err
+		}
+		dir := lane.Cwd
+		if dir == "" {
+			dir = filepath.Dir(lane.Path)
+		}
+		expanded := strings.NewReplacer(
+			"{cmd}", command,
+			"{id}", lane.ID,
+			"{name}", lane.Title,
+			"{dir}", dir,
+		).Replace(template)
+
+		// Started, not run to completion: the launcher opens a window and the
+		// map keeps its own terminal.
+		launch := exec.Command("sh", "-c", expanded)
+		launch.Dir = dir
+		if err := launch.Start(); err != nil {
+			return fmt.Errorf("BRAIDS_SPAWN failed: %w", err)
+		}
+		go launch.Wait() //nolint:errcheck // reaped so it cannot become a zombie
+		return nil
+	}
 }
 
 // findLane resolves a lane by ID prefix, refusing an ambiguous one rather than

@@ -104,10 +104,16 @@ func (s *Source) Lanes(ctx context.Context) ([]model.Lane, error) {
 	return lanes, nil
 }
 
-// Title reads a lane's display title, preferring one the user set over one the
-// model generated.
-func (s *Source) Title(_ context.Context, lane model.Lane) (string, error) {
-	return readTitle(lane.Path)
+// Enrich reads the details that need the transcript open: the display title,
+// preferring one the user set over one the model generated, and the directory
+// the conversation ran in.
+func (s *Source) Enrich(_ context.Context, lane model.Lane) (model.Lane, error) {
+	title, cwd, err := readMeta(lane.Path)
+	if err != nil {
+		return lane, err
+	}
+	lane.Title, lane.Cwd = title, cwd
+	return lane, nil
 }
 
 // Messages streams a lane's messages in file order, skipping the bookkeeping
@@ -172,12 +178,15 @@ func projectName(slug string) string {
 	return parts[len(parts)-1]
 }
 
-// readTitle returns the lane's display title, preferring a title the user set
-// over one the model generated.
-func readTitle(path string) (string, error) {
+// readMeta scans a transcript once for the details that are not in its
+// filename: the titles it carries, and the directory it ran in.
+//
+// Titles are rewritten as a conversation goes on, so the scan cannot stop early
+// for them; the working directory never changes, so the first one wins.
+func readMeta(path string) (title, cwd string, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("open %s: %w", path, err)
+		return "", "", fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close() //nolint:errcheck // read-only
 
@@ -185,6 +194,14 @@ func readTitle(path string) (string, error) {
 	sc := newScanner(f)
 	for sc.Scan() {
 		line := sc.Bytes()
+		if cwd == "" && bytes.Contains(line, []byte(`"cwd"`)) {
+			var r struct {
+				Cwd string `json:"cwd"`
+			}
+			if json.Unmarshal(line, &r) == nil {
+				cwd = r.Cwd
+			}
+		}
 		if !hasTitleHint(line) {
 			continue
 		}
@@ -202,9 +219,9 @@ func readTitle(path string) (string, error) {
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return "", fmt.Errorf("scan %s: %w", path, err)
+		return "", "", fmt.Errorf("scan %s: %w", path, err)
 	}
-	return firstNonEmpty(custom, ai, agent), nil
+	return firstNonEmpty(custom, ai, agent), cwd, nil
 }
 
 func hasTitleHint(line []byte) bool {
@@ -377,6 +394,6 @@ func flatten(raw json.RawMessage) string {
 
 // compile-time check that Source satisfies the port.
 var (
-	_ store.Source = (*Source)(nil)
-	_ store.Titler = (*Source)(nil)
+	_ store.Source   = (*Source)(nil)
+	_ store.Enricher = (*Source)(nil)
 )

@@ -36,13 +36,13 @@ type BranchRequest struct {
 	Name string
 }
 
-// Titler reports a lane's display title.
+// Enricher fills in the lane details that cost a read of the transcript, such
+// as its title and working directory.
 //
-// It is separate from Lanes because finding a title means reading the whole
-// transcript, while listing lanes should cost a directory scan. Callers fetch a
-// title only when they are already re-reading the lane.
-type Titler interface {
-	Title(ctx context.Context, lane model.Lane) (string, error)
+// It is separate from Lanes because listing should cost a directory scan.
+// Callers enrich a lane only when they are already re-reading it.
+type Enricher interface {
+	Enrich(ctx context.Context, lane model.Lane) (model.Lane, error)
 }
 
 // Brancher creates a new lane from a prefix of an existing one.

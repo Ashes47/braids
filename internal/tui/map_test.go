@@ -410,3 +410,88 @@ func TestSnapshotMapSaysNothingAboutLive(t *testing.T) {
 		t.Error("Init should still ask for the background colour")
 	}
 }
+
+func launcherModel(t *testing.T, spawn func(string) error) Model {
+	t.Helper()
+	lanes := []index.LaneInfo{laneInfo("abc123def456", "queue stall", "app", 5, time.Hour)}
+	m := NewModel(forestOf(lanes, nil), Options{
+		ASCII: true,
+		ResumeCommand: func(id string) (string, error) {
+			return `claude --resume ` + id + ` --name "queue stall"`, nil
+		},
+		Spawn:     spawn,
+		LoadSpine: func(string) ([]graph.Segment, error) { return nil, nil },
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 90, 20
+	return m
+}
+
+func TestCopyResumePutsTheCommandOnTheClipboard(t *testing.T) {
+	m := launcherModel(t, nil)
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	m = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("y should issue a clipboard command")
+	}
+	// The message type is internal to bubbletea; asserting it is not nil and
+	// is not a plain nil-returning command is as far as a test can honestly go.
+	if cmd() == nil {
+		t.Error("the clipboard command produced no message")
+	}
+	if out := plain(m.render()); !strings.Contains(out, "copied: claude --resume abc123def456") {
+		t.Errorf("expected the command in the status line:\n%s", out)
+	}
+}
+
+func TestOpenTerminalWithoutAConfigCopiesInstead(t *testing.T) {
+	m := launcherModel(t, nil)
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
+	m = updated.(Model)
+
+	if cmd == nil {
+		t.Error("with no launcher configured, o should still copy the command")
+	}
+	out := plain(m.render())
+	if !strings.Contains(out, "BRAIDS_SPAWN") {
+		t.Errorf("expected an explanation of how to configure one:\n%s", out)
+	}
+}
+
+func TestOpenTerminalUsesTheConfiguredLauncher(t *testing.T) {
+	var launched string
+	m := launcherModel(t, func(id string) error {
+		launched = id
+		return nil
+	})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
+	m = updated.(Model)
+
+	if launched != "abc123def456" {
+		t.Errorf("launcher called with %q", launched)
+	}
+	if !strings.Contains(plain(m.render()), "opened a terminal") {
+		t.Error("expected confirmation")
+	}
+}
+
+func TestLauncherFailureIsReported(t *testing.T) {
+	m := launcherModel(t, func(string) error { return errors.New("tmux is not running") })
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
+	if !strings.Contains(plain(updated.(Model).render()), "tmux is not running") {
+		t.Error("a failed launch must be reported")
+	}
+}
+
+func TestCopyResumeWorksFromTheSpineToo(t *testing.T) {
+	m := launcherModel(t, nil)
+	m = m.openSpine()
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if cmd == nil {
+		t.Fatal("y in the spine should also copy")
+	}
+	if !strings.Contains(plain(updated.(Model).renderSpine()), "copied:") {
+		t.Error("the spine should confirm the copy")
+	}
+}

@@ -54,6 +54,12 @@ type Options struct {
 	// Changes signals that transcripts moved on disk. With it the map follows
 	// live sessions; without it the map is a snapshot.
 	Changes <-chan struct{}
+	// ResumeCommand builds the shell command that continues a conversation.
+	ResumeCommand func(laneID string) (string, error)
+	// Spawn opens a terminal already resumed into a conversation. Nil when the
+	// user has configured no way to launch one, which is the default: braids
+	// copies the command instead of guessing at their terminal.
+	Spawn func(laneID string) error
 }
 
 // changedMsg says transcripts moved and the map should catch up.
@@ -78,6 +84,11 @@ type Model struct {
 	branch    func(string, int, string) (string, error)
 	refresh   func() (*graph.Forest, error)
 	changes   <-chan struct{}
+	resumeCmd func(string) (string, error)
+	spawn     func(string) error
+
+	notice string
+	failed bool
 
 	mode  mode
 	spine *spineState
@@ -112,6 +123,8 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		branch:    opts.Branch,
 		refresh:   opts.Refresh,
 		changes:   opts.Changes,
+		resumeCmd: opts.ResumeCommand,
+		spawn:     opts.Spawn,
 		now:       time.Now,
 		width:     80,
 		height:    24,
@@ -249,7 +262,7 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	if m.mode == spineMode {
-		return m.spineKey(key), nil
+		return m.spineKey(key)
 	}
 	if m.filter.key(key) {
 		m.apply()
@@ -259,6 +272,10 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "enter", "l", "right":
 		return m.openSpine(), nil
+	case "y":
+		return m.copyResume()
+	case "o":
+		return m.openTerminal()
 	case "j", "down":
 		m.cursor++
 	case "k", "up":
@@ -274,6 +291,58 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	m.clamp()
 	return m, nil
+}
+
+// selectedLane is the conversation under the cursor on whichever screen is up.
+func (m Model) selectedLane() (string, bool) {
+	if m.mode == spineMode && m.spine != nil {
+		return m.spine.lane.ID, true
+	}
+	if m.cursor < len(m.visible) {
+		return m.visible[m.cursor].node.Lane.ID, true
+	}
+	return "", false
+}
+
+// copyResume puts the resume command on the clipboard. It goes through the
+// terminal's own copy escape, so it works over SSH and needs no helper binary.
+func (m Model) copyResume() (tea.Model, tea.Cmd) {
+	lane, ok := m.selectedLane()
+	if !ok || m.resumeCmd == nil {
+		return m.withNotice("nothing to copy", true), nil
+	}
+	command, err := m.resumeCmd(lane)
+	if err != nil {
+		return m.withNotice(err.Error(), true), nil
+	}
+	return m.withNotice("copied: "+command, false), tea.SetClipboard(command)
+}
+
+// openTerminal launches a session, or explains how to make that possible.
+func (m Model) openTerminal() (tea.Model, tea.Cmd) {
+	lane, ok := m.selectedLane()
+	if !ok {
+		return m, nil
+	}
+	if m.spawn == nil {
+		updated, cmd := m.copyResume()
+		return updated.(Model).withNotice(
+			"no terminal configured — command copied; set BRAIDS_SPAWN to open one", true), cmd
+	}
+	if err := m.spawn(lane); err != nil {
+		return m.withNotice(err.Error(), true), nil
+	}
+	return m.withNotice("opened a terminal for "+shortID(lane), false), nil
+}
+
+// withNotice records a one-line outcome for whichever screen is showing.
+func (m Model) withNotice(text string, failed bool) Model {
+	if m.mode == spineMode && m.spine != nil {
+		m.spine.notice, m.spine.failed = text, failed
+		return m
+	}
+	m.notice, m.failed = text, failed
+	return m
 }
 
 // editing reports whether a text field currently owns typed keys, so that "q"

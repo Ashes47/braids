@@ -73,9 +73,9 @@ func TestBranchWritesAPrefixAndLeavesTheSourceAlone(t *testing.T) {
 		if l.ID != branch.ID {
 			continue
 		}
-		title, err := s.Title(context.Background(), l)
-		if err != nil || title != "try another way" {
-			t.Errorf("branch title on reload = %q (%v)", title, err)
+		enriched, err := s.Enrich(context.Background(), l)
+		if err != nil || enriched.Title != "try another way" {
+			t.Errorf("branch title on reload = %q (%v)", enriched.Title, err)
 		}
 		got = collect(t, s, l)
 	}

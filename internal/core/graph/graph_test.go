@@ -18,6 +18,13 @@ func lane(id string, msgs int, updated time.Time) index.LaneInfo {
 	return li
 }
 
+// born stamps a lane's file creation time, the signal that settles fork
+// direction on platforms that report it.
+func born(li index.LaneInfo, t time.Time) index.LaneInfo {
+	li.Created = t
+	return li
+}
+
 // shared marks message m as present in both lanes at the given turn numbers.
 func shared(m, laneA string, seqA int, laneB string, seqB int) []index.Overlap {
 	return []index.Overlap{
@@ -27,18 +34,19 @@ func shared(m, laneA string, seqA int, laneB string, seqB int) []index.Overlap {
 }
 
 func TestBuildDetectsForkAndDirection(t *testing.T) {
-	// main runs 1..4; fork copies turns 1..2 and diverges afterwards.
-	// main's turn 3 was written before the fork existed, so main is the parent.
+	// main runs 1..4; fork copies turns 1..2 and diverges afterwards. The fork's
+	// own turn happens *before* main's turn 3 — the common case of forking and
+	// then carrying on in the original — so only the file birth time settles it.
 	lanes := []index.LaneInfo{
-		lane("main", 4, at(40)),
-		lane("fork", 3, at(50)),
+		born(lane("main", 4, at(40)), at(-10)),
+		born(lane("fork", 3, at(50)), at(5)),
 	}
 	var overlaps []index.Overlap
 	overlaps = append(overlaps, shared("m1", "main", 1, "fork", 1)...)
 	overlaps = append(overlaps, shared("m2", "main", 2, "fork", 2)...)
 	timelines := map[string][]time.Time{
 		"main": {at(0), at(10), at(20), at(30)},
-		"fork": {at(0), at(10), at(45)},
+		"fork": {at(0), at(10), at(15)}, // diverges before main does
 	}
 
 	f := Build(lanes, overlaps, timelines)
@@ -59,6 +67,7 @@ func TestBuildDetectsForkAndDirection(t *testing.T) {
 
 func TestBuildTreatsStrictPrefixAsParent(t *testing.T) {
 	// "stub" was forked and then abandoned, so it has no turns of its own.
+	// No birth times, so the graph must fall back on containment.
 	lanes := []index.LaneInfo{lane("stub", 2, at(10)), lane("grown", 4, at(60))}
 	var overlaps []index.Overlap
 	overlaps = append(overlaps, shared("m1", "stub", 1, "grown", 1)...)
@@ -77,7 +86,11 @@ func TestBuildTreatsStrictPrefixAsParent(t *testing.T) {
 func TestBuildChoosesNearestAncestor(t *testing.T) {
 	// root 1..6, mid forks at 2, leaf forks from mid at 4. leaf overlaps root
 	// too, but shares more with mid, so mid is the nearer ancestor.
-	lanes := []index.LaneInfo{lane("root", 6, at(60)), lane("mid", 5, at(70)), lane("leaf", 5, at(80))}
+	lanes := []index.LaneInfo{
+		born(lane("root", 6, at(60)), at(-30)),
+		born(lane("mid", 5, at(70)), at(-20)),
+		born(lane("leaf", 5, at(80)), at(-10)),
+	}
 	var overlaps []index.Overlap
 	overlaps = append(overlaps, shared("m1", "root", 1, "mid", 1)...)
 	overlaps = append(overlaps, shared("m2", "root", 2, "mid", 2)...)

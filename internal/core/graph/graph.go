@@ -40,10 +40,13 @@ type key struct{ a, b string } // a < b, so each unordered pair appears once
 // records verbatim into a fork, so a shared message ID proves a shared prefix
 // and the last shared turn is the fork point.
 //
-// Direction — which lane is the parent — is decided by the first turn *after*
-// the shared prefix. The parent's own continuation was written before the fork
-// existed, so whichever lane diverges earlier is the parent. A lane that is a
-// strict prefix of another has no divergence at all and is always the parent.
+// Direction — which lane is the parent — is decided by file creation time,
+// because nothing inside the files can settle it: a fork copies the parent's
+// records verbatim, timestamps included, and people routinely fork and *then*
+// carry on in the parent, so "diverged first" is not evidence of anything.
+// Where the platform reports no birth time, weaker evidence is used in order:
+// a lane that is a strict prefix of another is its parent, then the longer
+// lane is taken as the parent.
 func Build(lanes []index.LaneInfo, overlaps []index.Overlap, timelines map[string][]time.Time) *Forest {
 	forest := &Forest{ByID: make(map[string]*Node, len(lanes))}
 	for _, l := range lanes {
@@ -54,7 +57,7 @@ func Build(lanes []index.LaneInfo, overlaps []index.Overlap, timelines map[strin
 	// nearest ancestor, so keep the strongest relationship seen.
 	best := make(map[string]int, len(lanes))
 	for k, p := range sharedPairs(overlaps, forest.ByID) {
-		child, parent, forkSeq := direction(k, p, timelines)
+		child, parent, forkSeq := direction(k, p, forest.ByID, timelines)
 		if p.count <= best[child] {
 			continue
 		}
@@ -106,29 +109,49 @@ func sharedPairs(overlaps []index.Overlap, known map[string]*Node) map[key]*pair
 
 // direction decides which lane of a pair forked from the other, returning the
 // child, the parent, and the fork turn numbered within the parent.
-func direction(k key, p *pair, timelines map[string][]time.Time) (child, parent string, forkSeq int) {
-	aDiverged, aOK := divergence(timelines[k.a], p.seqA)
-	bDiverged, bOK := divergence(timelines[k.b], p.seqB)
+func direction(k key, p *pair, nodes map[string]*Node, timelines map[string][]time.Time) (child, parent string, forkSeq int) {
+	aFirst := func() (string, string, int) { return k.b, k.a, p.seqA } // a is the parent
+	bFirst := func() (string, string, int) { return k.a, k.b, p.seqB } // b is the parent
 
+	a, b := nodes[k.a].Lane, nodes[k.b].Lane
+
+	// Best evidence: the file that existed first is the one that was forked.
+	if !a.Created.IsZero() && !b.Created.IsZero() && !a.Created.Equal(b.Created) {
+		if a.Created.Before(b.Created) {
+			return aFirst()
+		}
+		return bFirst()
+	}
+
+	// Next best: a lane wholly contained in another cannot be its parent's child.
+	aDiverges := diverges(timelines[k.a], p.seqA)
+	bDiverges := diverges(timelines[k.b], p.seqB)
 	switch {
-	case !aOK && bOK: // a is a strict prefix of b
-		return k.b, k.a, p.seqA
-	case aOK && !bOK: // b is a strict prefix of a
-		return k.a, k.b, p.seqB
-	case aOK && bOK && bDiverged.Before(aDiverged):
-		return k.a, k.b, p.seqB
+	case !aDiverges && bDiverges:
+		return aFirst()
+	case aDiverges && !bDiverges:
+		return bFirst()
+	}
+
+	// Weakest: assume the longer conversation is the one that was forked, and
+	// failing that the one that stopped being touched first.
+	switch {
+	case b.Messages != a.Messages:
+		if b.Messages > a.Messages {
+			return bFirst()
+		}
+		return aFirst()
+	case a.Updated.Before(b.Updated):
+		return aFirst()
 	default:
-		return k.b, k.a, p.seqA
+		return bFirst()
 	}
 }
 
-// divergence returns when a lane first departs from a shared prefix of the
-// given length, reporting false when the lane has nothing beyond it.
-func divergence(timeline []time.Time, sharedLen int) (time.Time, bool) {
-	if sharedLen < 0 || sharedLen >= len(timeline) {
-		return time.Time{}, false
-	}
-	return timeline[sharedLen], true
+// diverges reports whether a lane has any turn beyond a shared prefix of the
+// given length. A lane that does not is wholly contained in the other.
+func diverges(timeline []time.Time, sharedLen int) bool {
+	return sharedLen >= 0 && sharedLen < len(timeline)
 }
 
 // link attaches children to parents, drops any edge that would create a cycle,

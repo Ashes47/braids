@@ -50,7 +50,8 @@ func forestOf(lanes []index.LaneInfo, parents map[string]string) *graph.Forest {
 
 func newTestModel(t *testing.T, f *graph.Forest) Model {
 	t.Helper()
-	m := NewModel(f, true) // ASCII glyphs keep assertions width-stable
+	// ASCII glyphs keep assertions width-stable.
+	m := NewModel(f, Options{ASCII: true, Source: "claudecode", IndexPath: "/tmp/index.db"})
 	m.now = func() time.Time { return now }
 	m.width, m.height = 90, 20
 	return m
@@ -85,7 +86,11 @@ func TestRenderShowsLanesAndChrome(t *testing.T) {
 	m := newTestModel(t, forestOf(lanes, map[string]string{"kid": "root"}))
 	out := plain(m.render())
 
-	for _, want := range []string{"braids", "2 conversations", "1 active", "main work", "a branch", "q quit"} {
+	for _, want := range []string{
+		"Source:", "claudecode", "Lanes:", "Active:",
+		"Conversations(all)[2]", "CONVERSATION", "STATUS",
+		"main work", "a branch", "<j/k>", "active", "idle",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render missing %q:\n%s", want, out)
 		}
@@ -110,8 +115,9 @@ func TestOptionalColumnsAppearOnlyWhenUseful(t *testing.T) {
 		if m.showFork {
 			t.Error("showFork should be false with no forks")
 		}
-		if strings.Contains(plain(m.render()), "<") {
-			t.Error("fork glyph rendered without any fork")
+		out := plain(m.render())
+		if strings.Contains(out, "FORK") || strings.Contains(out, "< t") {
+			t.Errorf("fork column rendered without any fork:\n%s", out)
 		}
 	})
 
@@ -172,8 +178,8 @@ func TestFilterNarrowsAndClears(t *testing.T) {
 	if len(m.visible) != 1 || m.visible[0].node.Lane.ID != "b" {
 		t.Fatalf("filter left %d lanes, want just the schema one", len(m.visible))
 	}
-	if out := plain(m.render()); !strings.Contains(out, "/sch") {
-		t.Errorf("filter should be visible in the header:\n%s", out)
+	if out := plain(m.render()); !strings.Contains(out, "Conversations(/sch)[1]") {
+		t.Errorf("panel title should show the filter and count:\n%s", out)
 	}
 
 	esc, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -199,7 +205,7 @@ func TestCursorStaysInRange(t *testing.T) {
 		lanes = append(lanes, laneInfo(string(rune('a'+i)), "lane", "app", 1, time.Hour))
 	}
 	m := newTestModel(t, forestOf(lanes, nil))
-	m.height = 6 // room for two rows
+	m.height = chromeHeight + 2 // room for two rows
 
 	for range 20 {
 		m.cursor++
@@ -235,6 +241,44 @@ func TestTruncateMeasuresDisplayWidth(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("truncate(%q,%d) = %q, want %q", tt.in, tt.w, got, tt.want)
 		}
+	}
+}
+
+func TestHumanBytes(t *testing.T) {
+	tests := []struct {
+		n    int64
+		want string
+	}{
+		{512, "512 B"},
+		{2048, "2 kB"},
+		{5 << 20, "5 MB"},
+		{3 << 30, "3.0 GB"},
+	}
+	for _, tt := range tests {
+		if got := humanBytes(tt.n); got != tt.want {
+			t.Errorf("humanBytes(%d) = %q, want %q", tt.n, got, tt.want)
+		}
+	}
+}
+
+func TestShortenReplacesHome(t *testing.T) {
+	orig := homeDir
+	homeDir = func() (string, error) { return "/Users/x", nil }
+	defer func() { homeDir = orig }()
+
+	if got := shorten("/Users/x/.braids/index.db"); got != "~/.braids/index.db" {
+		t.Errorf("shorten = %q", got)
+	}
+	if got := shorten("/etc/other"); got != "/etc/other" {
+		t.Errorf("shorten should leave unrelated paths alone, got %q", got)
+	}
+}
+
+func TestStatusLineNamesTheSelectedLane(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("abc123", "one", "app", 5, time.Hour)}
+	m := newTestModel(t, forestOf(lanes, nil))
+	if !strings.Contains(plain(m.render()), "abc123") {
+		t.Error("status line should name the selected lane")
 	}
 }
 

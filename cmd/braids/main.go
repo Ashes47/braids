@@ -39,6 +39,8 @@ usage:
 map flags:
   --ascii          use narrow ASCII glyphs (for terminals that draw
                    box characters double-wide)
+  --print          render one frame to stdout instead of opening the map
+  --width N        frame width when printing (default 92)
 
 search flags:
   --lane ID        restrict to one conversation
@@ -59,11 +61,11 @@ func main() {
 func run(args []string, w io.Writer) error {
 	out := newPrinter(w)
 	if len(args) == 0 {
-		return cmdMap(nil)
+		return cmdMap(nil, out)
 	}
 	switch args[0] {
 	case "map":
-		return cmdMap(args[1:])
+		return cmdMap(args[1:], out)
 	case "index":
 		return cmdIndex(args[1:], out)
 	case "search":
@@ -116,32 +118,54 @@ func defaultDB() (string, error) {
 	return filepath.Join(dir, "index.db"), nil
 }
 
+// resolveDB picks the index path: the flag if given, else the default.
+func resolveDB(dbFlag string) (string, error) {
+	if dbFlag != "" {
+		return dbFlag, nil
+	}
+	return defaultDB()
+}
+
 // openIndex resolves the database path and opens it.
 func openIndex(dbFlag string) (*index.Index, error) {
-	path := dbFlag
-	if path == "" {
-		var err error
-		if path, err = defaultDB(); err != nil {
-			return nil, err
-		}
+	path, err := resolveDB(dbFlag)
+	if err != nil {
+		return nil, err
 	}
 	return index.Open(path)
 }
 
-func cmdMap(args []string) error {
+func cmdMap(args []string, out *printer) error {
 	fs := flag.NewFlagSet("map", flag.ContinueOnError)
 	ascii := fs.Bool("ascii", os.Getenv("BRAIDS_ASCII") != "", "use narrow ASCII glyphs")
 	db := fs.String("db", "", "index location")
+	print := fs.Bool("print", false, "render one frame to stdout instead of opening the map")
+	width := fs.Int("width", 92, "frame width when printing")
+	height := fs.Int("height", 24, "frame height when printing")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	ix, err := openIndex(*db)
+	dbPath, err := resolveDB(*db)
+	if err != nil {
+		return err
+	}
+	ix, err := index.Open(dbPath)
 	if err != nil {
 		return err
 	}
 	defer ix.Close() //nolint:errcheck // read-only
 
-	return tui.Run(context.Background(), ix, *ascii)
+	opts := tui.Options{ASCII: *ascii, Source: "claudecode", IndexPath: dbPath}
+	ctx := context.Background()
+	if !*print {
+		return tui.Run(ctx, ix, opts)
+	}
+	forest, err := tui.Forest(ctx, ix)
+	if err != nil {
+		return err
+	}
+	out.printf("%s\n", tui.Render(forest, opts, *width, *height))
+	return out.Err()
 }
 
 func cmdIndex(args []string, out *printer) error {

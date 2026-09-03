@@ -17,13 +17,19 @@ Early. The index, search and the Map are working; the Spine is next. See
 build order.
 
 ```
-$ braids
-   CONVERSATION                                              TURNS      AGE
- ● Agent observability and branching conversations             297      30m
- ● Clarify halt vs force halt behavior                         279      52m
- ● Debug annotation pipeline dataset issue        9419fd9c   25571      52m
- ● Review AMI customer data delivery runbook      cec6177b   18264      52m
- j/k move   g/G ends   / filter   esc clear   q quit
+ Source:   claudecode                                          <j/k>   move
+ Index:    ~/.braids/index.db                                  </>     filter
+ Lanes:    21                                                  <g/G>   first/last
+ Active:   9                                                   <q>     quit
+
+╭─ Conversations(all)[21] ─────────────────────────────────────────────────────────╮
+│  CONVERSATION                     FORK  PROJECT     TURNS      SIZE    AGE  STATUS│
+│ ● git worktrees                         demo            6     57 kB     6m  active│
+│ ├─● worktree cleanup              ← t6  demo            8     61 kB     6m  active│
+│ └─● worktree vs clone             ← t4  demo            6     53 kB     6m  active│
+│    └─● shallow clone              ← t6  demo            8     57 kB     6m  active│
+│ ● Debug annotation pipeline …           microagi     1841      7 MB     5d    idle│
+╰──────────────────────────────────────────────────────────────────────────────────╯
 ```
 
 ```

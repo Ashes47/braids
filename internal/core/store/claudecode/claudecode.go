@@ -89,6 +89,7 @@ func (s *Source) Lanes(ctx context.Context) ([]model.Lane, error) {
 				Source:  s.Name(),
 				Project: projectName(project.Name()),
 				Path:    path,
+				Created: birthTime(info),
 				Updated: info.ModTime(),
 				Size:    info.Size(),
 			}

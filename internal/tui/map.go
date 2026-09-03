@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -17,10 +18,12 @@ const activeWindow = 10 * time.Minute
 
 // Column widths for the right-hand block. Everything left of it flexes.
 const (
-	forkWidth    = 8
+	forkWidth    = 7
 	projectWidth = 10
-	msgsWidth    = 6
-	ageWidth     = 7
+	msgsWidth    = 7
+	sizeWidth    = 8
+	ageWidth     = 5
+	statusWidth  = 6
 )
 
 // row is one lane placed on screen together with the tree art leading to it.
@@ -29,11 +32,21 @@ type row struct {
 	prefix string
 }
 
+// Options configure the map. Source and IndexPath appear in the facts block,
+// so the screen always says what it is looking at.
+type Options struct {
+	ASCII     bool
+	Source    string
+	IndexPath string
+}
+
 // Model is the Map: every conversation and every branch as a single forest.
 type Model struct {
-	theme Theme
-	ascii bool
-	now   func() time.Time
+	theme     Theme
+	ascii     bool
+	source    string
+	indexPath string
+	now       func() time.Time
 
 	all       []row
 	visible   []row
@@ -55,13 +68,15 @@ type Model struct {
 
 // NewModel builds the Map over a forest. The theme starts dark and is corrected
 // as soon as the terminal reports its real background.
-func NewModel(f *graph.Forest, ascii bool) Model {
+func NewModel(f *graph.Forest, opts Options) Model {
 	m := Model{
-		theme:  NewTheme(true, ascii),
-		ascii:  ascii,
-		now:    time.Now,
-		width:  80,
-		height: 24,
+		theme:     NewTheme(true, opts.ASCII),
+		ascii:     opts.ASCII,
+		source:    opts.Source,
+		indexPath: opts.IndexPath,
+		now:       time.Now,
+		width:     80,
+		height:    24,
 	}
 	m.all = layout(f, m.theme.Glyphs)
 	m.visible = m.all
@@ -199,38 +214,54 @@ func (m *Model) clamp() {
 	}
 }
 
-// bodyHeight is the terminal height minus the header and footer chrome.
+// bodyHeight is the terminal height minus the chrome.
 func (m Model) bodyHeight() int {
-	h := m.height - 4
+	h := m.height - chromeHeight
 	if h < 1 {
 		return 1
 	}
 	return h
 }
 
+// contentWidth is the usable width inside the panel borders.
+func (m Model) contentWidth() int {
+	w := m.width - 2
+	if w < 20 {
+		return 20
+	}
+	return w
+}
+
 func (m Model) render() string {
 	var b strings.Builder
-	b.WriteString(m.header())
+	b.WriteString(m.info())
+	b.WriteString("\n\n")
+	b.WriteString(m.panelTop())
 	b.WriteString("\n")
-	b.WriteString(m.columns())
+	b.WriteString(m.framed(m.columns()))
 	b.WriteString("\n")
 
+	blank := strings.Repeat(" ", m.contentWidth())
 	if len(m.visible) == 0 {
-		b.WriteString("  " + m.theme.Empty.Render(m.emptyMessage()) + "\n")
-		for i := 1; i < m.bodyHeight(); i++ {
-			b.WriteString("\n")
+		empty := m.theme.Empty.Render(m.emptyMessage())
+		b.WriteString(m.framed(padRight(" "+empty, m.contentWidth()+lipgloss.Width(empty)-lipgloss.Width(m.emptyMessage()))))
+		b.WriteString("\n")
+		for range m.bodyHeight() - 1 {
+			b.WriteString(m.framed(blank) + "\n")
 		}
 	} else {
 		end := min(m.offset+m.bodyHeight(), len(m.visible))
 		for i := m.offset; i < end; i++ {
-			b.WriteString(m.renderRow(m.visible[i], i == m.cursor))
+			b.WriteString(m.framed(m.renderRow(m.visible[i], i == m.cursor)))
 			b.WriteString("\n")
 		}
-		for i := end - m.offset; i < m.bodyHeight(); i++ {
-			b.WriteString("\n")
+		for range m.bodyHeight() - (end - m.offset) {
+			b.WriteString(m.framed(blank) + "\n")
 		}
 	}
-	b.WriteString(m.footer())
+	b.WriteString(m.panelBottom())
+	b.WriteString("\n")
+	b.WriteString(m.statusLine())
 	return b.String()
 }
 
@@ -239,29 +270,6 @@ func (m Model) emptyMessage() string {
 		return fmt.Sprintf("nothing matches %q", m.filter)
 	}
 	return "no conversations indexed yet — run: braids index"
-}
-
-func (m Model) header() string {
-	left := m.theme.Brand.Render("braids") + "  " +
-		m.theme.Header.Render(fmt.Sprintf("%d conversations · %d active", len(m.all), m.activeCount()))
-	right := ""
-	switch {
-	case m.filtering:
-		right = m.theme.Accent.Render("/" + m.filter + "▏")
-	case m.filter != "":
-		right = m.theme.Dim.Render("/" + m.filter)
-	}
-	return " " + spread(left, right, m.width-2)
-}
-
-func (m Model) footer() string {
-	k := m.theme.Key.Render
-	t := m.theme.Footer.Render
-	if m.filtering {
-		return " " + k("enter") + t(" keep   ") + k("esc") + t(" clear   ") + t("type to filter")
-	}
-	return " " + k("j/k") + t(" move   ") + k("g/G") + t(" ends   ") +
-		k("/") + t(" filter   ") + k("esc") + t(" clear   ") + k("q") + t(" quit")
 }
 
 func (m Model) activeCount() int {
@@ -284,7 +292,7 @@ func (m Model) isActive(n *graph.Node) bool {
 func (m Model) renderRow(r row, selected bool) string {
 	plain, styled := m.rowParts(r)
 	if selected {
-		return m.theme.Selected.Width(m.width).Render(plain)
+		return m.theme.Selected.Width(m.contentWidth()).Render(plain)
 	}
 	return styled
 }
@@ -328,14 +336,21 @@ func (m Model) rowParts(r row) (plain, styled string) {
 		rightWidth += projectWidth + 2
 	}
 	msgs := padLeft(fmt.Sprintf("%d", lane.Messages), msgsWidth)
+	size := padLeft(humanBytes(lane.Size), sizeWidth)
 	age := padLeft(humanAge(m.now().Sub(lane.Updated)), ageWidth)
-	rightPlain += msgs + "  " + age
-	rightStyled += m.theme.Dim.Render(msgs) + "  " + m.theme.Faint.Render(age)
-	rightWidth += msgsWidth + 2 + ageWidth
+	status, statusStyle := "idle", m.theme.Faint
+	if m.isActive(r.node) {
+		status, statusStyle = "active", m.theme.Alive
+	}
+	status = padLeft(status, statusWidth)
+	rightPlain += msgs + "  " + size + "  " + age + "  " + status
+	rightStyled += m.theme.Value.Render(msgs) + "  " + m.theme.Faint.Render(size) + "  " +
+		m.theme.Dim.Render(age) + "  " + statusStyle.Render(status)
+	rightWidth += msgsWidth + 2 + sizeWidth + 2 + ageWidth + 2 + statusWidth
 
 	// row = " " + prefix + glyph + " " + title + suffix + " " + right,
 	// so the fixed cost either side of the title is 4 cells.
-	titleWidth := m.width - 4 - lipgloss.Width(r.prefix) - rightWidth - lipgloss.Width(suffix)
+	titleWidth := m.contentWidth() - 4 - lipgloss.Width(r.prefix) - rightWidth - lipgloss.Width(suffix)
 	if titleWidth < 8 {
 		titleWidth = 8
 	}
@@ -360,13 +375,14 @@ func (m Model) columns() string {
 	if m.showProject {
 		right += padRight("PROJECT", projectWidth) + "  "
 	}
-	right += padLeft("TURNS", msgsWidth) + "  " + padLeft("AGE", ageWidth)
+	right += padLeft("TURNS", msgsWidth) + "  " + padLeft("SIZE", sizeWidth) + "  " +
+		padLeft("AGE", ageWidth) + "  " + padLeft("STATUS", statusWidth)
 
-	nameWidth := m.width - 2 - lipgloss.Width(right)
+	nameWidth := m.contentWidth() - 2 - lipgloss.Width(right)
 	if nameWidth < 8 {
 		nameWidth = 8
 	}
-	return m.theme.Column.Render(" " + padRight("  CONVERSATION", nameWidth) + " " + right)
+	return m.theme.Column.Render(" " + padRight(" CONVERSATION", nameWidth) + " " + right)
 }
 
 // shortID is enough of a lane ID to tell two same-titled conversations apart.
@@ -408,6 +424,23 @@ func layout(f *graph.Forest, g Glyphs) []row {
 	}
 	return out
 }
+
+// humanBytes renders a transcript size compactly.
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.0f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.0f kB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
+}
+
+// homeDir is a variable so tests can pin it.
+var homeDir = os.UserHomeDir
 
 // humanAge renders a duration the way someone scanning for staleness reads it.
 func humanAge(d time.Duration) string {

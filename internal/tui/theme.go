@@ -54,6 +54,10 @@ type Theme struct {
 	Accent   lipgloss.Style
 	Column   lipgloss.Style
 	Selected lipgloss.Style
+	Border   lipgloss.Style
+	Label    lipgloss.Style
+	Value    lipgloss.Style
+	Panel    lipgloss.Style
 	Footer   lipgloss.Style
 	Key      lipgloss.Style
 	Empty    lipgloss.Style
@@ -83,7 +87,11 @@ func NewTheme(isDark, ascii bool) Theme {
 		Faint:  lipgloss.NewStyle().Foreground(faint),
 		Alive:  lipgloss.NewStyle().Foreground(alive),
 		Accent: lipgloss.NewStyle().Foreground(accent),
-		Column: lipgloss.NewStyle().Foreground(muted).Bold(true),
+		Column: lipgloss.NewStyle().Foreground(accent).Bold(true),
+		Border: lipgloss.NewStyle().Foreground(faint),
+		Label:  lipgloss.NewStyle().Foreground(muted),
+		Value:  lipgloss.NewStyle().Foreground(fg),
+		Panel:  lipgloss.NewStyle().Foreground(fg).Bold(true),
 		// Selection is a solid band across the whole row, k9s style: one flat
 		// style rather than nested per-segment colours, so it never tears.
 		Selected: lipgloss.NewStyle().Background(selBg).Foreground(selFg),

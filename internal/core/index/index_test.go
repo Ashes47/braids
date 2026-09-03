@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -238,4 +239,38 @@ func TestOverlapsFindSharedMessages(t *testing.T) {
 func withLane(m model.Message, lane string) model.Message {
 	m.LaneID = lane
 	return m
+}
+
+func TestOpenDiscardsAStaleSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "index.db")
+
+	// An index written by an older braids: right table name, wrong columns.
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := old.Exec(`CREATE TABLE lanes (id TEXT PRIMARY KEY, whatever TEXT)`); err != nil {
+		t.Fatalf("seed stale schema: %v", err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	ix, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open must recover from a stale schema, got: %v", err)
+	}
+	defer ix.Close() //nolint:errcheck // test cleanup
+
+	// The rebuild that follows must succeed against the current columns.
+	if _, err := ix.Rebuild(context.Background(), newFixture()); err != nil {
+		t.Fatalf("Rebuild after migration: %v", err)
+	}
+	lanes, err := ix.Lanes(context.Background())
+	if err != nil {
+		t.Fatalf("Lanes: %v", err)
+	}
+	if len(lanes) != 2 {
+		t.Fatalf("got %d lanes after rebuild, want 2", len(lanes))
+	}
 }

@@ -15,6 +15,16 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// schemaVersion is bumped whenever the tables change. The index holds no unique
+// state — it rebuilds from the transcripts in seconds — so an old schema is
+// dropped and recreated rather than migrated.
+const schemaVersion = 2
+
+const dropAll = `
+DROP TABLE IF EXISTS parts;
+DROP TABLE IF EXISTS messages;
+DROP TABLE IF EXISTS lanes;`
+
 const schema = `
 CREATE TABLE IF NOT EXISTS lanes (
 	id      TEXT PRIMARY KEY,
@@ -22,6 +32,7 @@ CREATE TABLE IF NOT EXISTS lanes (
 	project TEXT NOT NULL,
 	path    TEXT NOT NULL,
 	title   TEXT NOT NULL,
+	created INTEGER NOT NULL DEFAULT 0,
 	updated INTEGER NOT NULL,
 	size    INTEGER NOT NULL,
 	msg_count  INTEGER NOT NULL DEFAULT 0,
@@ -115,10 +126,32 @@ func Open(path string) (*Index, error) {
 			return nil, errors.Join(fmt.Errorf("apply %s: %w", pragma, err), db.Close())
 		}
 	}
-	if _, err := db.Exec(schema); err != nil {
-		return nil, errors.Join(fmt.Errorf("create schema: %w", err), db.Close())
+	if err := migrate(db); err != nil {
+		return nil, errors.Join(err, db.Close())
 	}
 	return &Index{db: db}, nil
+}
+
+// migrate brings the database to the current schema, discarding an older one.
+// Callers must rebuild afterwards; Lanes on a freshly dropped index simply
+// reports nothing, which the CLI and the map both already handle.
+func migrate(db *sql.DB) error {
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if version != schemaVersion {
+		if _, err := db.Exec(dropAll); err != nil {
+			return fmt.Errorf("drop stale schema v%d: %w", version, err)
+		}
+	}
+	if _, err := db.Exec(schema); err != nil {
+		return fmt.Errorf("create schema: %w", err)
+	}
+	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion)); err != nil {
+		return fmt.Errorf("stamp schema version: %w", err)
+	}
+	return nil
 }
 
 // Close releases the underlying database.
@@ -146,8 +179,8 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 		}
 	}
 	insertLane, err := tx.PrepareContext(ctx,
-		`INSERT INTO lanes (id,source,project,path,title,updated,size,msg_count,part_count) `+
-			`VALUES (?,?,?,?,?,?,?,?,?)`)
+		`INSERT INTO lanes (id,source,project,path,title,created,updated,size,msg_count,part_count) `+
+			`VALUES (?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return Stats{}, fmt.Errorf("prepare lane insert: %w", err)
 	}
@@ -192,7 +225,8 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 			return Stats{}, fmt.Errorf("index lane %s: %w", lane.ID, err)
 		}
 		if _, err := insertLane.ExecContext(ctx, lane.ID, lane.Source, lane.Project,
-			lane.Path, lane.Title, lane.Updated.Unix(), lane.Size, laneMsgs, laneParts); err != nil {
+			lane.Path, lane.Title, unixOrZero(lane.Created), lane.Updated.Unix(),
+			lane.Size, laneMsgs, laneParts); err != nil {
 			return Stats{}, fmt.Errorf("insert lane %s: %w", lane.ID, err)
 		}
 	}
@@ -322,7 +356,7 @@ func (ix *Index) Timelines(ctx context.Context) (map[string][]time.Time, error) 
 // Lanes returns every indexed lane, most recently updated first.
 func (ix *Index) Lanes(ctx context.Context) ([]LaneInfo, error) {
 	rows, err := ix.db.QueryContext(ctx,
-		`SELECT id,source,project,path,title,updated,size,msg_count,part_count FROM lanes ORDER BY updated DESC`)
+		`SELECT id,source,project,path,title,created,updated,size,msg_count,part_count FROM lanes ORDER BY updated DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list lanes: %w", err)
 	}
@@ -331,10 +365,13 @@ func (ix *Index) Lanes(ctx context.Context) ([]LaneInfo, error) {
 	var lanes []LaneInfo
 	for rows.Next() {
 		var l LaneInfo
-		var updated int64
+		var created, updated int64
 		if err := rows.Scan(&l.ID, &l.Source, &l.Project, &l.Path, &l.Title,
-			&updated, &l.Size, &l.Messages, &l.Parts); err != nil {
+			&created, &updated, &l.Size, &l.Messages, &l.Parts); err != nil {
 			return nil, fmt.Errorf("scan lane: %w", err)
+		}
+		if created > 0 {
+			l.Created = time.Unix(created, 0)
 		}
 		l.Updated = time.Unix(updated, 0)
 		lanes = append(lanes, l)
@@ -343,6 +380,14 @@ func (ix *Index) Lanes(ctx context.Context) ([]LaneInfo, error) {
 		return nil, fmt.Errorf("iterate lanes: %w", err)
 	}
 	return lanes, nil
+}
+
+// unixOrZero keeps a zero time zero rather than writing a 1970 timestamp.
+func unixOrZero(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.Unix()
 }
 
 // advanced reports whether the user wrote an FTS5 expression themselves, in

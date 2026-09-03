@@ -21,6 +21,7 @@ import (
 	"github.com/Ashes47/braids/internal/core/origins"
 	"github.com/Ashes47/braids/internal/core/store"
 	"github.com/Ashes47/braids/internal/core/store/claudecode"
+	"github.com/Ashes47/braids/internal/core/watch"
 	"github.com/Ashes47/braids/internal/tui"
 )
 
@@ -168,20 +169,30 @@ func cmdMap(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
+	root, err := claudecode.DefaultRoot()
+	if err != nil {
+		return err
+	}
+	// Watching is a convenience, not a requirement: if it cannot start, the map
+	// still opens as a snapshot.
+	var changes <-chan struct{}
+	if !*print {
+		if w, err := watch.New(root); err == nil {
+			defer w.Close() //nolint:errcheck // closing on exit
+			changes = w.Changes()
+		}
+	}
 	opts := tui.Options{
 		ASCII:     *ascii,
 		Source:    "claudecode",
 		IndexPath: dbPath,
 		LoadSpine: tui.SpineLoader(ctx, ix),
 		Origins:   provenance.All(),
+		Changes:   changes,
 		Branch: func(laneID string, turn int, name string) (string, error) {
 			return branchAt(ctx, ix, provenance, laneID, turn, name)
 		},
 		Refresh: func() (*graph.Forest, error) {
-			root, err := claudecode.DefaultRoot()
-			if err != nil {
-				return nil, err
-			}
 			if _, err := ix.Sync(ctx, claudecode.New(root)); err != nil {
 				return nil, err
 			}
@@ -321,7 +332,7 @@ func cmdBranch(args []string, out *printer) error {
 	}
 	out.printf("branched %s at turn %d\n  new conversation %s\n  resume with: claude --resume %s%s\n",
 		shortID(*laneRef), *at, newID, newID, nameFlag(*name))
-	out.printf("\nrun `braids index` to see it on the map\n")
+	out.printf("\nthe map picks it up on its own; `braids index` if you want it now\n")
 	return out.Err()
 }
 

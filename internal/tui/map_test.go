@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -316,5 +317,96 @@ func TestHumanAge(t *testing.T) {
 		if got := humanAge(tt.d); got != tt.want {
 			t.Errorf("humanAge(%v) = %q, want %q", tt.d, got, tt.want)
 		}
+	}
+}
+
+func TestLiveUpdatesAdoptANewForest(t *testing.T) {
+	before := []index.LaneInfo{laneInfo("a", "first", "app", 5, time.Hour)}
+	after := []index.LaneInfo{
+		laneInfo("a", "first", "app", 5, time.Hour),
+		laneInfo("b", "appeared while watching", "app", 2, time.Minute),
+	}
+	changes := make(chan struct{}, 1)
+	refreshed := 0
+
+	m := NewModel(forestOf(before, nil), Options{
+		ASCII:   true,
+		Source:  "claudecode",
+		Changes: changes,
+		Refresh: func() (*graph.Forest, error) {
+			refreshed++
+			return forestOf(after, nil), nil
+		},
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 90, 20
+
+	if !strings.Contains(plain(m.render()), "· live") {
+		t.Error("a watching map should say so")
+	}
+
+	updated, cmd := m.Update(changedMsg{})
+	m = updated.(Model)
+	if refreshed != 1 {
+		t.Fatalf("refresh called %d times, want 1", refreshed)
+	}
+	if cmd == nil {
+		t.Error("the map must re-arm its listener or it goes deaf after one change")
+	}
+	if !strings.Contains(plain(m.render()), "appeared while watching") {
+		t.Error("the new lane should be on the map")
+	}
+}
+
+func TestLiveUpdateKeepsThePlace(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("a", "first", "app", 5, time.Hour),
+		laneInfo("b", "second", "app", 5, time.Hour),
+	}
+	m := NewModel(forestOf(lanes, nil), Options{
+		ASCII:   true,
+		Changes: make(chan struct{}),
+		Refresh: func() (*graph.Forest, error) { return forestOf(lanes, nil), nil },
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 90, 20
+	m.cursor = 1
+	selected := m.visible[1].node.Lane.ID
+
+	updated, _ := m.Update(changedMsg{})
+	m = updated.(Model)
+	if got := m.visible[m.cursor].node.Lane.ID; got != selected {
+		t.Errorf("cursor moved to %q across a refresh, want %q", got, selected)
+	}
+}
+
+func TestRefreshFailureIsSurvivable(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("a", "first", "app", 5, time.Hour)}
+	m := NewModel(forestOf(lanes, nil), Options{
+		ASCII:   true,
+		Changes: make(chan struct{}),
+		Refresh: func() (*graph.Forest, error) { return nil, errors.New("half-written file") },
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 90, 20
+
+	updated, cmd := m.Update(changedMsg{})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Error("a failed refresh must still re-arm; transcripts settle on the next write")
+	}
+	if !strings.Contains(plain(m.render()), "first") {
+		t.Error("the map should keep showing what it had")
+	}
+}
+
+func TestSnapshotMapSaysNothingAboutLive(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("a", "first", "app", 5, time.Hour)}
+	m := newTestModel(t, forestOf(lanes, nil))
+	if strings.Contains(plain(m.render()), "· live") {
+		t.Error("a map without a watcher must not claim to be live")
+	}
+	if m.Init() == nil {
+		t.Error("Init should still ask for the background colour")
 	}
 }

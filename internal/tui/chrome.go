@@ -26,8 +26,12 @@ type fact struct{ label, value string }
 type hint struct{ key, action string }
 
 func (m Model) facts() []fact {
+	source := m.source
+	if m.changes != nil {
+		source += " · live"
+	}
 	return []fact{
-		{"Source", m.source},
+		{"Source", source},
 		{"Index", shorten(m.indexPath)},
 		{"Lanes", fmt.Sprintf("%d", len(m.all))},
 		{"Active", fmt.Sprintf("%d", m.activeCount())},

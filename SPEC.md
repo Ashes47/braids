@@ -61,6 +61,7 @@ Every design decision below rests on something measured on this machine
 | A tool result wears the user role | Treating every user record as a landmark left a long spine 85% uncollapsed; requiring text cut 20,506 segments to 3,015 |
 | Identical prefixes make forks ambiguous | A lane cut from a fork shares the same turns with the fork *and* its parent; only a record of what braids did can tell them apart |
 | Incremental sync is worth having | 9.2 s full rebuild vs **47 ms** when only one transcript moved |
+| Stored mtimes are second-precision | Comparing a raw `ModTime` marks every lane changed forever, turning an incremental sync silently into a full one |
 | Fork files are standalone | Child holds a full copy of the prefix ⇒ **deletion never cascades** |
 | Stale reads are guarded | Edit after external change: *"has been modified on disk since I read it"* |
 | Local search is trivial | 60,616 units · 1.8 s full rebuild · 74.5 MB · **0.1–0.3 ms** queries |
@@ -90,9 +91,12 @@ Every design decision below rests on something measured on this machine
                                         spawn ──▶ claude --resume … --name …
 ```
 
-**Watcher.** Transcripts are append-only, so braids keeps a byte offset per file
-and parses only the delta. A 145 MB file costs nothing to follow. Full rebuild
-(1.8 s) is the cold start and the panic button.
+**Watcher.** fsnotify over the transcript root and each project directory,
+adding new projects as they appear. A single turn appends many lines, so a burst
+is coalesced into one signal after 400 ms of quiet — the map only needs to know
+that *something* moved, because catching up is a 47 ms incremental sync. Watching
+is a convenience, never a requirement: if it cannot start, the map opens as a
+snapshot and says so by omitting `· live`.
 
 **Index.** One SQLite file, stamped with a schema version. `Sync` re-reads only
 lanes whose size or mtime moved and drops ones whose file is gone — 47 ms
@@ -583,7 +587,9 @@ needs-you — are declared as optional `Capabilities`, never assumed.
 4. ~~**Branch.**~~ **Done**: file synthesis, naming, the `b` key, navigating
    into a branch from its parent, recorded provenance, and an immediate
    in-place refresh. `--worktree` and spawning a terminal still to come.
-5. **Live.** Watcher, byte-offset tailing, hooks, needs-you queue. ← *next*
+5. ~~**Live.**~~ **Done** for the watcher and in-place refresh: the map follows
+   sessions as they are written, and a branch appears without any command.
+   Hooks and the needs-you queue still to come. ← *next*
 5. **Live.** Watcher, byte-offset tailing, hooks, needs-you queue.
 6. **Subagents.** Nested lanes, promote.
 7. **Housekeeping.** Archive, sweep, trash, undo.

@@ -51,7 +51,13 @@ type Options struct {
 	// after a branch so the new lane appears at once instead of after a
 	// remembered command.
 	Refresh func() (*graph.Forest, error)
+	// Changes signals that transcripts moved on disk. With it the map follows
+	// live sessions; without it the map is a snapshot.
+	Changes <-chan struct{}
 }
+
+// changedMsg says transcripts moved and the map should catch up.
+type changedMsg struct{}
 
 // mode is which screen the map is showing.
 type mode int
@@ -71,6 +77,7 @@ type Model struct {
 	loadSpine func(string) ([]graph.Segment, error)
 	branch    func(string, int, string) (string, error)
 	refresh   func() (*graph.Forest, error)
+	changes   <-chan struct{}
 
 	mode  mode
 	spine *spineState
@@ -104,6 +111,7 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		loadSpine: opts.LoadSpine,
 		branch:    opts.Branch,
 		refresh:   opts.Refresh,
+		changes:   opts.Changes,
 		now:       time.Now,
 		width:     80,
 		height:    24,
@@ -163,8 +171,25 @@ func (m *Model) measure() {
 	}
 }
 
-// Init asks the terminal for its background colour so the palette can adapt.
-func (m Model) Init() tea.Cmd { return tea.RequestBackgroundColor }
+// Init asks the terminal for its background colour and, when watching, starts
+// listening for changes on disk.
+func (m Model) Init() tea.Cmd {
+	if m.changes == nil {
+		return tea.RequestBackgroundColor
+	}
+	return tea.Batch(tea.RequestBackgroundColor, awaitChange(m.changes))
+}
+
+// awaitChange blocks one command on the watcher. Re-armed after every change,
+// it keeps exactly one listener alive for the life of the program.
+func awaitChange(ch <-chan struct{}) tea.Cmd {
+	return func() tea.Msg {
+		if _, ok := <-ch; !ok {
+			return nil
+		}
+		return changedMsg{}
+	}
+}
 
 // Update handles terminal events.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -175,10 +200,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.clamp()
 		m.clampSpine()
+	case changedMsg:
+		return m.catchUp(), awaitChange(m.changes)
 	case tea.KeyPressMsg:
 		return m.key(msg)
 	}
 	return m, nil
+}
+
+// catchUp re-syncs after something moved on disk. A failure is left silent:
+// transcripts are written continuously, so a half-written file resolves itself
+// on the next change rather than deserving an alarm.
+func (m Model) catchUp() Model {
+	if m.refresh == nil {
+		return m
+	}
+	forest, err := m.refresh()
+	if err != nil {
+		return m
+	}
+	return m.adopt(forest)
 }
 
 // View renders whichever screen is active, full-screen.

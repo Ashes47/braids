@@ -111,6 +111,13 @@ func (s *Source) Messages(ctx context.Context, lane model.Lane, visit store.Visi
 	}
 	defer f.Close() //nolint:errcheck // read-only
 
+	// Claude Code threads bookkeeping records (attachments, snapshots) into the
+	// same parent chain as the conversation, so a message's parentUuid usually
+	// names a record that is not itself a message. nearest maps every record to
+	// the closest *conversational* ancestor, which is what ParentID must be for
+	// the chain to reconstruct.
+	nearest := make(map[string]string)
+
 	sc := newScanner(f)
 	for sc.Scan() {
 		if err := ctx.Err(); err != nil {
@@ -120,10 +127,17 @@ func (s *Source) Messages(ctx context.Context, lane model.Lane, visit store.Visi
 		if err := json.Unmarshal(sc.Bytes(), &r); err != nil {
 			continue // a malformed line must not abort an otherwise good lane
 		}
-		msg, ok := r.toMessage(lane.ID)
-		if !ok {
+		if r.UUID == "" {
 			continue
 		}
+		ancestor := nearest[r.parentID()]
+		msg, ok := r.toMessage(lane.ID)
+		if !ok {
+			nearest[r.UUID] = ancestor
+			continue
+		}
+		nearest[r.UUID] = r.UUID
+		msg.ParentID = ancestor
 		if err := visit(msg); err != nil {
 			return err
 		}
@@ -254,18 +268,18 @@ func (r record) toMessage(laneID string) (model.Message, bool) {
 	}
 	at, _ := time.Parse(time.RFC3339, r.Timestamp)
 	return model.Message{
-		ID:       r.UUID,
-		ParentID: r.parentID(),
-		LaneID:   laneID,
-		Role:     role,
-		At:       at,
-		Parts:    parts,
+		ID:     r.UUID,
+		LaneID: laneID,
+		Role:   role,
+		At:     at,
+		Parts:  parts,
 	}, true
 }
 
-// parentID stitches over compaction. A compact boundary is written with a nil
-// parentUuid and a logicalParentUuid pointing at the pre-compaction record;
-// without this, one conversation reads as one lane per compaction.
+// parentID is the raw predecessor of a record, stitched over compaction: a
+// compact boundary is written with a nil parentUuid and a logicalParentUuid
+// pointing at the pre-compaction record, and without following it one
+// conversation reads as one lane per compaction.
 func (r record) parentID() string {
 	if r.ParentUUID != nil {
 		return *r.ParentUUID

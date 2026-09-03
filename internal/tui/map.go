@@ -38,7 +38,18 @@ type Options struct {
 	ASCII     bool
 	Source    string
 	IndexPath string
+	// LoadSpine reduces one lane to its spine. Passing it as a function keeps
+	// the views free of any dependency on the index.
+	LoadSpine func(laneID string) ([]graph.Segment, error)
 }
+
+// mode is which screen the map is showing.
+type mode int
+
+const (
+	mapMode mode = iota
+	spineMode
+)
 
 // Model is the Map: every conversation and every branch as a single forest.
 type Model struct {
@@ -47,6 +58,10 @@ type Model struct {
 	source    string
 	indexPath string
 	now       func() time.Time
+	loadSpine func(string) ([]graph.Segment, error)
+
+	mode  mode
+	spine *spineState
 
 	all       []row
 	visible   []row
@@ -74,6 +89,7 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		ascii:     opts.ASCII,
 		source:    opts.Source,
 		indexPath: opts.IndexPath,
+		loadSpine: opts.LoadSpine,
 		now:       time.Now,
 		width:     80,
 		height:    24,
@@ -115,14 +131,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.clamp()
+		m.clampSpine()
 	case tea.KeyPressMsg:
 		return m.key(msg)
 	}
 	return m, nil
 }
 
-// View renders the Map full-screen.
+// View renders whichever screen is active, full-screen.
 func (m Model) View() tea.View {
+	if m.mode == spineMode && m.spine != nil {
+		return tea.View{Content: m.renderSpine(), AltScreen: true}
+	}
 	return tea.View{Content: m.render(), AltScreen: true}
 }
 
@@ -130,9 +150,16 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.filtering {
 		return m.filterKey(msg)
 	}
-	switch msg.String() {
-	case "q", "ctrl+c":
+	if msg.String() == "q" || msg.String() == "ctrl+c" {
 		return m, tea.Quit
+	}
+	if m.mode == spineMode {
+		updated, _ := m.spineKey(msg.String())
+		return updated, nil
+	}
+	switch msg.String() {
+	case "enter", "l", "right":
+		return m.openSpine(), nil
 	case "j", "down":
 		m.cursor++
 	case "k", "up":
@@ -424,6 +451,8 @@ func layout(f *graph.Forest, g Glyphs) []row {
 	}
 	return out
 }
+
+// oneLine lives in spineview.go.
 
 // humanBytes renders a transcript size compactly.
 func humanBytes(n int64) string {

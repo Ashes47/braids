@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -13,6 +14,9 @@ import (
 
 // Run assembles the forest from the index and starts the Map.
 func Run(ctx context.Context, ix *index.Index, opts Options) error {
+	if opts.LoadSpine == nil {
+		opts.LoadSpine = SpineLoader(ctx, ix)
+	}
 	forest, err := Forest(ctx, ix)
 	if err != nil {
 		return err
@@ -29,11 +33,35 @@ func Run(ctx context.Context, ix *index.Index, opts Options) error {
 // Render draws a single frame of the map and returns it. It exists so the map
 // can be inspected without a terminal — for screenshots, for debugging, and
 // for golden tests that would otherwise need a pty.
-func Render(forest *graph.Forest, opts Options, width, height int) string {
+func Render(forest *graph.Forest, opts Options, laneID string, width, height int) string {
 	m := NewModel(forest, opts)
 	m.width, m.height = width, height
 	m.clamp()
-	return m.render()
+	if laneID == "" {
+		return m.render()
+	}
+	for i, r := range m.visible {
+		if strings.HasPrefix(r.node.Lane.ID, laneID) {
+			m.cursor = i
+			break
+		}
+	}
+	m = m.openSpine()
+	if m.spine == nil {
+		return m.render()
+	}
+	return m.renderSpine()
+}
+
+// SpineLoader returns a loader that reduces a lane to its spine on demand.
+func SpineLoader(ctx context.Context, ix *index.Index) func(string) ([]graph.Segment, error) {
+	return func(laneID string) ([]graph.Segment, error) {
+		msgs, err := ix.LaneMessages(ctx, laneID)
+		if err != nil {
+			return nil, err
+		}
+		return graph.Spine(msgs), nil
+	}
 }
 
 // Forest reads everything the map needs and arranges it. Kept exported and

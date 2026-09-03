@@ -31,13 +31,14 @@ type Glyphs struct {
 	Pipe     string
 	Blank    string
 	Fork     string
+	Run      string
 }
 
 func glyphsFor(ascii bool) Glyphs {
 	if ascii {
-		return Glyphs{Lane: "*", Archived: "o", Branch: "|-", Last: "`-", Pipe: "|  ", Blank: "   ", Fork: "<"}
+		return Glyphs{Lane: "*", Archived: "o", Branch: "|-", Last: "`-", Pipe: "|  ", Blank: "   ", Fork: "<", Run: "~"}
 	}
-	return Glyphs{Lane: "●", Archived: "○", Branch: "├─", Last: "└─", Pipe: "│  ", Blank: "   ", Fork: "←"}
+	return Glyphs{Lane: "●", Archived: "○", Branch: "├─", Last: "└─", Pipe: "│  ", Blank: "   ", Fork: "←", Run: "⋯"}
 }
 
 // Theme holds every style the map draws with.

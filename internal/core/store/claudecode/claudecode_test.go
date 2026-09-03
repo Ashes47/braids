@@ -117,6 +117,35 @@ func TestMessagesSkipsBookkeepingRecords(t *testing.T) {
 	}
 }
 
+func TestParentIDSkipsBookkeepingRecords(t *testing.T) {
+	// Claude Code threads attachments into the parent chain, so a message's
+	// raw parentUuid usually names a record that is not a message. Without
+	// resolving through them the chain breaks and a spine has one turn.
+	root := writeLanes(t, "-p", map[string][]string{"s.jsonl": {
+		`{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"first"}}`,
+		`{"type":"attachment","uuid":"att1","parentUuid":"u1"}`,
+		`{"type":"attachment","uuid":"att2","parentUuid":"att1"}`,
+		`{"type":"assistant","uuid":"a1","parentUuid":"att2","message":{"role":"assistant","content":[{"type":"text","text":"second"}]}}`,
+		`{"type":"attachment","uuid":"att3","parentUuid":"a1"}`,
+		`{"type":"user","uuid":"u2","parentUuid":"att3","message":{"role":"user","content":"third"}}`,
+	}})
+	s := New(root)
+	lanes, err := s.Lanes(context.Background())
+	if err != nil {
+		t.Fatalf("Lanes: %v", err)
+	}
+	got := collect(t, s, lanes[0])
+	if len(got) != 3 {
+		t.Fatalf("want 3 messages, got %d", len(got))
+	}
+	want := []string{"", "u1", "a1"}
+	for i, w := range want {
+		if got[i].ParentID != w {
+			t.Errorf("message %d ParentID = %q, want %q", i, got[i].ParentID, w)
+		}
+	}
+}
+
 func TestParentIDStitchesCompactionBoundary(t *testing.T) {
 	root := writeLanes(t, "-p", map[string][]string{"s.jsonl": {
 		`{"type":"user","uuid":"before","parentUuid":null,"message":{"role":"user","content":"early work"}}`,
@@ -136,10 +165,12 @@ func TestParentIDStitchesCompactionBoundary(t *testing.T) {
 	if got[0].ParentID != "" {
 		t.Errorf("true root must have no parent, got %q", got[0].ParentID)
 	}
-	// Without the logicalParentUuid fallback this is "", which would split one
-	// conversation into one lane per compaction.
-	if got[1].ParentID != "boundary" {
-		t.Errorf("compaction not stitched: ParentID = %q, want %q", got[1].ParentID, "boundary")
+	// The boundary itself is a system record, so the summary resolves past it to
+	// the last real turn before the compaction. Without following
+	// logicalParentUuid this would be "", splitting one conversation into one
+	// lane per compaction.
+	if got[1].ParentID != "before" {
+		t.Errorf("compaction not stitched: ParentID = %q, want %q", got[1].ParentID, "before")
 	}
 }
 

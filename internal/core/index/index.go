@@ -18,7 +18,7 @@ import (
 // schemaVersion is bumped whenever the tables change. The index holds no unique
 // state — it rebuilds from the transcripts in seconds — so an old schema is
 // dropped and recreated rather than migrated.
-const schemaVersion = 2
+const schemaVersion = 3
 
 const dropAll = `
 DROP TABLE IF EXISTS parts;
@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS messages (
 	parent_id TEXT    NOT NULL,
 	role      TEXT    NOT NULL,
 	at        INTEGER NOT NULL,
+	preview   TEXT    NOT NULL DEFAULT '',
+	tools     TEXT    NOT NULL DEFAULT '',
 	PRIMARY KEY (lane_id, seq)
 );
 CREATE INDEX IF NOT EXISTS messages_by_msg_id ON messages(msg_id);
@@ -192,7 +194,8 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 	}
 	defer insertPart.Close() //nolint:errcheck // tx-scoped
 	insertMsg, err := tx.PrepareContext(ctx,
-		`INSERT INTO messages (lane_id,seq,msg_id,parent_id,role,at) VALUES (?,?,?,?,?,?)`)
+		`INSERT INTO messages (lane_id,seq,msg_id,parent_id,role,at,preview,tools) `+
+			`VALUES (?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return Stats{}, fmt.Errorf("prepare message insert: %w", err)
 	}
@@ -205,7 +208,7 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 			stats.Messages++
 			laneMsgs++
 			if _, err := insertMsg.ExecContext(ctx, m.LaneID, laneMsgs, m.ID,
-				m.ParentID, string(m.Role), m.At.Unix()); err != nil {
+				m.ParentID, string(m.Role), m.At.Unix(), previewOf(m), toolsOf(m)); err != nil {
 				return fmt.Errorf("insert message: %w", err)
 			}
 			for _, p := range m.Parts {
@@ -297,6 +300,78 @@ func (ix *Index) Search(ctx context.Context, q Query) ([]Hit, error) {
 		return nil, fmt.Errorf("iterate hits: %w", err)
 	}
 	return hits, nil
+}
+
+// MessageRow is one turn as the spine needs it: enough to draw a line without
+// reading the transcript again.
+type MessageRow struct {
+	Seq      int
+	ID       string
+	ParentID string
+	Role     model.Role
+	At       time.Time
+	Preview  string
+	Tools    string
+}
+
+// LaneMessages returns one lane's turns in file order.
+func (ix *Index) LaneMessages(ctx context.Context, laneID string) ([]MessageRow, error) {
+	rows, err := ix.db.QueryContext(ctx,
+		`SELECT seq, msg_id, parent_id, role, at, preview, tools
+		 FROM messages WHERE lane_id = ? ORDER BY seq`, laneID)
+	if err != nil {
+		return nil, fmt.Errorf("read lane messages: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only
+
+	var out []MessageRow
+	for rows.Next() {
+		var r MessageRow
+		var role string
+		var at int64
+		if err := rows.Scan(&r.Seq, &r.ID, &r.ParentID, &role, &at, &r.Preview, &r.Tools); err != nil {
+			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		r.Role = model.Role(role)
+		r.At = time.Unix(at, 0)
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate messages: %w", err)
+	}
+	return out, nil
+}
+
+// previewMax bounds the stored one-line summary of a turn.
+const previewMax = 240
+
+// previewOf is the first readable text of a turn, collapsed to one line. Tool
+// calls are summarised by name instead, since their raw input is rarely what a
+// human is scanning for.
+func previewOf(m model.Message) string {
+	text := m.Text(model.PartText)
+	if strings.TrimSpace(text) == "" {
+		text = m.Text(model.PartThinking)
+	}
+	text = strings.Join(strings.Fields(text), " ")
+	if len(text) > previewMax {
+		text = text[:previewMax]
+	}
+	return text
+}
+
+// toolsOf lists the tools a turn invoked, in order, without repeats.
+func toolsOf(m model.Message) string {
+	var names []string
+	seen := make(map[string]bool)
+	for _, p := range m.Parts {
+		if p.Kind != model.PartToolUse || p.Tool == "" || seen[p.Tool] {
+			continue
+		}
+		seen[p.Tool] = true
+		names = append(names, p.Tool)
+	}
+	return strings.Join(names, ",")
 }
 
 // Overlaps returns every message that appears in more than one lane, which is

@@ -56,6 +56,9 @@ Every design decision below rests on something measured on this machine
 | Native forks preserve uuids | `--fork-session`: 11/11 shared records ⇒ **topology is free** |
 | …but not fork *direction* | A fork rewrites `sessionId` throughout and records no origin; timestamps are copied too, so nothing in the file says which came first |
 | File birth time does say | Demo tree: root 23:21:00 → fork 23:21:20 → fork 23:21:39 → fork 23:21:49, all correct. APFS reports it; Linux may not |
+| `parentUuid` names bookkeeping, not turns | A message's parent is usually an `attachment`; resolving through them is what makes a chain reconstruct at all |
+| In-file branching is the common case | One real 25,571-turn lane: **220 junctions, 228 departing branches** — none of them visible in Claude Code |
+| A tool result wears the user role | Treating every user record as a landmark left a long spine 85% uncollapsed; requiring text cut 20,506 segments to 3,015 |
 | Fork files are standalone | Child holds a full copy of the prefix ⇒ **deletion never cascades** |
 | Stale reads are guarded | Edit after external change: *"has been modified on disk since I read it"* |
 | Local search is trivial | 60,616 units · 1.8 s full rebuild · 74.5 MB · **0.1–0.3 ms** queries |
@@ -168,7 +171,10 @@ project
 ```
 
 **Edges**
-- `parent` — `parentUuid`, within a file
+- `parent` — `parentUuid`, within a file, **resolved through bookkeeping
+  records**: Claude Code threads attachments and snapshots into the same chain,
+  so a turn's raw parent is usually not a turn. A Source must report the nearest
+  conversational ancestor or nothing downstream reconstructs
 - `fork` — derived: two conversations sharing a uuid; fork point = last shared.
   *Direction* is decided by file birth time, because a fork copies the parent's
   records verbatim — timestamps included — and people routinely fork and then
@@ -245,34 +251,38 @@ for. Archived lanes collapse to one line.
 ### 6.2 The Spine — inside one conversation
 
 ```
-┌ nvidia-delivery ─────────────────────────────────────── 412 turns · running ──┐
-│                                                                               │
-│  ▲ turn 1 · 08-06 11:04                                              [g] top  │
-│  ⋯ 180 turns                                                  47 Bash · 6 Edit│
-│  │                                                                            │
-│  ● t288  you     the gcsfuse mount is hard-coded to 10+1 per second           │
-│  ├─● gcsfuse-density                                     63 turns · done      │
-│  │                                                                            │
-│  ⋯ 96 turns                                                                   │
-│ ══ compacted · auto · 1,000,241 → 15,033 tok · 985,208 dropped · 2m21s ══ [b] │
-│  ⌗ t396  summary   This session is being continued from a previous convers…   │
-│  ⊕ t401  Explore · "find the ORDER BY key in the dispatcher"   6 turns    ▸   │
-│  ⚠ t407  Bash exit 1 · kubectl get pods --context mirzakhani                  │
-│  ⋯ 4 turns                                                                    │
-│ ▓● t412  you     NULLS LAST starved the unstamped backlog — try option C      │
-│  ├─◆ try-option-c                                       38 turns · needs you  │
-│  │                                                                            │
-│  ⋯ 8 turns                                                          idle 2m   │
-│  ▼ turn 412 · 09-03 17:38                                            [G] end  │
-│                                                                               │
-├───────────────────────────────────────────────────────────────────────────────┤
-│ ↑↓ move   ␣ expand   ↵ read   b branch here   / search here   esc map         │
-└───────────────────────────────────────────────────────────────────────────────┘
+ Lane:      9419fd9c                                        <j/k>   move
+ Turns:     25571                                           <g/G>   first/last
+ Junctions: 220                                             <n/N>   next junction
+ Branches:  228                                             <esc>   back to map
+
+╭─ Spine(Debug annotation pipeline dataset issue)[3015] ─────────────────────────╮
+│  TURN  WHO     WHAT HAPPENED                                           BRANCHES│
+│ ●    t1 you     This session is being continued from a previous conver…        │
+│ ⋯    t2         113 turns · 36 Bash · 2 ToolSearch · 1 AskUserQuestion         │
+│ ●  t115 you     [Request interrupted by user for tool use]                     │
+│ ●  t116 you     what's the status                                              │
+│ ⋯  t117         10 turns · 4 Bash                                              │
+│ ●  t127 you     what's the long term fix for this?                             │
+│ ●  t128 claude  Long-term, this breaks into five fixes. Ordered by lev…        │
+│ ●  t138 claude  Bash                                                      ├─ 2 │
+╰────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-93% of a real conversation is a straight line, so runs collapse to a single row
-carrying a tool tally. Only rare things get weight: junctions, subagents, errors,
-long idle gaps. `▓` is the cursor.
+The active path is the parent chain walked back from the **last** record, which
+is exactly how the harness reconstructs context — so the spine shows the
+conversation the model would see, not the file in order.
+
+**Landmarks are human turns that said something.** A tool result is recorded
+with the user role but is the harness returning output; counting it as a
+landmark left a real 25,571-turn lane at 20,506 segments. Requiring text brought
+it to 3,015. Everything between landmarks collapses to one line with a tool
+tally, and a junction is always a landmark however dull the turn.
+
+`n` / `N` step between junctions. With 220 of them in one lane, that is the only
+practical way to find where a thread split.
+
+Not yet drawn: compaction seams (§5.1), subagent lanes (§6.6), and error marks.
 
 ### 6.3 Search — the front door
 
@@ -523,8 +533,9 @@ needs-you — are declared as optional `Capabilities`, never assumed.
 1. ~~**Index + search.**~~ **Done.** Parse, FTS5, `braids search`.
 2. ~~**The Map.**~~ **Done.** Lanes, fork detection by shared uuid, statuses
    from mtime, k9s-style chrome.
-3. **The Spine.** Runs, junctions, errors, read pane. ← *in progress*
-4. **Branch.** File synthesis + `--name` + `--worktree` + spawn.
+3. ~~**The Spine.**~~ **Done** for runs and junctions; compaction seams,
+   subagent lanes and error marks still to come.
+4. **Branch.** File synthesis + `--name` + `--worktree` + spawn. ← *next*
 5. **Live.** Watcher, byte-offset tailing, hooks, needs-you queue.
 6. **Subagents.** Nested lanes, promote.
 7. **Housekeeping.** Archive, sweep, trash, undo.

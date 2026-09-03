@@ -40,6 +40,7 @@ map flags:
   --ascii          use narrow ASCII glyphs (for terminals that draw
                    box characters double-wide)
   --print          render one frame to stdout instead of opening the map
+  --lane ID        with --print, render that lane's spine instead of the map
   --width N        frame width when printing (default 92)
 
 search flags:
@@ -140,6 +141,7 @@ func cmdMap(args []string, out *printer) error {
 	ascii := fs.Bool("ascii", os.Getenv("BRAIDS_ASCII") != "", "use narrow ASCII glyphs")
 	db := fs.String("db", "", "index location")
 	print := fs.Bool("print", false, "render one frame to stdout instead of opening the map")
+	lane := fs.String("lane", "", "with --print, render this lane's spine instead of the map")
 	width := fs.Int("width", 92, "frame width when printing")
 	height := fs.Int("height", 24, "frame height when printing")
 	if err := fs.Parse(args); err != nil {
@@ -155,8 +157,13 @@ func cmdMap(args []string, out *printer) error {
 	}
 	defer ix.Close() //nolint:errcheck // read-only
 
-	opts := tui.Options{ASCII: *ascii, Source: "claudecode", IndexPath: dbPath}
 	ctx := context.Background()
+	opts := tui.Options{
+		ASCII:     *ascii,
+		Source:    "claudecode",
+		IndexPath: dbPath,
+		LoadSpine: tui.SpineLoader(ctx, ix),
+	}
 	if !*print {
 		return tui.Run(ctx, ix, opts)
 	}
@@ -164,7 +171,7 @@ func cmdMap(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
-	out.printf("%s\n", tui.Render(forest, opts, *width, *height))
+	out.printf("%s\n", tui.Render(forest, opts, *lane, *width, *height))
 	return out.Err()
 }
 

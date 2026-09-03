@@ -37,27 +37,33 @@ func (m Model) facts() []fact {
 func hints() []hint {
 	return []hint{
 		{"j/k", "move"},
+		{"↵", "open spine"},
 		{"/", "filter"},
-		{"g/G", "first/last"},
 		{"q", "quit"},
 	}
 }
 
-// info renders the facts block and the key hints side by side. The hint block
-// is padded to a fixed width before being pushed right, so the keys form a
-// clean column instead of a ragged edge.
-func (m Model) info() string {
-	facts, keys := m.facts(), hints()
+// info renders the map's facts block and key hints.
+func (m Model) info() string { return m.factsBlock(m.facts(), hints()) }
+
+// factsBlock renders labelled facts on the left and key hints on the right. The
+// hint block is padded to a fixed width before being pushed right, so the keys
+// form a clean column instead of a ragged edge.
+func (m Model) factsBlock(facts []fact, keys []hint) string {
 	hintWidth := hintCol
 	for _, k := range keys {
 		hintWidth = max(hintWidth, hintCol+lipgloss.Width(k.action))
+	}
+	labelWidth := labelCol
+	for _, f := range facts {
+		labelWidth = max(labelWidth, lipgloss.Width(f.label)+2)
 	}
 
 	lines := make([]string, 0, infoLines)
 	for i := range infoLines {
 		left := ""
 		if i < len(facts) {
-			left = m.theme.Label.Render(padRight(facts[i].label+":", labelCol)) +
+			left = m.theme.Label.Render(padRight(facts[i].label+":", labelWidth)) +
 				m.theme.Value.Render(facts[i].value)
 		}
 		right := strings.Repeat(" ", hintWidth)
@@ -79,8 +85,10 @@ func (m Model) panelTitle() string {
 	return fmt.Sprintf("Conversations(%s)[%d]", scope, len(m.visible))
 }
 
-func (m Model) panelTop() string {
-	title := " " + m.panelTitle() + " "
+func (m Model) panelTop() string { return m.panelTopTitled(m.panelTitle()) }
+
+func (m Model) panelTopTitled(name string) string {
+	title := " " + name + " "
 	rule := m.width - 4 - lipgloss.Width(title)
 	if rule < 0 {
 		rule = 0

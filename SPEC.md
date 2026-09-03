@@ -54,6 +54,8 @@ Every design decision below rests on something measured on this machine
 | …but they race | A third resume inherited `ROOT, RIGHT`; `LEFT` was silently orphaned |
 | Merge by splice works | Re-parented sibling branch → `ROOT, LEFT, RIGHT` in one context |
 | Native forks preserve uuids | `--fork-session`: 11/11 shared records ⇒ **topology is free** |
+| …but not fork *direction* | A fork rewrites `sessionId` throughout and records no origin; timestamps are copied too, so nothing in the file says which came first |
+| File birth time does say | Demo tree: root 23:21:00 → fork 23:21:20 → fork 23:21:39 → fork 23:21:49, all correct. APFS reports it; Linux may not |
 | Fork files are standalone | Child holds a full copy of the prefix ⇒ **deletion never cascades** |
 | Stale reads are guarded | Edit after external change: *"has been modified on disk since I read it"* |
 | Local search is trivial | 60,616 units · 1.8 s full rebuild · 74.5 MB · **0.1–0.3 ms** queries |
@@ -87,8 +89,10 @@ Every design decision below rests on something measured on this machine
 and parses only the delta. A 145 MB file costs nothing to follow. Full rebuild
 (1.8 s) is the cold start and the panic button.
 
-**Index.** One SQLite file. FTS5 over `text | thinking | tool_use | tool_result`.
-Rebuildable from scratch at any time; holds no unique state.
+**Index.** One SQLite file, stamped with a schema version. FTS5 over
+`text | thinking | tool_use | tool_result`, plus a `messages` table carrying the
+parent chain that the graph and the spine are derived from. Rebuildable from
+scratch at any time; a version mismatch drops and recreates it.
 
 **Sidecar.** Names, colors, archive flags, worktree paths. Topology is *not*
 stored — it is derived from shared uuids, so it survives losing the sidecar.
@@ -165,7 +169,12 @@ project
 
 **Edges**
 - `parent` — `parentUuid`, within a file
-- `fork` — derived: two conversations sharing a uuid; fork point = last shared
+- `fork` — derived: two conversations sharing a uuid; fork point = last shared.
+  *Direction* is decided by file birth time, because a fork copies the parent's
+  records verbatim — timestamps included — and people routinely fork and then
+  carry on in the original, so "diverged first" proves nothing. Where no birth
+  time exists, weaker evidence in order: containment, then length, then
+  last-touched
 - `spawn` — `meta.json.toolUseId` → the parent's `tool_use` block
 - `issued` — `sourceToolAssistantUUID`, tool_result → the assistant turn
 
@@ -511,9 +520,10 @@ needs-you — are declared as optional `Capabilities`, never assumed.
 
 ## 11. Build order
 
-1. **Index + search.** Parse, FTS5, `/`. Useful alone on day one.
-2. **The Map.** Lanes, fork detection by shared uuid, statuses from mtime.
-3. **The Spine.** Runs, junctions, errors, read pane.
+1. ~~**Index + search.**~~ **Done.** Parse, FTS5, `braids search`.
+2. ~~**The Map.**~~ **Done.** Lanes, fork detection by shared uuid, statuses
+   from mtime, k9s-style chrome.
+3. **The Spine.** Runs, junctions, errors, read pane. ← *in progress*
 4. **Branch.** File synthesis + `--name` + `--worktree` + spawn.
 5. **Live.** Watcher, byte-offset tailing, hooks, needs-you queue.
 6. **Subagents.** Nested lanes, promote.

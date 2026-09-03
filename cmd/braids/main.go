@@ -155,6 +155,7 @@ func cmdMap(args []string, out *printer) error {
 	db := fs.String("db", "", "index location")
 	print := fs.Bool("print", false, "render one frame to stdout instead of opening the map")
 	lane := fs.String("lane", "", "with --print, render this lane's spine instead of the map")
+	query := fs.String("query", "", "with --print, render the search screen for this query")
 	width := fs.Int("width", 92, "frame width when printing")
 	height := fs.Int("height", 24, "frame height when printing")
 	if err := fs.Parse(args); err != nil {
@@ -199,6 +200,9 @@ func cmdMap(args []string, out *printer) error {
 			return resumeCommand(ctx, ix, laneID)
 		},
 		Spawn: spawner(ctx, ix),
+		Search: func(query, scope string) ([]index.Hit, error) {
+			return ix.Search(ctx, index.Query{Text: query, Lane: scope, Limit: 200})
+		},
 		Branch: func(laneID string, turn int, name string) (string, error) {
 			return branchAt(ctx, ix, provenance, laneID, turn, name)
 		},
@@ -216,7 +220,7 @@ func cmdMap(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
-	out.printf("%s\n", tui.Render(forest, opts, *lane, *width, *height))
+	out.printf("%s\n", tui.Render(forest, opts, *lane, *query, *width, *height))
 	return out.Err()
 }
 

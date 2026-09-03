@@ -41,8 +41,8 @@ func (m Model) facts() []fact {
 func hints() []hint {
 	return []hint{
 		{"j/k", "move"}, {"↵", "open spine"},
-		{"/", "filter"}, {"y", "copy resume"},
-		{"o", "open terminal"}, {"q", "quit"},
+		{"/", "search"}, {"f", "filter lanes"},
+		{"y/o", "copy / open"}, {"q", "quit"},
 	}
 }
 

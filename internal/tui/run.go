@@ -34,10 +34,17 @@ func Run(ctx context.Context, ix *index.Index, opts Options) error {
 // Render draws a single frame of the map and returns it. It exists so the map
 // can be inspected without a terminal — for screenshots, for debugging, and
 // for golden tests that would otherwise need a pty.
-func Render(forest *graph.Forest, opts Options, laneID string, width, height int) string {
+func Render(forest *graph.Forest, opts Options, laneID, query string, width, height int) string {
 	m := NewModel(forest, opts)
 	m.width, m.height = width, height
 	m.clamp()
+	if query != "" {
+		m = m.openSearch()
+		for _, r := range query {
+			m = m.searchKey(string(r))
+		}
+		return m.renderSearch()
+	}
 	if laneID == "" {
 		return m.render()
 	}

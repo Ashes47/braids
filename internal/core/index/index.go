@@ -108,11 +108,13 @@ type Hit struct {
 	LaneTitle string
 	Project   string
 	MessageID string
-	Kind      model.PartKind
-	Role      model.Role
-	Tool      string
-	Snippet   string
-	At        time.Time
+	// Seq is the turn number within the lane, so a result can be jumped to.
+	Seq     int
+	Kind    model.PartKind
+	Role    model.Role
+	Tool    string
+	Snippet string
+	At      time.Time
 }
 
 // Open opens or creates the index at path.
@@ -409,9 +411,11 @@ func (ix *Index) Search(ctx context.Context, q Query) ([]Hit, error) {
 
 	query := `
 		SELECT parts.lane_id, COALESCE(lanes.title,''), COALESCE(lanes.project,''),
-		       parts.msg_id, parts.kind, parts.role, parts.tool, parts.at,
-		       snippet(parts, 0, '[', ']', '…', 12)
-		FROM parts LEFT JOIN lanes ON lanes.id = parts.lane_id
+		       parts.msg_id, COALESCE(messages.seq,0), parts.kind, parts.role,
+		       parts.tool, parts.at, snippet(parts, 0, '[', ']', '…', 12)
+		FROM parts
+		LEFT JOIN lanes ON lanes.id = parts.lane_id
+		LEFT JOIN messages ON messages.lane_id = parts.lane_id AND messages.msg_id = parts.msg_id
 		WHERE ` + strings.Join(where, " AND ") + `
 		ORDER BY rank LIMIT ?`
 
@@ -426,7 +430,7 @@ func (ix *Index) Search(ctx context.Context, q Query) ([]Hit, error) {
 		var h Hit
 		var kind, role string
 		var at int64
-		if err := rows.Scan(&h.LaneID, &h.LaneTitle, &h.Project, &h.MessageID,
+		if err := rows.Scan(&h.LaneID, &h.LaneTitle, &h.Project, &h.MessageID, &h.Seq,
 			&kind, &role, &h.Tool, &at, &h.Snippet); err != nil {
 			return nil, fmt.Errorf("scan hit: %w", err)
 		}

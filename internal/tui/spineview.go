@@ -171,6 +171,8 @@ func (m Model) spineKey(key string) (Model, tea.Cmd) {
 		s.cursor += m.bodyHeight() / 2
 	case "ctrl+u", "pgup":
 		s.cursor -= m.bodyHeight() / 2
+	case "f":
+		s.filter.active = true
 	case "b":
 		return m.startBranch(), nil
 	case "y":
@@ -333,8 +335,9 @@ func (m Model) spineInfo() string {
 	}
 	keys := []hint{
 		{"j/k", "move"}, {"b", "branch here"},
-		{"/", "filter"}, {"↵", "open branch"},
-		{"n/N", "next split"}, {"y/o", "copy / open"},
+		{"/", "search"}, {"f", "filter turns"},
+		{"↵", "open branch"}, {"n/N", "next split"},
+		{"y/o", "copy / open"}, {"esc", "back"},
 	}
 	return m.factsBlock(facts, keys)
 }

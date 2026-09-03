@@ -495,3 +495,36 @@ func TestCopyResumeWorksFromTheSpineToo(t *testing.T) {
 		t.Error("the spine should confirm the copy")
 	}
 }
+
+func TestSlashSearchesAndFFilters(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("a", "gcsfuse density", "app", 5, time.Hour),
+		laneInfo("b", "schema refactor", "app", 5, time.Hour),
+	}
+	m := NewModel(forestOf(lanes, nil), Options{
+		ASCII:  true,
+		Search: func(string, string) ([]index.Hit, error) { return nil, nil },
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 90, 20
+
+	// / is the front door: full text across every conversation.
+	slash, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	if slash.(Model).mode != searchMode {
+		t.Fatal("/ should open search")
+	}
+
+	// f narrows the list in front of you, which is a different job.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	m = updated.(Model)
+	if !m.filter.active {
+		t.Fatal("f should open the lane filter")
+	}
+	for _, k := range []string{"s", "c", "h"} {
+		updated, _ := m.Update(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
+		m = updated.(Model)
+	}
+	if len(m.visible) != 1 || m.visible[0].node.Lane.ID != "b" {
+		t.Errorf("filter left %d lanes, want the schema one", len(m.visible))
+	}
+}

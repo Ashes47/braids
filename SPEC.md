@@ -322,23 +322,34 @@ Not yet drawn: compaction seams (§5.1), subagent lanes (§6.6), and error marks
 ### 6.3 Search — the front door
 
 ```
-┌ search ───────────────────────────────────────────────────────────────────────┐
-│  › gcsfuse density▏                                  1,281 hits · 0.2 ms      │
-│    scope  [all]  this convo   this branch     kind  all  you  claude  tool    │
-├───────────────────────────────────────────────────────────────────────────────┤
-│ ▸ nvidia-delivery    t288  you        the [gcsfuse] mount is hard-coded to 1  │
-│   gcsfuse-density    t12   tool_use   gke-[gcsfuse]-tmp → gke-[gcsfuse]-buff  │
-│   nvidia-delivery    t301  claude     …raising [density] past 10 needs the s  │
-│   schema-refactor    t44   tool_res   mount option [density]=1 rejected by t  │
-│   ○ mdt-contention   t9    you        does [gcsfuse] contend on the same MDT  │
-├───────────────────────────────────────────────────────────────────────────────┤
-│ ↵ jump to message   b branch from result   ⇥ scope   esc cancel               │
-└───────────────────────────────────────────────────────────────────────────────┘
+ Query:    gcsfuse density                    <↵>     jump to turn <↑/↓>   move
+ Scope:    every conversation                 <tab>   change scope <esc>   back
+ Hits:     130
+ Took:     22.8ms
+
+╭─ Search(everywhere)[130] ──────────────────────────────────────────────────────╮
+│ CONVERSATION              TURN KIND        MATCH                               │
+│ Review annotation pip…   t2916 tool_result …Solve post [gcsfuse] [density] st…│
+│ Review annotation pip…   t3467 tool_result …memory/[gcsfuse]-[density]-arc.md …│
+│ Agent observability a…    t298 tool_result …[gcsfuse]-[density] t12 tool_use …│
+╰────────────────────────────────────────────────────────────────────────────────╯
+ /gcsfuse density▏  ↵ jump · tab scope · esc back
 ```
 
-Typing re-highlights matching lanes on the map underneath, live, every keystroke.
-At 0.2 ms that is free. `b` on a result branches directly from that message —
-search → land → branch is the core loop, and it never touches the graph.
+Full text over every message, thought and tool call — the same FTS5 index
+`braids search` uses. It runs on every keystroke because it can: a query costs
+milliseconds even over 60,000 rows.
+
+**`↵` jumps to the turn, not to the result.** It opens the conversation with the
+cursor on the matching turn — landing inside the thread is the point, since a
+result on its own says nothing about what came before it. When the turn was
+swallowed by a collapsed run, it lands on the run.
+
+**`tab` changes scope.** Opened from a conversation, search starts inside it;
+`tab` widens to everything and back.
+
+`/` and `f` are different jobs and deserve different keys: `/` searches every
+conversation, `f` narrows the list already in front of you.
 
 ### 6.4 Needs-you — the switchboard
 
@@ -601,9 +612,11 @@ needs-you — are declared as optional `Capabilities`, never assumed.
 5. ~~**Live.**~~ **Done** for the watcher and in-place refresh: the map follows
    sessions as they are written, and a branch appears without any command.
    Hooks and the needs-you queue still to come. ← *next*
-6. **Subagents.** Nested lanes, promote.
-7. **Housekeeping.** Archive, sweep, trash, undo.
-8. **Merge.** Splice with preview.
+6. ~~**Search screen.**~~ **Done**: full text across every conversation, with
+   `↵` jumping to the turn it found.
+7. **Subagents.** Nested lanes, promote.
+8. **Housekeeping.** Archive, sweep, trash, undo.
+9. **Merge.** Splice with preview.
 
 Steps 1–2 are already a tool worth opening.
 

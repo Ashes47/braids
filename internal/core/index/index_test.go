@@ -388,3 +388,22 @@ func TestSyncPicksUpANewLane(t *testing.T) {
 		t.Errorf("a new lane was not indexed: %+v", hits)
 	}
 }
+
+func TestSearchHitsCarryTheirTurnNumber(t *testing.T) {
+	ctx := context.Background()
+	ix := openIndex(t)
+	if _, err := ix.Rebuild(ctx, newFixture()); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	hits, err := ix.Search(ctx, Query{Text: "sidecar", Lane: "main"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("want 1 hit, got %d", len(hits))
+	}
+	// Without the turn number a result cannot be jumped to.
+	if hits[0].Seq != 2 {
+		t.Errorf("Seq = %d, want 2 (the second turn of the lane)", hits[0].Seq)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/Ashes47/braids/internal/core/graph"
+	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/model"
 )
 
@@ -60,6 +61,9 @@ type Options struct {
 	// user has configured no way to launch one, which is the default: braids
 	// copies the command instead of guessing at their terminal.
 	Spawn func(laneID string) error
+	// Search runs a full-text query over every indexed message and tool call.
+	// An empty scope searches everywhere; a lane ID narrows to one.
+	Search func(query, scope string) ([]index.Hit, error)
 }
 
 // changedMsg says transcripts moved and the map should catch up.
@@ -71,6 +75,7 @@ type mode int
 const (
 	mapMode mode = iota
 	spineMode
+	searchMode
 )
 
 // Model is the Map: every conversation and every branch as a single forest.
@@ -86,13 +91,16 @@ type Model struct {
 	changes   <-chan struct{}
 	resumeCmd func(string) (string, error)
 	spawn     func(string) error
+	searchFn  func(string, string) ([]index.Hit, error)
 
 	notice string
 	failed bool
 
-	mode  mode
-	spine *spineState
-	stack []*spineState
+	mode     mode
+	returnTo mode
+	spine    *spineState
+	stack    []*spineState
+	search   *searchState
 
 	all     []row
 	visible []row
@@ -125,6 +133,7 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		changes:   opts.Changes,
 		resumeCmd: opts.ResumeCommand,
 		spawn:     opts.Spawn,
+		searchFn:  opts.Search,
 		now:       time.Now,
 		width:     80,
 		height:    24,
@@ -237,10 +246,14 @@ func (m Model) catchUp() Model {
 
 // View renders whichever screen is active, full-screen.
 func (m Model) View() tea.View {
-	if m.mode == spineMode && m.spine != nil {
+	switch {
+	case m.mode == searchMode && m.search != nil:
+		return tea.View{Content: m.renderSearch(), AltScreen: true}
+	case m.mode == spineMode && m.spine != nil:
 		return tea.View{Content: m.renderSpine(), AltScreen: true}
+	default:
+		return tea.View{Content: m.render(), AltScreen: true}
 	}
-	return tea.View{Content: m.render(), AltScreen: true}
 }
 
 // normalizeKey folds the spellings a terminal may use for the same key. Return
@@ -261,6 +274,12 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key == "ctrl+c" || (key == "q" && !m.editing()) {
 		return m, tea.Quit
 	}
+	if m.mode == searchMode {
+		return m.searchKey(key), nil
+	}
+	if key == "/" && m.searchFn != nil {
+		return m.openSearch(), nil
+	}
 	if m.mode == spineMode {
 		return m.spineKey(key)
 	}
@@ -272,6 +291,8 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "enter", "l", "right":
 		return m.openSpine(), nil
+	case "f":
+		m.filter.active = true
 	case "y":
 		return m.copyResume()
 	case "o":
@@ -348,10 +369,14 @@ func (m Model) withNotice(text string, failed bool) Model {
 // editing reports whether a text field currently owns typed keys, so that "q"
 // types a letter instead of quitting.
 func (m Model) editing() bool {
-	if m.mode == spineMode && m.spine != nil {
+	switch {
+	case m.mode == searchMode:
+		return true
+	case m.mode == spineMode && m.spine != nil:
 		return m.spine.filter.active || m.spine.naming.active
+	default:
+		return m.filter.active
 	}
-	return m.filter.active
 }
 
 // apply narrows the visible rows to those matching the filter. Filtering drops

@@ -469,6 +469,34 @@ tests via `teatest` should assert frame width, not just content.
 
 ---
 
+### 9.1 Other harnesses
+
+v1 is Claude Code only. The primitive generalises to any agent that writes local
+transcripts and can resume one by id, so `store.Source` is a port from day one —
+but no second adapter ships until someone asks for it.
+
+Verified on this machine:
+
+| Harness | Storage | Shape | Fit |
+|---|---|---|---|
+| Claude Code | `~/.claude/projects/**/*.jsonl` | **DAG** — uuid/parentUuid | native |
+| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (493 MB here) | flat log, **no parent pointers** | works, file-level branches only |
+| opencode | SQLite since v1.2 (was per-file JSON) | messages + parts | adapter reads SQLite |
+| Aider | `.aider.chat.history.md` | markdown, linear, no resume-by-id | poor fit |
+
+Two consequences for the domain model:
+
+- **Branch points must not be assumed to live inside a transcript.** They do in
+  Claude Code; in Codex a fork is only ever a separate file.
+- **Prefix fingerprinting is the universal fork-detection method** — hash the
+  opening run of turns and match across lanes. Shared-uuid matching (§5) is the
+  exact fast path where a harness offers it, not the general algorithm.
+
+Claude Code luxuries — subagent forest, `compactMetadata`, hook-driven
+needs-you — are declared as optional `Capabilities`, never assumed.
+
+---
+
 ## 10. Non-goals
 
 - Not a chat client. braids never sends a message to Claude.

@@ -206,3 +206,80 @@ func TestSpineFilterWithNoMatchesExplainsItself(t *testing.T) {
 		t.Error("expected an empty-state message in the spine")
 	}
 }
+
+func TestBranchFromASpineTurn(t *testing.T) {
+	var gotLane, gotName string
+	var gotTurn int
+	m := spineModel(t, demoSegments(), nil)
+	m.branch = func(lane string, turn int, name string) (string, error) {
+		gotLane, gotTurn, gotName = lane, turn, name
+		return "newlane01234", nil
+	}
+	m = m.openSpine()
+	m = m.spineKey("j") // move to the collapsed run
+
+	m = m.spineKey("b")
+	if !strings.Contains(plain(m.renderSpine()), "collapsed run") {
+		t.Error("branching from a run should explain why it cannot")
+	}
+
+	m = m.spineKey("k") // back to the first turn
+	m = m.spineKey("b")
+	if !m.spine.naming.active {
+		t.Fatal("b should open the name field")
+	}
+	if got := m.spine.naming.text; got != "queue-stalling" {
+		t.Errorf("suggested name = %q", got)
+	}
+	// The suggestion is editable.
+	m = m.spineKey("backspace")
+	m = m.spineKey("!")
+	m = m.spineKey("enter")
+
+	if gotLane != "lane1234abcd" || gotTurn != 1 || gotName != "queue-stallin!" {
+		t.Errorf("branch called with (%q, %d, %q)", gotLane, gotTurn, gotName)
+	}
+	out := plain(m.renderSpine())
+	if !strings.Contains(out, "branched at t1") || !strings.Contains(out, "newlane") {
+		t.Errorf("expected a confirmation:\n%s", out)
+	}
+}
+
+func TestBranchFailureIsShown(t *testing.T) {
+	m := spineModel(t, demoSegments(), nil)
+	m.branch = func(string, int, string) (string, error) { return "", errors.New("disk is full") }
+	m = m.openSpine()
+	m = m.spineKey("b")
+	m = m.spineKey("enter")
+	if !strings.Contains(plain(m.renderSpine()), "disk is full") {
+		t.Error("a failed branch must be reported")
+	}
+}
+
+func TestBranchUnavailableWithoutASource(t *testing.T) {
+	m := spineModel(t, demoSegments(), nil)
+	m.branch = nil
+	m = m.openSpine()
+	m = m.spineKey("b")
+	if m.spine.naming.active {
+		t.Error("the name field should not open when branching is unavailable")
+	}
+	if !strings.Contains(plain(m.renderSpine()), "unavailable") {
+		t.Error("expected an explanation")
+	}
+}
+
+func TestSuggestName(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"why is the queue stalling", "queue-stalling"},
+		{"", "branch-t7"},
+		{"the and for with this", "branch-t7"},
+		{"NULLS LAST starved the unstamped backlog", "nulls-last-starved"},
+	}
+	for _, tt := range tests {
+		got := suggestName(graph.Segment{Seq: 7, Preview: tt.in})
+		if got != tt.want {
+			t.Errorf("suggestName(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}

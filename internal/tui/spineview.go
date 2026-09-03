@@ -17,9 +17,13 @@ type spineState struct {
 	segs    []graph.Segment
 	visible []graph.Segment
 	filter  filterInput
-	cursor  int
-	offset  int
-	err     error
+	// naming is the branch-name field, opened with `b` on a turn.
+	naming filterInput
+	notice string
+	failed bool
+	cursor int
+	offset int
+	err    error
 }
 
 // apply narrows the spine to segments matching the filter. A run is matched on
@@ -55,6 +59,9 @@ func (m Model) openSpine() Model {
 
 func (m Model) spineKey(key string) Model {
 	s := m.spine
+	if s.naming.active {
+		return m.namingKey(key)
+	}
 	if s.filter.key(key) {
 		s.apply()
 		m.clampSpine()
@@ -77,6 +84,8 @@ func (m Model) spineKey(key string) Model {
 		s.cursor += m.bodyHeight() / 2
 	case "ctrl+u", "pgup":
 		s.cursor -= m.bodyHeight() / 2
+	case "b":
+		return m.startBranch()
 	case "n":
 		s.cursor = nextJunction(s.visible, s.cursor, 1)
 	case "N":
@@ -145,12 +154,29 @@ func (m Model) renderSpine() string {
 	}
 	b.WriteString(m.panelBottom())
 	b.WriteString("\n")
-	if s.filter.active {
-		b.WriteString(m.typingLine(s.filter))
-	} else {
-		b.WriteString(" " + m.theme.Label.Render(s.lane.ID))
-	}
+	b.WriteString(m.spineStatus())
 	return b.String()
+}
+
+// spineStatus is the bottom line: the field being typed, the last outcome, or
+// the lane's identity.
+func (m Model) spineStatus() string {
+	s := m.spine
+	switch {
+	case s.naming.active:
+		return " " + m.theme.Column.Render("branch name ") + m.theme.Value.Render(s.naming.text) +
+			m.theme.Column.Render("▏") + "  " + m.theme.Label.Render("enter create · esc cancel")
+	case s.filter.active:
+		return m.typingLine(s.filter)
+	case s.notice != "":
+		style := m.theme.Alive
+		if s.failed {
+			style = m.theme.Column
+		}
+		return " " + style.Render(s.notice)
+	default:
+		return " " + m.theme.Label.Render(s.lane.ID)
+	}
 }
 
 func (m Model) spineEmptyMessage() string {
@@ -189,9 +215,9 @@ func (m Model) spineInfo() string {
 	}
 	keys := []hint{
 		{"j/k", "move"},
+		{"b", "branch here"},
 		{"/", "filter"},
 		{"n/N", "next junction"},
-		{"esc", "back to map"},
 	}
 	return m.factsBlock(facts, keys)
 }
@@ -263,6 +289,86 @@ func (m Model) segmentParts(seg graph.Segment) (plain, styled string) {
 		bodyStyle.Render(body) + " " +
 		m.theme.Column.Render(branches)
 	return plain, styled
+}
+
+// startBranch opens the name field, pre-filled from the turn being branched.
+func (m Model) startBranch() Model {
+	s := m.spine
+	if m.branch == nil || len(s.visible) == 0 {
+		s.notice, s.failed = "branching is unavailable for this source", true
+		return m
+	}
+	seg := s.visible[s.cursor]
+	if seg.Kind == graph.SegRun {
+		s.notice, s.failed = "pick a single turn to branch from, not a collapsed run", true
+		return m
+	}
+	s.naming = filterInput{active: true, text: suggestName(seg)}
+	s.notice, s.failed = "", false
+	return m
+}
+
+func (m Model) namingKey(key string) Model {
+	s := m.spine
+	switch key {
+	case "esc":
+		s.naming = filterInput{}
+	case "enter":
+		return m.commitBranch()
+	default:
+		s.naming.edit(key)
+	}
+	return m
+}
+
+// commitBranch writes the new lane and reports what to do with it. The index is
+// deliberately not rebuilt here: it takes seconds, and a screen that freezes on
+// every branch would discourage the one action the tool exists for.
+func (m Model) commitBranch() Model {
+	s := m.spine
+	seg := s.visible[s.cursor]
+	name := strings.TrimSpace(s.naming.text)
+	s.naming = filterInput{}
+
+	id, err := m.branch(s.lane.ID, seg.Seq, name)
+	if err != nil {
+		s.notice, s.failed = err.Error(), true
+		return m
+	}
+	s.notice, s.failed = fmt.Sprintf("branched at t%d → %s · run `braids index` to see it on the map",
+		seg.Seq, shortID(id)), false
+	return m
+}
+
+// suggestName proposes a branch name from the turn's own words. It is only a
+// starting point: the field is editable, and a lane can always be renamed.
+func suggestName(seg graph.Segment) string {
+	words := strings.Fields(strings.ToLower(seg.Preview))
+	var out []string
+	for _, w := range words {
+		w = strings.Trim(w, ".,:;!?\"'`()[]{}")
+		if len(w) < 3 || stopWords[w] {
+			continue
+		}
+		out = append(out, w)
+		if len(out) == 3 {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return fmt.Sprintf("branch-t%d", seg.Seq)
+	}
+	return strings.Join(out, "-")
+}
+
+// stopWords are the words that make a name say nothing.
+var stopWords = map[string]bool{
+	"the": true, "and": true, "for": true, "with": true, "this": true, "that": true,
+	"you": true, "can": true, "was": true, "are": true, "but": true, "not": true,
+	"our": true, "its": true, "his": true, "her": true, "has": true, "had": true,
+	"why": true, "how": true, "what": true, "when": true, "who": true, "does": true,
+	"did": true, "will": true, "would": true, "should": true, "could": true,
+	"from": true, "into": true, "your": true, "than": true, "then": true,
 }
 
 // nextJunction finds the next turn that a branch leaves from, wrapping around.

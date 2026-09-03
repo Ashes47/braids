@@ -41,6 +41,9 @@ type Options struct {
 	// LoadSpine reduces one lane to its spine. Passing it as a function keeps
 	// the views free of any dependency on the index.
 	LoadSpine func(laneID string) ([]graph.Segment, error)
+	// Branch cuts a new conversation from a lane at a turn, returning the new
+	// lane's ID. Nil disables branching, which is what a read-only Source gets.
+	Branch func(laneID string, turn int, name string) (string, error)
 }
 
 // mode is which screen the map is showing.
@@ -59,6 +62,7 @@ type Model struct {
 	indexPath string
 	now       func() time.Time
 	loadSpine func(string) ([]graph.Segment, error)
+	branch    func(string, int, string) (string, error)
 
 	mode  mode
 	spine *spineState
@@ -89,6 +93,7 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		source:    opts.Source,
 		indexPath: opts.IndexPath,
 		loadSpine: opts.LoadSpine,
+		branch:    opts.Branch,
 		now:       time.Now,
 		width:     80,
 		height:    24,
@@ -182,7 +187,7 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // types a letter instead of quitting.
 func (m Model) editing() bool {
 	if m.mode == spineMode && m.spine != nil {
-		return m.spine.filter.active
+		return m.spine.filter.active || m.spine.naming.active
 	}
 	return m.filter.active
 }

@@ -422,9 +422,17 @@ full copy of its prefix.
 
 ## 8. Core interactions
 
-**Branch from a message.** Walk `parentUuid` from the chosen node to the root,
-write those records to a new session file with a fresh `sessionId`, append a
-`last-prompt`, spawn `claude --resume <new> --name <branch>`. Original untouched.
+**Branch from a message.** Walk the raw chain from the chosen turn to the root —
+bookkeeping records included, since the harness wrote them — copy those records
+into a new file with a fresh `sessionId`, prepend a `custom-title` so the branch
+is named on the map, and append a `last-prompt` pinning the leaf. The new file is
+built in a temp file and renamed into place, so an interrupted branch leaves
+either a whole lane or none. **The source is opened read-only and never written
+to**, which a test asserts by hashing it before and after.
+
+Verified end to end: a branch cut at turn 2 of a real conversation resumed under
+`claude --resume` with exactly that prefix as its context, and appeared on the
+map as a child at `← t2`.
 
 **Clone a graph.** Copy each lane's file, rewrite `sessionId`, keep message uuids.
 Topology reassembles itself, because forks are detected by shared uuids.
@@ -442,6 +450,11 @@ session is untouched. Permitted from any *completed* turn; only the in-flight
 turn is blocked, because its records are still being written. This is the point:
 you watch an agent go wrong, branch from three turns before it did, and try
 another way without killing it.
+
+**Auto-naming today** is a plain stop-word filter over the turn's own words —
+`"why is the queue stalling"` → `queue-stalling` — pre-filled into an editable
+field. The df-banded version below is the intended upgrade once the index
+exposes term frequencies; it is not what ships yet.
 
 **Auto-naming, no model involved.** Score the tokens of the forked message by
 document frequency across the corpus — free, since the FTS5 index already has
@@ -542,7 +555,8 @@ needs-you — are declared as optional `Capabilities`, never assumed.
    from mtime, k9s-style chrome.
 3. ~~**The Spine.**~~ **Done** for runs and junctions; compaction seams,
    subagent lanes and error marks still to come.
-4. **Branch.** File synthesis + `--name` + `--worktree` + spawn. ← *next*
+4. ~~**Branch.**~~ **Done** for file synthesis, naming and the `b` key.
+   `--worktree` and spawning a terminal still to come. ← *next*
 5. **Live.** Watcher, byte-offset tailing, hooks, needs-you queue.
 6. **Subagents.** Nested lanes, promote.
 7. **Housekeeping.** Archive, sweep, trash, undo.

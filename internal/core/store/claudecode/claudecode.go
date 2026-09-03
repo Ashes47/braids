@@ -51,6 +51,7 @@ func (s *Source) Capabilities() store.Capabilities {
 		Subagents:       true,
 		Compaction:      true,
 		StableIDs:       true,
+		Branching:       true,
 	}
 }
 

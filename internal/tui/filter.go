@@ -33,17 +33,29 @@ func (f *filterInput) key(k string) bool {
 		f.active = false
 		return true
 
-	case k == "backspace" && f.active:
-		if r := []rune(f.text); len(r) > 0 {
-			f.text = string(r[:len(r)-1])
-		}
-		return true
-
 	case k == "/" && !f.active:
 		f.active = true
 		return true
 
-	case f.active && len([]rune(k)) == 1:
+	case f.active:
+		return f.edit(k)
+	}
+	return false
+}
+
+// edit applies a keypress to the text itself: a character or a backspace.
+// Shared by every one-line field so they all behave the same way.
+func (f *filterInput) edit(k string) bool {
+	switch {
+	case k == "backspace":
+		if r := []rune(f.text); len(r) > 0 {
+			f.text = string(r[:len(r)-1])
+		}
+		return true
+	case k == "space":
+		f.text += " "
+		return true
+	case len([]rune(k)) == 1:
 		f.text += k
 		return true
 	}

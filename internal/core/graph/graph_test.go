@@ -143,3 +143,39 @@ func ids(nodes []*Node) []string {
 	}
 	return out
 }
+
+func TestBuildBreaksAmbiguousTiesTowardsTheShallowestAncestor(t *testing.T) {
+	// root 1..4; mid forked at 4 so it holds 1..4; leaf forked at 2 so it holds
+	// 1..2. leaf's prefix is byte-identical in root and mid — both share exactly
+	// two turns with it — so which one it came from is unknowable from content.
+	// Attaching to root keeps the tree honest rather than inventing depth.
+	lanes := []index.LaneInfo{
+		born(lane("root", 4, at(40)), at(-30)),
+		born(lane("mid", 6, at(50)), at(-20)),
+		born(lane("leaf", 2, at(60)), at(-10)),
+	}
+	var overlaps []index.Overlap
+	for i, id := range []string{"m1", "m2"} {
+		overlaps = append(overlaps, shared(id, "root", i+1, "mid", i+1)...)
+		overlaps = append(overlaps, shared(id, "root", i+1, "leaf", i+1)...)
+		overlaps = append(overlaps, shared(id, "mid", i+1, "leaf", i+1)...)
+	}
+	overlaps = append(overlaps, shared("m3", "root", 3, "mid", 3)...)
+	overlaps = append(overlaps, shared("m4", "root", 4, "mid", 4)...)
+	timelines := map[string][]time.Time{
+		"root": {at(0), at(5), at(10), at(15)},
+		"mid":  {at(0), at(5), at(10), at(15), at(20), at(25)},
+		"leaf": {at(0), at(5)},
+	}
+
+	// Repeat: the pair map iterates randomly, so a tie must not flip between runs.
+	for range 25 {
+		f := Build(lanes, overlaps, timelines)
+		if got := f.ByID["leaf"].ParentID; got != "root" {
+			t.Fatalf("leaf parent = %q, want root (shallowest ancestor on a tie)", got)
+		}
+		if got := f.ByID["mid"].ParentID; got != "root" {
+			t.Fatalf("mid parent = %q, want root", got)
+		}
+	}
+}

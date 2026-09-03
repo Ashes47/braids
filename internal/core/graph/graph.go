@@ -53,22 +53,53 @@ func Build(lanes []index.LaneInfo, overlaps []index.Overlap, timelines map[strin
 		forest.ByID[l.ID] = &Node{Lane: l}
 	}
 
-	// When a lane overlaps several others, the longest shared prefix is its
-	// nearest ancestor, so keep the strongest relationship seen.
-	best := make(map[string]int, len(lanes))
-	for k, p := range sharedPairs(overlaps, forest.ByID) {
-		child, parent, forkSeq := direction(k, p, forest.ByID, timelines)
-		if p.count <= best[child] {
-			continue
-		}
-		best[child] = p.count
+	for child, c := range candidates(sharedPairs(overlaps, forest.ByID), forest.ByID, timelines) {
 		node := forest.ByID[child]
-		node.ParentID = parent
-		node.ForkSeq = forkSeq
+		node.ParentID = c.parent
+		node.ForkSeq = c.forkSeq
 	}
 
 	link(forest)
 	return forest
+}
+
+// candidate is one lane's best-supported parent.
+type candidate struct {
+	parent  string
+	forkSeq int
+	count   int
+}
+
+// candidates picks each lane's parent from every lane it overlaps.
+//
+// The longest shared prefix wins: that is the nearest ancestor. A tie is
+// genuinely ambiguous — two lanes can hold byte-identical prefixes — so it is
+// broken towards the *earliest* candidate, attaching to the shallowest common
+// ancestor rather than inventing a deeper relationship, and then by ID so the
+// same transcripts always draw the same tree.
+func candidates(pairs map[key]*pair, nodes map[string]*Node, timelines map[string][]time.Time) map[string]candidate {
+	best := make(map[string]candidate, len(nodes))
+	for k, p := range pairs {
+		child, parent, forkSeq := direction(k, p, nodes, timelines)
+		next := candidate{parent: parent, forkSeq: forkSeq, count: p.count}
+		cur, seen := best[child]
+		if !seen || better(next, cur, nodes) {
+			best[child] = next
+		}
+	}
+	return best
+}
+
+// better reports whether a beats b as a parent for the same lane.
+func better(a, b candidate, nodes map[string]*Node) bool {
+	if a.count != b.count {
+		return a.count > b.count
+	}
+	ac, bc := nodes[a.parent].Lane.Created, nodes[b.parent].Lane.Created
+	if !ac.IsZero() && !bc.IsZero() && !ac.Equal(bc) {
+		return ac.Before(bc)
+	}
+	return a.parent < b.parent
 }
 
 // sharedPairs counts, for every pair of lanes, how many messages they share and

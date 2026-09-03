@@ -17,6 +17,7 @@ import (
 
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/model"
+	"github.com/Ashes47/braids/internal/core/store"
 	"github.com/Ashes47/braids/internal/core/store/claudecode"
 	"github.com/Ashes47/braids/internal/tui"
 )
@@ -34,6 +35,7 @@ usage:
   braids index [--root DIR]              rebuild the index from local transcripts
   braids search [flags] QUERY            search every indexed message
   braids lanes                           list indexed conversations
+  braids branch --lane ID --at TURN      cut a new conversation at that turn
   braids version
 
 map flags:
@@ -73,6 +75,8 @@ func run(args []string, w io.Writer) error {
 		return cmdSearch(args[1:], out)
 	case "lanes":
 		return cmdLanes(args[1:], out)
+	case "branch":
+		return cmdBranch(args[1:], out)
 	case "version":
 		out.printf("braids %s (%s)\n", version, commit)
 		return out.Err()
@@ -163,6 +167,9 @@ func cmdMap(args []string, out *printer) error {
 		Source:    "claudecode",
 		IndexPath: dbPath,
 		LoadSpine: tui.SpineLoader(ctx, ix),
+		Branch: func(laneID string, turn int, name string) (string, error) {
+			return branchAt(ctx, ix, laneID, turn, name)
+		},
 	}
 	if !*print {
 		return tui.Run(ctx, ix, opts)
@@ -255,6 +262,100 @@ func cmdSearch(args []string, out *printer) error {
 	}
 	out.printf("\n%d hits in %s\n", len(hits), time.Since(start).Round(time.Microsecond))
 	return out.Err()
+}
+
+func cmdBranch(args []string, out *printer) error {
+	fs := flag.NewFlagSet("branch", flag.ContinueOnError)
+	laneRef := fs.String("lane", "", "conversation to branch from (ID prefix)")
+	at := fs.Int("at", 0, "turn number to branch at")
+	name := fs.String("name", "", "name for the new conversation")
+	db := fs.String("db", "", "index location")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *laneRef == "" || *at <= 0 {
+		return errors.New("branch needs --lane and --at (try: braids branch --lane abc123 --at 12)")
+	}
+
+	ix, err := openIndex(*db)
+	if err != nil {
+		return err
+	}
+	defer ix.Close() //nolint:errcheck // read-only
+
+	ctx := context.Background()
+	newID, err := branchAt(ctx, ix, *laneRef, *at, *name)
+	if err != nil {
+		return err
+	}
+	out.printf("branched %s at turn %d\n  new conversation %s\n  resume with: claude --resume %s%s\n",
+		shortID(*laneRef), *at, newID, newID, nameFlag(*name))
+	out.printf("\nrun `braids index` to see it on the map\n")
+	return out.Err()
+}
+
+// branchAt cuts a lane at a turn number and returns the new lane's ID. Shared
+// by the CLI and the map so both take exactly the same path.
+func branchAt(ctx context.Context, ix *index.Index, laneRef string, turn int, name string) (string, error) {
+	lane, err := findLane(ctx, ix, laneRef)
+	if err != nil {
+		return "", err
+	}
+	msgs, err := ix.LaneMessages(ctx, lane.ID)
+	if err != nil {
+		return "", err
+	}
+	var target string
+	for _, m := range msgs {
+		if m.Seq == turn {
+			target = m.ID
+			break
+		}
+	}
+	if target == "" {
+		return "", fmt.Errorf("turn %d is not in %s (it has %d turns)", turn, shortID(lane.ID), len(msgs))
+	}
+	root, err := claudecode.DefaultRoot()
+	if err != nil {
+		return "", err
+	}
+	branch, err := claudecode.New(root).Branch(ctx, store.BranchRequest{
+		Lane: lane.Lane, AtMessage: target, Name: name,
+	})
+	if err != nil {
+		return "", err
+	}
+	return branch.ID, nil
+}
+
+func nameFlag(name string) string {
+	if name == "" {
+		return ""
+	}
+	return fmt.Sprintf(" --name %q", name)
+}
+
+// findLane resolves a lane by ID prefix, refusing an ambiguous one rather than
+// guessing which conversation the user meant.
+func findLane(ctx context.Context, ix *index.Index, ref string) (index.LaneInfo, error) {
+	lanes, err := ix.Lanes(ctx)
+	if err != nil {
+		return index.LaneInfo{}, err
+	}
+	var found []index.LaneInfo
+	for _, l := range lanes {
+		if strings.HasPrefix(l.ID, ref) {
+			found = append(found, l)
+		}
+	}
+	switch len(found) {
+	case 0:
+		return index.LaneInfo{}, fmt.Errorf("no conversation starts with %q", ref)
+	case 1:
+		return found[0], nil
+	default:
+		return index.LaneInfo{}, fmt.Errorf("%q matches %d conversations; use more of the ID", ref, len(found))
+	}
 }
 
 func cmdLanes(args []string, out *printer) error {

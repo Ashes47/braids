@@ -52,6 +52,28 @@ Review annotation pipeline …  08-21 19:16  TaskCreate  {"subject":"Solve post 
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
+## Running it
+
+```sh
+make build          # ./braids in the repo
+./braids index      # scan ~/.claude/projects (a few seconds)
+./braids            # open the map
+
+make run            # build + open the map
+make reindex        # rebuild the index
+```
+
+To put it on your PATH:
+
+```sh
+make install                            # -> $(go env GOPATH)/bin/braids
+export PATH="$(go env GOPATH)/bin:$PATH"  # add to ~/.zshrc if not already there
+braids
+```
+
+Other commands: `braids search QUERY [--kind text,tool_use] [--limit N]`,
+`braids lanes`, `braids map --ascii`, `braids version`.
+
 ## Principles
 
 1. **Files are the truth.** Everything is derived from `~/.claude/`. Delete

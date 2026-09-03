@@ -2,12 +2,24 @@ GO      ?= go
 BIN     := braids
 PKGS    := ./...
 
-.PHONY: all build test race lint vet fmt tidy cover clean ci
+.PHONY: all build install run reindex test race lint vet fmt tidy cover clean ci
 
 all: build
 
 build:
 	$(GO) build -trimpath -o $(BIN) ./cmd/braids
+
+# install puts braids on your PATH (needs $(shell $(GO) env GOPATH)/bin in PATH).
+install:
+	$(GO) install ./cmd/braids
+
+# run builds and opens the map without installing.
+run: build
+	./$(BIN)
+
+# reindex rebuilds the search index from ~/.claude/projects.
+reindex: build
+	./$(BIN) index
 
 test:
 	$(GO) test $(PKGS)

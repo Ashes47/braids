@@ -38,9 +38,6 @@ CREATE VIRTUAL TABLE IF NOT EXISTS parts USING fts5(
 	tokenize='porter unicode61'
 );`
 
-// batchSize bounds how many rows accumulate before a flush during Rebuild.
-const batchSize = 2000
-
 // Index is a searchable snapshot of every lane a Source can see.
 type Index struct {
 	db *sql.DB

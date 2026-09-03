@@ -50,10 +50,11 @@ func main() {
 	}
 }
 
-func run(args []string, out io.Writer) error {
+func run(args []string, w io.Writer) error {
+	out := newPrinter(w)
 	if len(args) == 0 {
-		fmt.Fprint(out, usage)
-		return nil
+		out.printf("%s", usage)
+		return out.Err()
 	}
 	switch args[0] {
 	case "index":
@@ -63,11 +64,11 @@ func run(args []string, out io.Writer) error {
 	case "lanes":
 		return cmdLanes(args[1:], out)
 	case "version":
-		fmt.Fprintf(out, "braids %s (%s)\n", version, commit)
-		return nil
+		out.printf("braids %s (%s)\n", version, commit)
+		return out.Err()
 	case "help", "-h", "--help":
-		fmt.Fprint(out, usage)
-		return nil
+		out.printf("%s", usage)
+		return out.Err()
 	default:
 		return fmt.Errorf("unknown command %q (try: braids help)", args[0])
 	}
@@ -120,7 +121,7 @@ func openIndex(dbFlag string) (*index.Index, error) {
 	return index.Open(path)
 }
 
-func cmdIndex(args []string, out io.Writer) error {
+func cmdIndex(args []string, out *printer) error {
 	fs := flag.NewFlagSet("index", flag.ContinueOnError)
 	fs.SetOutput(out)
 	root := fs.String("root", "", "transcript root (default ~/.claude/projects)")
@@ -146,12 +147,12 @@ func cmdIndex(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "indexed %d lanes · %d messages · %d searchable parts in %s\n",
+	out.printf("indexed %d lanes · %d messages · %d searchable parts in %s\n",
 		stats.Lanes, stats.Messages, stats.Parts, stats.Duration.Round(time.Millisecond))
-	return nil
+	return out.Err()
 }
 
-func cmdSearch(args []string, out io.Writer) error {
+func cmdSearch(args []string, out *printer) error {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	fs.SetOutput(out)
 	lane := fs.String("lane", "", "restrict to one conversation")
@@ -184,23 +185,25 @@ func cmdSearch(args []string, out io.Writer) error {
 		return err
 	}
 	if len(hits) == 0 {
-		fmt.Fprintf(out, "no matches for %q\n", query)
-		return nil
+		out.printf("no matches for %q\n", query)
+		return out.Err()
 	}
 
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	for _, h := range hits {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
-			laneLabel(h), h.At.Format("01-02 15:04"), kindLabel(h), oneLine(h.Snippet))
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+			laneLabel(h), h.At.Format("01-02 15:04"), kindLabel(h), oneLine(h.Snippet)); err != nil {
+			return fmt.Errorf("write results: %w", err)
+		}
 	}
 	if err := tw.Flush(); err != nil {
 		return fmt.Errorf("write results: %w", err)
 	}
-	fmt.Fprintf(out, "\n%d hits in %s\n", len(hits), time.Since(start).Round(time.Microsecond))
-	return nil
+	out.printf("\n%d hits in %s\n", len(hits), time.Since(start).Round(time.Microsecond))
+	return out.Err()
 }
 
-func cmdLanes(args []string, out io.Writer) error {
+func cmdLanes(args []string, out *printer) error {
 	fs := flag.NewFlagSet("lanes", flag.ContinueOnError)
 	fs.SetOutput(out)
 	db := fs.String("db", "", "index location")
@@ -218,20 +221,25 @@ func cmdLanes(args []string, out io.Writer) error {
 		return err
 	}
 	if len(lanes) == 0 {
-		fmt.Fprintln(out, "no lanes indexed yet (run: braids index)")
-		return nil
+		out.printf("no lanes indexed yet (run: braids index)\n")
+		return out.Err()
 	}
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "LANE\tPROJECT\tMSGS\tUPDATED\tTITLE")
+	rows := []string{"LANE\tPROJECT\tMSGS\tUPDATED\tTITLE"}
 	for _, l := range lanes {
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\n",
-			shortID(l.ID), l.Project, l.Messages, l.Updated.Format("01-02 15:04"), l.Title)
+		rows = append(rows, fmt.Sprintf("%s\t%s\t%d\t%s\t%s",
+			shortID(l.ID), l.Project, l.Messages, l.Updated.Format("01-02 15:04"), l.Title))
+	}
+	for _, r := range rows {
+		if _, err := fmt.Fprintln(tw, r); err != nil {
+			return fmt.Errorf("write lanes: %w", err)
+		}
 	}
 	if err := tw.Flush(); err != nil {
 		return fmt.Errorf("write lanes: %w", err)
 	}
-	fmt.Fprintf(out, "\n%d lanes\n", len(lanes))
-	return nil
+	out.printf("\n%d lanes\n", len(lanes))
+	return out.Err()
 }
 
 // parseKinds validates the --kind flag, refusing unknown kinds rather than

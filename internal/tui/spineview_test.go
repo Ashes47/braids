@@ -311,7 +311,7 @@ func TestSpineShowsForksInlineAtTheirTurn(t *testing.T) {
 	if rows[0].fork != nil || rows[1].fork == nil {
 		t.Errorf("fork placed at row %d, want immediately after t1", indexOfFork(rows))
 	}
-	if !strings.Contains(out, "2 / 1 forked out") {
+	if !strings.Contains(out, "2 kept here · 1 forked out") {
 		t.Errorf("facts should count lanes that forked out:\n%s", out)
 	}
 }
@@ -378,5 +378,22 @@ func TestNextSplitFindsForksAsWellAsJunctions(t *testing.T) {
 	}
 	if got := nextJunction(rows, 0, 1); got != 1 {
 		t.Errorf("next split = %d, want the fork row at 1", got)
+	}
+}
+
+func TestDescribeBranches(t *testing.T) {
+	tests := []struct {
+		kept, forked int
+		want         string
+	}{
+		{0, 0, "none"},
+		{3, 0, "3 kept here"},
+		{0, 2, "2 forked out"},
+		{3, 2, "3 kept here · 2 forked out"},
+	}
+	for _, tt := range tests {
+		if got := describeBranches(tt.kept, tt.forked); got != tt.want {
+			t.Errorf("describeBranches(%d,%d) = %q, want %q", tt.kept, tt.forked, got, tt.want)
+		}
 	}
 }

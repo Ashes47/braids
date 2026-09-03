@@ -322,7 +322,7 @@ func (m Model) spineInfo() string {
 		{"Lane", shortID(m.spine.lane.ID)},
 		{"Turns", fmt.Sprintf("%d", m.spine.lane.Messages)},
 		{"Junctions", fmt.Sprintf("%d", junctions)},
-		{"Branches", fmt.Sprintf("%d / %d forked out", alternates, forks)},
+		{"Branches", describeBranches(alternates, forks)},
 	}
 	keys := []hint{
 		{"j/k", "move"}, {"b", "branch here"},
@@ -330,6 +330,25 @@ func (m Model) spineInfo() string {
 		{"n/N", "next split"}, {"esc", "back"},
 	}
 	return m.factsBlock(facts, keys)
+}
+
+// describeBranches names the two kinds of branch a conversation can have, since
+// a bare "0 / 0" says nothing about what is being counted.
+//
+//	kept here  — an alternative still inside this transcript, left behind by a
+//	             rewind or an edited message. Claude Code cannot show these.
+//	forked out — a branch that became a conversation of its own.
+func describeBranches(kept, forked int) string {
+	switch {
+	case kept == 0 && forked == 0:
+		return "none"
+	case forked == 0:
+		return fmt.Sprintf("%d kept here", kept)
+	case kept == 0:
+		return fmt.Sprintf("%d forked out", forked)
+	default:
+		return fmt.Sprintf("%d kept here · %d forked out", kept, forked)
+	}
 }
 
 func (m Model) spineColumns() string {

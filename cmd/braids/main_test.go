@@ -125,10 +125,24 @@ func TestRunRejectsBadInput(t *testing.T) {
 }
 
 func TestRunHelp(t *testing.T) {
-	for _, args := range [][]string{{}, {"help"}, {"--help"}} {
+	// Bare `braids` opens the map, so only the explicit help verbs print usage.
+	for _, args := range [][]string{{"help"}, {"--help"}} {
 		if out := runCmd(t, args...); !strings.Contains(out, "manage Claude Code conversations") {
 			t.Errorf("run(%v) = %q", args, out)
 		}
+	}
+}
+
+func TestMapRefusesToOpenWithNothingIndexed(t *testing.T) {
+	// An empty index must fail with advice rather than reaching for a TTY.
+	db := filepath.Join(t.TempDir(), "index.db")
+	var buf bytes.Buffer
+	err := run([]string{"map", "--db", db}, &buf)
+	if err == nil {
+		t.Fatal("want an error for an empty index")
+	}
+	if !strings.Contains(err.Error(), "braids index") {
+		t.Errorf("err = %v, want it to suggest running braids index", err)
 	}
 }
 

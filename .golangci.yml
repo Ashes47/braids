@@ -1,0 +1,32 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - misspell
+    - nilerr
+    - revive
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: early-return
+        - name: unused-parameter
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [unparam, gocritic]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

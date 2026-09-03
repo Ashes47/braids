@@ -12,7 +12,18 @@ It never talks to Claude. It arranges the conversations you have with Claude.
 
 ## Status
 
-Design complete, implementation not started. See [SPEC.md](SPEC.md).
+Early. The index and search are working; the TUI is next. See [SPEC.md](SPEC.md)
+for the full design and [§11](SPEC.md#11-build-order) for the build order.
+
+```
+$ braids index
+indexed 17 lanes · 59811 messages · 59839 searchable parts in 5.8s
+
+$ braids search "gcsfuse density" --limit 3
+Review annotation pipeline …  08-21 19:16  TaskCreate  {"subject":"Solve post [gcsfuse] [density] stall…
+...
+3 hits in 1.2ms
+```
 
 ## Design in one screen
 

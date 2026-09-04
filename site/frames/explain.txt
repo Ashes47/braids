@@ -1,0 +1,21 @@
+~/src/storefront/checkout/handler.go
+2 commits, against 6 conversations that ran in this repository
+
+996282d5  2026-09-04 13:55  checkout: defer the tax lookup out of the lock
+    Checkout stalls at 80% under load, then recovers on its own  ·  storefront  ·  24 turns in the window
+      last said 4 minutes before, at turn 24:
+        so we need the deferral to rejoin before receipt
+      braids --lane a1b2c3d4
+    Option C: move the lock inside the tax client and re-run the load test  ·  storefront  ·  6 turns in the window
+      last said under a minute before, at turn 6:
+        stall is gone and the receipt total is right
+      braids --lane b2c3d4e5
+
+5b407b53  2026-09-02 14:05  checkout: take the tax quote inline
+    Blobstore is doing 11 KiB reads per object instead of batching them  ·  storefront  ·  4 turns in the window
+      last said 7 minutes before, at turn 4:
+        the reader asks per object, not per batch
+      braids --lane d4e5f6a7
+
+These conversations were live when those commits landed. braids does not
+know that they caused them; it knows when things happened and where.

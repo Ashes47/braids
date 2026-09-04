@@ -157,10 +157,50 @@ def fill(size: int, line: str) -> bytes:
     return "".join(out).encode()
 
 
-def write_corpus(out: pathlib.Path) -> None:
+# CORPUS_NOW is when this fake history pretends to be. Everything dated in it,
+# transcripts and commits alike, is measured back from here, because explain
+# joins the two by time and a demo where they disagree demonstrates nothing.
+CORPUS_NOW = dt.datetime(2026, 9, 4, 12, 0, tzinfo=dt.timezone.utc)
+
+
+def build_repo(out: pathlib.Path) -> pathlib.Path:
+    """A git repository the fake sessions ran in.
+
+    `braids explain` joins what git knows about a file to what braids knows
+    about the conversations that were live when it changed, so demonstrating it
+    needs both halves. The commits are dated to land inside the windows the
+    fake conversations cover, which is the whole point of the screen.
+    """
+    repo = out / "storefront"
+    (repo / "checkout").mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
+    run = lambda *args: subprocess.run(["git", "-C", str(repo), *args], check=True,
+                                       capture_output=True, env=env)
+    run("init", "--quiet")
+    run("config", "user.email", "you@example.invalid")
+    run("config", "user.name", "you")
+
+    for minutes_ago, body, subject in (
+        # Inside the windows the fake conversations cover: one during the
+        # blobstore session two days ago, one at the end of the checkout one.
+        (2875, "func Quote(ctx context.Context) error { return nil }\n",
+         "checkout: take the tax quote inline"),
+        (5, "func Quote(ctx context.Context) error { return deferred(ctx) }\n",
+         "checkout: defer the tax lookup out of the lock"),
+    ):
+        (repo / "checkout" / "handler.go").write_text(body)
+        stamp = (CORPUS_NOW - dt.timedelta(minutes=minutes_ago)).isoformat()
+        run("add", "checkout/handler.go")
+        subprocess.run(["git", "-C", str(repo), "commit", "--quiet", "-m", subject,
+                        "--date", stamp], check=True, capture_output=True,
+                       env=dict(env, GIT_AUTHOR_DATE=stamp, GIT_COMMITTER_DATE=stamp))
+    return repo
+
+
+def write_corpus(out: pathlib.Path, repo: pathlib.Path) -> None:
     project = out / "projects" / "-Users-you-src-storefront"
     project.mkdir(parents=True, exist_ok=True)
-    now = dt.datetime(2026, 9, 4, 12, 0, tzinfo=dt.timezone.utc)
+    now = CORPUS_NOW
 
     for sid, story_key, title, age, parent, owes in LANES:
         story = STORIES[story_key]
@@ -173,7 +213,7 @@ def write_corpus(out: pathlib.Path) -> None:
             if who == "you":
                 lines.append(json.dumps({
                     "type": "user", "uuid": uid, "parentUuid": prev, "timestamp": at,
-                    "cwd": "/Users/you/src/storefront",
+                    "cwd": str(repo),
                     "message": {"role": "user", "content": text},
                 }))
             elif tool:
@@ -246,7 +286,8 @@ def main() -> None:
     out = pathlib.Path(args.out).expanduser()
     if out.exists():
         subprocess.run(["rm", "-rf", str(out)], check=True)
-    write_corpus(out)
+    repo = build_repo(out)
+    write_corpus(out, repo)
 
     db = out / "braids" / "index.db"
     subprocess.run([args.braids, "index", "--root", str(out / "projects"), "--db", str(db)],
@@ -288,6 +329,17 @@ def main() -> None:
         "bin": (9, ["--screen", "bin", "--discard",
                     str(out / "jobs" / lane / "tmp" / "row-ids-out.txt")]),
     }
+    if args.frames:
+        explain = subprocess.run(
+            [args.braids, "explain", "--db", str(db),
+             str(repo / "checkout" / "handler.go")],
+            capture_output=True, text=True).stdout
+        explain = explain.replace(str(repo), "~/src/storefront")
+        into = pathlib.Path(args.frames).expanduser()
+        into.mkdir(parents=True, exist_ok=True)
+        (into / "explain.txt").write_text(explain)
+        print("=== explain ===\n" + explain)
+
     for name, (height, extra) in shots.items():
         frame = subprocess.run(
             args.shots.split() + ["--db", str(db), "--root", str(out / "projects"),

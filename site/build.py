@@ -13,7 +13,7 @@ the first thing a reader notices.
 import pathlib
 import shutil
 
-from chrome import CSS, footer, frame, mark, nav, page
+from chrome import CSS, capture, footer, frame, mark, nav, page
 
 HERE = pathlib.Path(__file__).parent
 
@@ -26,11 +26,12 @@ BODY = f"""
     <img class="mark" src="assets/braids-logo.png" alt="braids">
     {mark()}
   </div>
-  <h1>Claude Code runs one thread.<br>Your work runs twelve.</h1>
+  <h1>You worked this out already.<br>braids finds where.</h1>
   <p class="lede">
-    braids draws every conversation you have had, and every branch of it, as
-    one graph. It searches all of them in a few milliseconds. Put the cursor on
-    any message and start a new conversation from exactly there.
+    Every Claude Code session on your machine, searchable in a few
+    milliseconds: what you asked, what came back, what a tool returned, what a
+    project remembers. Find the turn where you worked something out, then start
+    a new conversation from exactly there.
   </p>
   <p class="lede">
     braids never talks to a model. It arranges the conversations you have with
@@ -51,12 +52,61 @@ BODY = f"""
   </p>
 </div></header>
 
-<section id="map"><div class="wrap">
-  <h2><span class="kicker">The map</span>Every conversation, and where it came from</h2>
+<section id="find"><div class="wrap">
+  <h2><span class="kicker">Find it</span>One field over everything you have</h2>
   <p class="sub">
-    One row per conversation. A branch sits under the conversation it was cut
-    from, tagged with the turn it left at, so the shape of the week is the shape
-    of the list.
+    Every message and tool call, every memory a project keeps, and the name of
+    every file a session left on disk. Each hit says which kind it is, and
+    <kbd>↵</kbd> opens the screen that can do something about it: a
+    conversation at that turn, a memory in the reader, a file in the browser.
+  </p>
+  {frame("search", cmd="braids", then="<kbd>/</kbd> and a word")}
+  <p class="more"><a href="docs/search/">Scopes, kinds, dates, and how the ranking works</a></p>
+</div></section>
+
+<section id="explain"><div class="wrap">
+  <h2><span class="kicker">Explain</span>Which conversation produced this file</h2>
+  <p class="sub">
+    git knows when a file changed. braids knows what was being said in that
+    directory at the time. Joining them gets you from a line of code back to
+    the conversation it came out of.
+  </p>
+  {capture("explain", "braids explain checkout/handler.go",
+           "Real output, against a fake repository and a fake ~/.claude.")}
+  <p>
+    It does not claim those conversations caused those commits, and it says so
+    outright. What it offers is where to look, which is the honest thing to
+    compute without reading a word of meaning. That is also why it costs a git
+    log and two columns rather than a model.
+  </p>
+  <p class="more"><a href="docs/reference/#commands">Every command braids has</a></p>
+</div></section>
+
+<section id="branch"><div class="wrap">
+  <h2><span class="kicker">Then carry on</span>Start a new conversation from any turn</h2>
+  <p class="sub">
+    Finding the moment is half of it. The spine collapses a long conversation
+    to its landmarks: what you asked, what came back, where a tool call failed,
+    where the context got compacted, where each branch left.
+  </p>
+  {frame("spine", cmd="braids", then="<kbd>↵</kbd> on a conversation")}
+  <p>
+    Put the cursor on a turn and press <kbd>b</kbd>. braids writes a new session
+    file holding that turn's ancestry, then hands you the
+    <code>claude --resume</code> command. Ask for a workspace and the branch
+    gets its own git worktree, so two branches can edit the same file and never
+    collide. The transcript you branched from is opened read only, and a test
+    hashes it before and after to prove it.
+  </p>
+  <p class="more"><a href="docs/branching/">Branching, merging and promoting a subagent</a></p>
+</div></section>
+
+<section id="map"><div class="wrap">
+  <h2><span class="kicker">The map</span>And the shape of all of it</h2>
+  <p class="sub">
+    One row per conversation, with branches under the conversation they were cut
+    from, tagged with the turn they left at. Search is the front door; this is
+    where you see what you have and who is waiting on you.
   </p>
   {frame("map", cmd="braids")}
   <ul class="plain">
@@ -69,37 +119,6 @@ BODY = f"""
       captured against a fake <code>~/.claude</code>.</li>
   </ul>
   <p class="more"><a href="docs/map/">Every key on the map and the spine</a></p>
-</div></section>
-
-<section id="branch"><div class="wrap">
-  <h2><span class="kicker">Branch</span>Start a new conversation from any turn</h2>
-  <p class="sub">
-    A long conversation is mostly turns you will never read again. The spine
-    keeps the landmarks and collapses the rest: what you asked, what came back,
-    where a tool call failed, where the context got compacted, where each
-    branch left.
-  </p>
-  {frame("spine", cmd="braids", then="<kbd>↵</kbd> on a conversation")}
-  <p>
-    Put the cursor on a turn and press <kbd>b</kbd>. braids writes a new
-    session file holding that turn's ancestry, then hands you the
-    <code>claude --resume</code> command. Ask for a workspace and the branch
-    gets its own git worktree, so two branches can edit the same file and never
-    collide. The transcript you branched from is opened read only, and a test
-    hashes it before and after to prove it.
-  </p>
-  <p class="more"><a href="docs/branching/">Branching, merging and promoting a subagent</a></p>
-</div></section>
-
-<section id="search"><div class="wrap">
-  <h2><span class="kicker">Search</span>One field over everything you have</h2>
-  <p class="sub">
-    Every message and tool call, every memory a project keeps, and the name of
-    every file a session left on disk. Each hit says which kind it is, and
-    <kbd>↵</kbd> opens the screen that can do something about it.
-  </p>
-  {frame("search", cmd="braids", then="<kbd>/</kbd> and a word")}
-  <p class="more"><a href="docs/search/">Scopes, kinds, and how the ranking works</a></p>
 </div></section>
 
 <section id="more"><div class="wrap">
@@ -259,10 +278,10 @@ function copyCmd(button) {{
 """
 
 PAGE = page(
-    title="braids: branch your Claude Code conversations",
-    description="braids draws every Claude Code conversation and every branch as one graph, searches all of them in milliseconds, and turns any message into the start of a new conversation. Local, open source, nothing hosted.",
-    og_title="braids: conversations don't go in a straight line",
-    og_description="A terminal map of every Claude Code conversation and branch. Search all of them in milliseconds. Fork a new conversation from any message. Local, open source, nothing hosted.",
+    title="braids: find the reasoning in your past Claude Code sessions",
+    description="Every Claude Code session on your machine, searchable in milliseconds. Find the turn where you worked something out, see which conversation produced a file, and start a new conversation from exactly there. Local, open source, nothing hosted.",
+    og_title="braids: you worked this out already",
+    og_description="Every Claude Code session on your machine, searchable in milliseconds, with the conversation behind any file and a new branch from any turn. Local, open source, nothing hosted.",
     body=BODY,
     css=CSS,
 )

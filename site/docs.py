@@ -820,6 +820,24 @@ braids explain internal/core/index/index.go --json
 </p>
 {say("It does not claim the conversation caused the commit, and neither should anything reading it. What it offers is where to look, which is the honest thing braids can compute without reading a word of meaning.")}
 
+<h2 id="skill">The skill</h2>
+<p>
+  The repository carries a Claude Code skill that teaches all of this. Copy it
+  where Claude looks for skills:
+</p>
+{sh("""
+git clone https://github.com/Ashes47/braids /tmp/braids
+cp -r /tmp/braids/skills/braids ~/.claude/skills/
+""")}
+<p>
+  It says when to reach for braids and, as importantly, when not to: searching
+  history on every question is slow and usually beside the point. Three
+  situations only, which are the user referring to earlier work, the user
+  asking why something is the way it is, and Claude about to propose something
+  that may already have been tried.
+</p>
+{say("A test reads that skill and checks every command and flag in it against the program, because a skill lives in somebody's <code>~/.claude/skills</code> where nothing here can fix it if it drifts.")}
+
 <h2 id="checks">Check before you rely on it</h2>
 {sh('''
 braids hooks --json    # .reporting says whether waiting states are trustworthy

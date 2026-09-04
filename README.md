@@ -4,7 +4,7 @@
 
 # braids
 
-**Branch your Claude Code conversations. Resume any of them from any turn.**
+**Find the reasoning in your past Claude Code sessions, and carry on from it.**
 
 [![ci](https://github.com/Ashes47/braids/actions/workflows/ci.yml/badge.svg)](https://github.com/Ashes47/braids/actions/workflows/ci.yml)
 [![go](https://img.shields.io/badge/go-1.25-00ADD8)](https://go.dev)
@@ -16,13 +16,17 @@
 
 ---
 
-Claude Code works best on one linear thread doing one thing. Humans don't work
-that way. A task forks, doubles back, and spawns three side quests, and the
-only way to cope today is to run N terminals and hold the map in your head.
+You have worked this out before. Somewhere in a session three weeks ago is the
+turn where you and Claude figured out why the lock was held across a network
+call, and neither of you can find it.
 
-**braids is that map.** One terminal window alongside your N others. It shows
-every conversation and every branch as a graph, searches all of them in about a
-millisecond, and turns any message into the start of a new branch.
+**braids finds it.** Every Claude Code session on your machine, searchable in a
+few milliseconds: what you asked, what came back, what a tool returned, what a
+project remembers. Then it turns that turn into the start of a new
+conversation, so the reasoning gets reused rather than rediscovered.
+
+It also draws every conversation and every branch as one graph, because once
+you can find things you want to see what you have.
 
 It never talks to Claude. It arranges the conversations you have with Claude.
 
@@ -169,6 +173,16 @@ where to look, which is the honest thing to compute without reading meaning.
 
 **Bin.** Deleting moves files aside with a manifest and a 14-day retention, so
 nothing you delete is gone the moment you regret it.
+
+## A skill for Claude
+
+`skills/braids/SKILL.md` teaches Claude to use braids: when to search history,
+how to read the JSON, and how to branch from what it finds. Copy it into
+`~/.claude/skills/` and Claude will reach for braids when the user refers to
+earlier work, asks why something is the way it is, or is about to propose
+something that may already have been tried. A test checks every command and
+flag in that file against the program, so it cannot drift from what braids
+actually takes.
 
 ## Driving it from an agent
 

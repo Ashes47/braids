@@ -30,6 +30,19 @@ def mark() -> str:
     return f'<pre class="ascii" aria-hidden="true">{art}\n<span class="tag">{tag}</span></pre>'
 
 
+def capture(name: str, cmd: str, caption: str = "") -> str:
+    """A captured run of a command, as text rather than a picture.
+
+    Command output that is plain text stays text: it is narrow enough to read
+    at the page's own size, it can be copied, and it needs no image.
+    """
+    body = html.escape((FRAMES / f"{name}.txt").read_text().rstrip("\n"))
+    cap = f'<figcaption>{caption}</figcaption>' if caption else ""
+    return (f'<figure class="frame capture"><div class="shell">'
+            f'<div class="cmdbar"><span class="prompt">$</span> <b>{cmd}</b></div>'
+            f'<pre>{body}</pre></div>{cap}</figure>')
+
+
 def frame(name: str, caption: str = "", cmd: str = "", then: str = "") -> str:
     """One captured braids screen, as an image.
 
@@ -71,10 +84,10 @@ NAV = """<nav><div class="wrap">
     <span class="name">braids</span>
   </a>
   <span class="spacer"></span>
-  <a class="link" href="#map">Map</a>
+  <a class="link" href="#find">Find</a>
+  <a class="link" href="#explain">Explain</a>
   <a class="link" href="#branch">Branch</a>
-  <a class="link" href="#search">Search</a>
-  <a class="link" href="#local">Local</a>
+  <a class="link" href="#map">Map</a>
   <a class="link" href="#install">Install</a>
   <a class="link" href="docs/">Docs</a>
   <a class="link" href="https://github.com/Ashes47/braids">GitHub</a>
@@ -85,10 +98,10 @@ FOOTER = """<footer><div class="wrap">
   <div class="cols footcols">
     <div>
       <h5>braids</h5>
-      <a href="#map">The map</a>
+      <a href="#find">Find</a>
+      <a href="#explain">Explain</a>
       <a href="#branch">Branch</a>
       <a href="#local">Local</a>
-      <a href="#install">Install</a>
     </div>
     <div>
       <h5>Read</h5>
@@ -300,6 +313,12 @@ figure.frame .cmdbar b { color:var(--ink); font-weight:600; }
 figure.frame .cmdbar .then { color:var(--faint); }
 figure.frame .cmdbar kbd { font-size:11px; padding:0 5px; }
 figure.frame img { display:block; width:100%; height:auto; }
+/* A text capture is narrow enough to read at the page's own size. */
+figure.frame.capture pre {
+  font-family:var(--mono); font-size:12.5px; line-height:1.55; margin:0;
+  padding:16px 18px; overflow-x:auto; color:var(--dim); white-space:pre;
+}
+figure.frame.capture pre { -webkit-overflow-scrolling:touch; }
 figure.frame figcaption { color:var(--faint); font-size:13px; margin-top:10px; text-align:center; }
 
 pre.sh {

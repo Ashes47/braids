@@ -11,6 +11,18 @@ import (
 	"time"
 )
 
+// requireShellTemplates skips a test that drives BRAIDS_SPAWN.
+//
+// Where braids will not run a template through a shell it does not offer one,
+// so Detect hands back a nil launcher and a test that calls it panics. Every
+// test that drives a template says so here rather than each finding out.
+func requireShellTemplates(t *testing.T) {
+	t.Helper()
+	if !shellTemplates {
+		t.Skip("BRAIDS_SPAWN runs through a POSIX shell, which braids does not use here")
+	}
+}
+
 func envOf(pairs map[string]string) func(string) string {
 	return func(key string) string { return pairs[key] }
 }
@@ -33,8 +45,8 @@ func TestDetectPrefersAnExplicitTemplate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Where a template cannot be run through a shell braids does not
 			// offer one, so the next launcher wins instead.
-			if !shellTemplates && tt.want == "BRAIDS_SPAWN" {
-				t.Skip("BRAIDS_SPAWN needs a POSIX shell, which braids does not use here")
+			if tt.want == "BRAIDS_SPAWN" {
+				requireShellTemplates(t)
 			}
 			open, name := Detect(envOf(tt.env))
 			if name != tt.want {
@@ -48,9 +60,7 @@ func TestDetectPrefersAnExplicitTemplate(t *testing.T) {
 }
 
 func TestTemplateExpansion(t *testing.T) {
-	if !shellTemplates {
-		t.Skip("BRAIDS_SPAWN needs a POSIX shell, which braids does not use here")
-	}
+	requireShellTemplates(t)
 	open, _ := Detect(envOf(map[string]string{
 		"BRAIDS_SPAWN": "sh -c 'test {name} = mine && test {dir} = /tmp && echo {cmd}'",
 	}))
@@ -60,6 +70,7 @@ func TestTemplateExpansion(t *testing.T) {
 }
 
 func TestRunReportsWhatWentWrong(t *testing.T) {
+	requireShellTemplates(t)
 	open, _ := Detect(envOf(map[string]string{"BRAIDS_SPAWN": "echo nope >&2; exit 3"}))
 	err := open(context.Background(), "", "", "")
 	if err == nil {
@@ -126,6 +137,7 @@ func TestTemplateValuesCannotBecomeCommands(t *testing.T) {
 		{"cmd", "true {cmd}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			requireShellTemplates(t)
 			mark := filepath.Join(t.TempDir(), "pwned")
 			hostile := "x; touch " + mark + " #"
 			launcher, _ := Detect(func(k string) string {

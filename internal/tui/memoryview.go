@@ -2,8 +2,9 @@ package tui
 
 import (
 	"fmt"
-	"github.com/charmbracelet/x/ansi"
 	"strings"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Ashes47/braids/internal/core/memory"
 )
@@ -553,10 +554,7 @@ func (doc *memoryDoc) rewrap(width int) {
 		return
 	}
 	doc.width = width
-	doc.lines = nil
-	for _, para := range strings.Split(ansi.Wordwrap(doc.text, width, " -"), "\n") {
-		doc.lines = append(doc.lines, para)
-	}
+	doc.lines = strings.Split(ansi.Wordwrap(doc.text, width, " -"), "\n")
 }
 
 func (m Model) readingFacts() []fact {

@@ -140,7 +140,14 @@ footer h5 {
 }
 footer .footcols a { color:var(--faint); }
 footer .footcols a:hover { color:var(--ink); text-decoration:none; }
-footer .bottom { margin-top:34px; padding-top:20px; border-top:1px solid var(--line); font-size:13px; }
+footer .bottom { margin-top:34px; padding-top:20px; border-top:1px solid var(--line); font-size:13px;
+                 align-items:center; gap:18px; }
+footer .icons { display:inline-flex; align-items:center; gap:14px; }
+footer .icons a {
+  color:var(--faint); display:inline-flex; align-items:center;
+  transition:color .12s ease;
+}
+footer .icons a:hover { color:var(--ink); text-decoration:none; }
 @media (max-width:640px) {
   figure.frame pre { font-size:9.5px; }
   header { padding:44px 0 0; }
@@ -452,16 +459,23 @@ braids         <span class="c"># open the map</span>
       <a href="https://github.com/Ashes47/braids/releases">Releases</a>
       <a href="https://braids.chat/install.sh">install.sh</a>
     </div>
-    <div>
-      <h5>Anuj Verma</h5>
-      <a href="https://github.com/Ashes47">github.com/Ashes47</a>
-      <a href="https://x.com/devanujhere">x.com/devanujhere</a>
-      <a href="mailto:ashes4799@gmail.com">ashes4799@gmail.com</a>
-    </div>
   </div>
   <div class="row bottom">
-    <span>MIT licensed. Built by
-      <a href="https://x.com/devanujhere">@devanujhere</a>.</span>
+    <span>MIT licensed</span>
+    <span class="icons">
+      <a href="https://x.com/devanujhere" title="@devanujhere on X" aria-label="X">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+        </svg>
+      </a>
+      <a href="mailto:ashes4799@gmail.com" title="ashes4799@gmail.com" aria-label="Email">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/>
+          <path d="M3 6.5l9 6.5 9-6.5"/>
+        </svg>
+      </a>
+    </span>
     <span class="spacer"></span>
     <span>braids never talks to a model. It arranges the conversations you have with one.</span>
   </div>

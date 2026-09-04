@@ -30,6 +30,7 @@ import (
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/memory"
 	"github.com/Ashes47/braids/internal/core/model"
+	"github.com/Ashes47/braids/internal/core/release"
 	"github.com/Ashes47/braids/internal/core/sidecar"
 	"github.com/Ashes47/braids/internal/core/store"
 	"github.com/Ashes47/braids/internal/core/store/claudecode"
@@ -145,6 +146,15 @@ func run(args []string, w io.Writer) error {
 	case "version", "-v", "--version":
 		out.mark(brand.Small())
 		out.printf("braids %s (%s)\n", version, commit)
+		// Only for a person. The installer reads this command to find out what
+		// is installed, and a program parsing output does not want a nudge in
+		// the middle of it.
+		if stdoutIsTerminal() {
+			exe, _ := os.Executable()
+			if notice := updateNotice(release.Read(braidsHome(), exe), time.Now()); notice != "" {
+				out.printf("\n%s\n", notice)
+			}
+		}
 		return out.Err()
 	case "help", "-h", "--help":
 		out.mark(brand.Full())
@@ -272,6 +282,60 @@ func parseArgs(fs *flag.FlagSet, args []string, out *printer) ([]string, error) 
 }
 
 // defaultDB resolves the index location and ensures its directory exists.
+// braidsHome is where braids keeps its own files. The stamp the installer
+// leaves lives here rather than beside the index, because BRAIDS_DB can point
+// the index anywhere and the two have to agree on one place to look.
+func braidsHome() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".braids")
+}
+
+// installCommand is the one line that updates braids. It is printed rather
+// than run, except by the map's update key, which prints it first.
+const installCommand = "curl -fsSL https://braids.chat/install.sh | sh"
+
+// updateNotice says how old this build is, and offers the command only when
+// nobody has checked in a while. It never claims a newer version exists:
+// braids cannot know that without asking, and it does not ask.
+//
+// The two halves are separate on purpose. Checking and finding yourself
+// current resets the offer but not the age, and reporting the age as though
+// the check had rebuilt the binary would be a lie told by arithmetic.
+func updateNotice(state release.State, now time.Time) string {
+	age, ok := state.BuildAge(now)
+	if !ok {
+		return ""
+	}
+	line := fmt.Sprintf("this build is %s old", release.Age(age))
+	if !state.Due(now) {
+		return line
+	}
+	return fmt.Sprintf("%s. To check for a newer one:\n  %s", line, installCommand)
+}
+
+// updateCommand builds the line the map's update key runs.
+//
+// BRAIDS_BIN_DIR points the installer at the directory this binary is running
+// from, so it replaces braids where it already lives. Without it the script
+// picks /usr/local/bin or ~/.local/bin, which for anyone who installed another
+// way means a second braids on disk and PATH deciding which one they get.
+func updateCommand() *exec.Cmd {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	script := fmt.Sprintf("echo '$ %s'; echo; %s", installCommand, installCommand)
+	command := exec.Command("sh", "-c", script)
+	command.Env = append(os.Environ(), "BRAIDS_BIN_DIR="+filepath.Dir(exe))
+	return command
+}
+
 func defaultDB() (string, error) {
 	if p := os.Getenv("BRAIDS_DB"); p != "" {
 		return p, nil
@@ -392,6 +456,12 @@ func cmdMap(args []string, out *printer) error {
 		ASCII:     *ascii,
 		Source:    "claudecode",
 		IndexPath: dbPath,
+		Version:   version,
+		Release: func() release.State {
+			exe, _ := os.Executable()
+			return release.Read(braidsHome(), exe)
+		},
+		Update:    updateCommand,
 		LoadSpine: tui.SpineLoader(ctx, ix),
 		PlanMerge: func(base, incoming string) (int, int, error) {
 			req, err := mergeRequest(ctx, ix, base, incoming, "")

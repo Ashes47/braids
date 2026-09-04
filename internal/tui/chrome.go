@@ -7,6 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/Ashes47/braids/internal/brand"
+	"github.com/Ashes47/braids/internal/core/release"
 )
 
 // The chrome is modelled on k9s: a compact facts block top-left, key hints
@@ -79,7 +80,29 @@ func (m Model) facts() []fact {
 		{"Lanes", fmt.Sprintf("%d", len(m.all))},
 		{"Waiting on you", fmt.Sprintf("%d", m.waitingCount())},
 		{"Hooks", reporting},
+		{"Version", m.versionFact()},
 	}
+}
+
+// versionFact names the build, and how old it is once nobody has checked in a
+// while. The key rides in the value rather than the legend: a fifteenth
+// binding needs a third column of hints, and that column costs the glyph key
+// on an ordinary terminal, which names marks that are on the screen right now.
+func (m Model) versionFact() string {
+	if m.version == "" {
+		return "—"
+	}
+	if m.releaseFn == nil {
+		return m.version
+	}
+	state := m.releaseFn()
+	if !state.Due(m.now()) {
+		return m.version
+	}
+	if age, ok := state.BuildAge(m.now()); ok {
+		return fmt.Sprintf("%s · %s old · v to update", m.version, release.Age(age))
+	}
+	return m.version + " · v to update"
 }
 
 func hints() []hint {

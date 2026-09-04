@@ -990,6 +990,46 @@ it is reporting on.
 one respectively, coloured only when stdout is a terminal, because escape codes
 in a pipe are noise in somebody's grep. The installer opens with the same mark.
 
+### 10.1 Telling you a build is old without asking anyone
+
+braids cannot say that a newer version exists. Finding out means asking, and
+braids makes no network calls. It can say how long it has been since anyone
+looked, from two facts it holds locally: when this binary arrived, which is its
+own mtime, and when the installer last ran, which is a stamp the installer
+leaves in `~/.braids`.
+
+The stamp is the whole design. Without it the only thing that could clear a
+notice is an actual update, so a build that is current and old would be nagged
+about forever, which is precisely the case where there is nothing to do. The
+installer writes it on every run **including the run where it decides there is
+nothing to install**, so checking and finding yourself current resets the clock.
+
+The two ages are kept apart. The build's age is what the header reports, and
+`max(build, check)` is what decides whether to say anything, because a check
+does not make a binary younger and reporting it as though it had would be a lie
+told by arithmetic.
+
+The interval is 30 days. braids is a local reader with no server to stay
+compatible with and an index that rebuilds itself, so being a release behind
+costs nothing and a fortnightly reminder is a nag.
+
+The offer rides in the version row rather than the key legend, because a
+fifteenth binding needs a third column of hints and that column costs the glyph
+key, which names marks that are on the screen right now. `v` runs the
+installer through the terminal, printing the command before it does, with
+`BRAIDS_BIN_DIR` pointing at the directory the running binary is in so it
+replaces braids where it lives rather than leaving a second copy for `PATH` to
+arbitrate. Replacing a running binary is safe on Unix: the open file keeps its
+inode and the new version takes over at the next launch.
+
+It is not `u`. That opens the bin, and recovering deleted files and replacing
+your binary over the network should not be one shift-slip apart.
+
+There is no timer and no background check. A tool whose headline is that it
+makes no network calls should not make one while you are not looking, and an
+update that arrives unannounced can also mean an unexplained re-index, because
+a schema bump drops and recreates the index rather than migrating it.
+
 ---
 
 ## 11. What is built, and what is not
@@ -1023,7 +1063,11 @@ How the screenshots and the site are built is in
 
 - **Not a chat client.** braids never sends a message to a model.
 - **No server, no account, no sync.** Everything is local, and there is no HTTP
-  client and no listener in the binary.
+  client and no listener in the binary. The installer reaches the network,
+  which is its job, and the map's update key runs the installer.
+- **No background checks of any kind.** No telemetry, no update ping, no timer.
+  braids reaches the network only when a person presses the key that says it
+  will.
 - **No auto-segmentation of existing conversations.** The user decides where a
   branch belongs; the tool only makes it one keystroke.
 - **No re-stamping of stale environment on fork.** A branch replays the world as

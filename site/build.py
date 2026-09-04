@@ -199,6 +199,24 @@ go install github.com/Ashes47/braids/cmd/braids@latest
 braids index   <span class="c"># read every transcript under ~/.claude</span>
 braids         <span class="c"># open the map</span>
 </pre>
+  <p class="note">
+    Run that first line again to update. It asks the binary it would replace
+    what version it is, says <em>already installed</em> and stops if there is
+    nothing to do, and replaces braids where it already lives rather than
+    leaving a second copy somewhere else on your PATH.
+  </p>
+
+  <h3>Staying current</h3>
+  <p class="sub">
+    braids cannot tell you a newer version exists, because finding out would
+    mean asking, and it makes no network calls. What it can say is how long it
+    has been since anyone checked. After a month the map's header adds
+    <code>3 months old · v to update</code> to the version row, and
+    <kbd>v</kbd> runs the installer above, printing the command first.
+    Checking and finding yourself current resets the clock, so it asks once a
+    month at most and never claims you are behind.
+  </p>
+
   <h3>Uninstalling</h3>
 <pre class="sh"><span class="c"># take the hook back out of ~/.claude/settings.json, if you added it</span>
 braids hooks --remove

@@ -15,6 +15,18 @@ VERSION="${BRAIDS_VERSION:-latest}"
 
 say() { printf '%s\n' "$*"; }
 
+# stamp records that somebody checked, which braids reads to decide whether to
+# mention updates. It is written even when this run installs nothing: braids
+# cannot see what the newest version is, so a notice that only cleared on a
+# real update would keep asking forever in the one case where there is nothing
+# to do. Failing to write it is never a reason to fail an install.
+stamp() {
+  home="$HOME/.braids"
+  mkdir -p "$home" 2>/dev/null || return 0
+  chmod 700 "$home" 2>/dev/null || true
+  date -u +%Y-%m-%dT%H:%M:%SZ > "$home/checked" 2>/dev/null || true
+}
+
 # The same mark `braids help` prints, so the install and the program greet you
 # the same way. Accent colour only when stdout is a terminal: with `curl | sh`
 # it is the pipe that is on stdin, so this is usually true, but a log file
@@ -80,12 +92,34 @@ else
 fi
 mkdir -p "$bindir"
 
+# Already on it? Ask the binary this run would replace, rather than whatever
+# is first on PATH, because those are not always the same file and replacing
+# the wrong one is how you end up with two braids and PATH choosing.
+here=""
+if [ -x "$bindir/braids" ]; then
+  here=$("$bindir/braids" version 2>/dev/null | sed -n 's/^braids \([0-9][^ ]*\).*/\1/p' | head -1)
+fi
+if [ -n "$here" ] && [ "$here" = "$number" ]; then
+  say "braids $VERSION is already installed at $bindir/braids"
+  stamp
+  onpath=$(command -v braids 2>/dev/null || true)
+  if [ -n "$onpath" ] && [ "$onpath" != "$bindir/braids" ]; then
+    say ""
+    say "  note: $onpath comes first on your PATH and is a different file"
+  fi
+  exit 0
+fi
+
 archive="braids_${number}_${os}_${arch}.tar.gz"
 base="https://github.com/$REPO/releases/download/$VERSION"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT HUP TERM
 
-say "braids $VERSION — $os/$arch"
+if [ -n "$here" ]; then
+  say "braids $here -> $VERSION, $os/$arch"
+else
+  say "braids $VERSION, $os/$arch"
+fi
 fetch "$base/$archive" "$tmp/$archive" || die "could not download $base/$archive"
 
 # Verified, because a binary fetched over the network and put on your PATH is
@@ -102,7 +136,7 @@ if fetch "$base/checksums.txt" "$tmp/checksums.txt" 2>/dev/null; then
       say "  checksum: skipped, no shasum or sha256sum on this machine"
     fi
     if [ -n "$got" ]; then
-      [ "$got" = "$want" ] || die "checksum mismatch for $archive — refusing to install"
+      [ "$got" = "$want" ] || die "checksum mismatch for $archive, refusing to install"
       say "  checksum: ok"
     fi
   else
@@ -124,6 +158,10 @@ case ":$PATH:" in
      ;;
 esac
 
+stamp
+
+say ""
+say "  what changed: https://github.com/$REPO/releases/tag/$VERSION"
 say ""
 say "Next:"
 say "  braids index    # read every transcript under ~/.claude"

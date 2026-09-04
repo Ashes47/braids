@@ -50,6 +50,10 @@ wrapper, no proxy, no protocol of its own.
 curl -fsSL https://braids.chat/install.sh | sh
 ```
 
+Run it again to update: it asks the binary it would replace what version it is,
+says so and stops when there is nothing to do, and replaces braids where it
+already lives rather than leaving a second copy elsewhere on your PATH.
+
 That works out the release build for your machine, checks it against the
 published checksums, and puts one binary on your PATH. Nothing else: no
 daemon, no configuration file, and nothing to uninstall but the file.

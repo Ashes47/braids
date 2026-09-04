@@ -14,6 +14,7 @@ import (
 	"github.com/Ashes47/braids/internal/core/graph"
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/model"
+	"github.com/Ashes47/braids/internal/core/release"
 )
 
 var ansiCodes = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -1026,5 +1027,64 @@ func TestNoFrameSizePanics(t *testing.T) {
 				_ = Render(f, Options{ASCII: true, Source: "claudecode"}, "", "work", width, height)
 			}()
 		}
+	}
+}
+
+// The header names the build always, and offers the key only once nobody has
+// checked in a while. The two are separate because checking and finding
+// yourself current resets the offer and not the age.
+func TestVersionRowOffersTheKeyOnlyWhenDue(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("root", "main work", "app", 100, time.Hour)}
+	f := forestOf(lanes, nil)
+	build := func(state release.State) Model {
+		m := NewModel(f, Options{
+			ASCII: true, Source: "claudecode", Version: "0.1.0",
+			Release: func() release.State { return state },
+		})
+		m.now = func() time.Time { return now }
+		m.width, m.height = 120, 24
+		return m
+	}
+
+	stale := release.State{Built: now.Add(-100 * 24 * time.Hour)}
+	if got := build(stale).versionFact(); !strings.Contains(got, "v to update") ||
+		!strings.Contains(got, "3 months old") {
+		t.Errorf("a hundred day old build reads %q", got)
+	}
+
+	// Checked yesterday: the build is just as old, and braids stops asking.
+	checked := release.State{
+		Built:   now.Add(-100 * 24 * time.Hour),
+		Checked: now.Add(-24 * time.Hour),
+	}
+	if got := build(checked).versionFact(); got != "0.1.0" {
+		t.Errorf("after a check the row reads %q, want just the version", got)
+	}
+
+	// And with nothing knowable, it still names the build.
+	if got := build(release.State{}).versionFact(); got != "0.1.0" {
+		t.Errorf("with no dates the row reads %q", got)
+	}
+}
+
+// The header carries the key rather than the legend, because a fifteenth
+// binding needs a third column of hints and that column costs the glyph key.
+func TestUpdateKeyDoesNotCostTheGlyphKey(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("root", "main work", "app", 100, time.Hour)}
+	f := forestOf(lanes, nil)
+	m := NewModel(f, Options{
+		ASCII: true, Source: "claudecode", Version: "0.1.0",
+		Release: func() release.State {
+			return release.State{Built: now.Add(-100 * 24 * time.Hour)}
+		},
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 176, 30
+	if p := m.headerPlan(); !p.showGlyphs {
+		t.Error("the glyph key was dropped to make room for the update hint")
+	}
+	if len(hints()) != 14 {
+		t.Errorf("hints() has %d entries; the update key belongs in the version row",
+			len(hints()))
 	}
 }

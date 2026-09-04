@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/memory"
 	"github.com/Ashes47/braids/internal/core/model"
+	"github.com/Ashes47/braids/internal/core/release"
 	"github.com/Ashes47/braids/internal/core/trash"
 	"github.com/Ashes47/braids/internal/format"
 )
@@ -127,6 +129,18 @@ type Options struct {
 	// either way — but a missing capability should be visible rather than
 	// silent, so the map says which of the two it is looking at.
 	Reporting bool
+	// Version is what this build calls itself, shown in the header so a bug
+	// report can name it without anyone going looking.
+	Version string
+	// Release reports how old this build is and when the installer last ran.
+	// It is a function because an update changes the answer while the map is
+	// open. It never reaches the network: both facts are local.
+	Release func() release.State
+	// Update returns the command that installs the newest braids, or nil when
+	// there is nothing sensible to run. braids itself makes no network calls;
+	// this hands off to the installer script, which does, and only when
+	// somebody presses the key.
+	Update func() *exec.Cmd
 	// Changes signals that transcripts moved on disk. With it the map follows
 	// live sessions; without it the map is a snapshot.
 	Changes <-chan struct{}
@@ -179,6 +193,9 @@ type Model struct {
 	changes        <-chan struct{}
 	liveFn         func() (map[string]hooks.Event, error)
 	reporting      bool
+	version        string
+	releaseFn      func() release.State
+	updateFn       func() *exec.Cmd
 	live           map[string]hooks.Event
 	resumeCmd      func(string) (string, error)
 	spawn          func(string) error
@@ -265,6 +282,9 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		changes:          opts.Changes,
 		liveFn:           opts.LiveEvents,
 		reporting:        opts.Reporting,
+		version:          opts.Version,
+		releaseFn:        opts.Release,
+		updateFn:         opts.Update,
 		resumeCmd:        opts.ResumeCommand,
 		spawn:            opts.Spawn,
 		terminal:         opts.Terminal,
@@ -414,6 +434,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, refreshInBackground(m))
 		}
 		return m, tea.Batch(cmds...)
+	case updatedMsg:
+		return m.updated(msg), nil
 	case refreshedMsg:
 		m.refreshing = false
 		if msg.err == nil && msg.forest != nil {
@@ -567,6 +589,8 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.cursor = m.nextWaiting(m.cursor, 1)
 	case "N":
 		m.cursor = m.nextWaiting(m.cursor, -1)
+	case "v":
+		return m.runUpdate()
 	case "y":
 		return m.copyResume()
 	case "o":
@@ -716,6 +740,36 @@ func (m Model) selectedLane() (string, bool) {
 
 // copyResume puts the resume command on the clipboard. It goes through the
 // terminal's own copy escape, so it works over SSH and needs no helper binary.
+// runUpdate hands the terminal to the installer.
+//
+// braids does not fetch anything itself. The script it runs is the same line
+// the docs print, and it is printed here before it runs, because a keystroke
+// that reaches the network should say so first. The binary being replaced is
+// the one that is running: on any Unix that is safe, the open file keeps its
+// inode, and the new version takes over at the next launch.
+func (m Model) runUpdate() (Model, tea.Cmd) {
+	if m.updateFn == nil {
+		return m.withNotice("updating is unavailable here", true), nil
+	}
+	command := m.updateFn()
+	if command == nil {
+		return m.withNotice("braids cannot tell where it is installed", true), nil
+	}
+	return m, tea.ExecProcess(command, func(err error) tea.Msg { return updatedMsg{err} })
+}
+
+// updatedMsg carries the outcome of the installer back onto the screen.
+type updatedMsg struct{ err error }
+
+func (m Model) updated(msg updatedMsg) Model {
+	if msg.err != nil {
+		return m.withNotice("update: "+msg.err.Error(), true)
+	}
+	// The stamp moved, so the header stops asking either way. Whether anything
+	// was installed is the installer's business and it said so on screen.
+	return m.withNotice("the installer has run · restart braids to use a new version", false)
+}
+
 func (m Model) copyResume() (tea.Model, tea.Cmd) {
 	lane, ok := m.selectedLane()
 	if !ok || m.resumeCmd == nil {

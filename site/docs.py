@@ -211,6 +211,24 @@ rm -rf ~/.braids         # the index and its sidecar files
   removing braids costs you the map and nothing else.
 </p>
 
+<h3>Staying current</h3>
+<p>
+  Run the same line again to update. It asks the binary it would replace what
+  version it is and stops if there is nothing to do, and it replaces braids
+  where it already lives, so a build installed with Go is not shadowed by a
+  second copy in <code>/usr/local/bin</code>.
+</p>
+<p>
+  braids cannot tell you that a newer version exists, because finding out means
+  asking and braids makes no network calls. It can say how long it has been
+  since anyone checked, which it reads from two local facts: when this binary
+  arrived, and when the installer last ran. After a month the map's version row
+  grows <code>· 3 months old · v to update</code>, and <kbd>v</kbd> runs the
+  installer, printing the command before it does. Checking and finding yourself
+  current resets the clock, so it asks at most once a month and never claims
+  you are behind.
+</p>
+
 <h2 id="first">The first index</h2>
 {sh('''
 braids index
@@ -302,6 +320,7 @@ MAP = f"""
     ("M", "open memories"),
     ("y / o", "copy the resume command, or open it in a terminal"),
     ("q", "quit"),
+    ("v", "run the installer, when the header offers it"),
 ])}
 
 <h2 id="spine">The spine</h2>
@@ -335,6 +354,16 @@ MAP = f"""
     ("y / o", "copy the resume command, or open it in a terminal"),
     ("esc", "back to the map"),
 ])}
+
+<h3>The version row</h3>
+<p>
+  The header names the build always, and once nobody has checked for updates in
+  a month it grows <code>· 3 months old · v to update</code>. The key rides in
+  that row rather than in the legend on purpose: a fifteenth binding would need
+  a third column of hints, and that column costs the glyph key, which names
+  marks that are on the screen right now.
+</p>
+{say("<kbd>v</kbd> runs the installer, which is the only thing in braids that reaches the network, and it prints the command before running it. See <a href='/docs/privacy/'>Files and privacy</a>.")}
 
 <h2 id="live">It keeps up on its own</h2>
 <p>
@@ -792,6 +821,13 @@ go list -deps ./cmd/braids | grep net/http
 # (no output)
 ''')}
 {say("braids does not call a model and has no API key. The only program that talks to Anthropic on your machine is Claude Code itself.")}
+<p>
+  One thing does reach the network, and only when you ask it to: the installer.
+  Pressing <kbd>v</kbd> on the map runs the same
+  <code>curl … | sh</code> line the docs print, in your terminal, after
+  printing it. braids does not fetch anything itself, has no timer, and never
+  checks anything in the background.
+</p>
 
 <h2 id="files">What it writes</h2>
 {table(["Path", "What", "Mode"], [
@@ -846,7 +882,7 @@ REFERENCE = f"""
     ("braids work", "browse what a session wrote to disk"),
     ("braids memories", "what a project remembers, and what it has lost"),
     ("braids hooks", "install, remove or inspect the hook"),
-    ("braids version", "the version and the commit it was built from"),
+    ("braids version", "the version, the commit, and how old this build is"),
     ("braids help", "everything, briefly"),
 ])}
 

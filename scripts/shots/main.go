@@ -20,11 +20,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Ashes47/braids/internal/core/artifacts"
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/memory"
 	"github.com/Ashes47/braids/internal/core/model"
+	"github.com/Ashes47/braids/internal/core/release"
 	"github.com/Ashes47/braids/internal/core/sidecar"
 	"github.com/Ashes47/braids/internal/core/store/claudecode"
 	"github.com/Ashes47/braids/internal/core/trash"
@@ -82,6 +84,11 @@ func run() error {
 		// So the header says what it says on a machine with the hook
 		// installed, which is what the facts block is describing.
 		Reporting: true,
+		// A released version, freshly checked, so the header shows the row as
+		// it reads on a machine that is up to date rather than one nagging
+		// about a demo binary built a minute ago.
+		Version:   "0.1.0",
+		Release:   func() release.State { return release.State{Built: time.Now()} },
 		LoadSpine: tui.SpineLoader(ctx, ix),
 		Search: func(query, scope string) ([]index.Hit, error) {
 			return ix.Search(ctx, index.Query{Text: query, Lane: scope, Limit: 200})

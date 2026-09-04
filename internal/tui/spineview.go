@@ -411,14 +411,15 @@ func (m Model) spineInfo() string {
 	return m.factsBlock(facts, keys, m.spineGlyphs())
 }
 
-// spineGlyphs explains the marks a conversation is drawn with.
-func (m Model) spineGlyphs() []hint {
+// spineGlyphs explains the marks a conversation is drawn with, each in the
+// style it is drawn in.
+func (m Model) spineGlyphs() []glyph {
 	g := m.theme.Glyphs
-	return []hint{
-		{g.Lane, "a turn"},
-		{g.Run, "turns collapsed"},
-		{g.Agent, "agent it spawned"},
-		{g.Branch, "branch / split"},
+	return []glyph{
+		{g.Lane, m.theme.Alive, "your turn"},
+		{g.Lane, m.theme.Faint, "claude's turn"},
+		{g.Run, m.theme.Faint, "turns collapsed"},
+		{g.Agent, m.theme.Accent, "agent it spawned"},
 	}
 }
 

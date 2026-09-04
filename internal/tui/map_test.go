@@ -681,7 +681,7 @@ func TestGlyphKeyAppearsOnlyWhenThereIsRoom(t *testing.T) {
 
 	m.width = 132
 	wide := plain(m.render())
-	for _, want := range []string{"conversation", "branched at turn 12"} {
+	for _, want := range []string{"live conversation", "waiting on you", "branched from above"} {
 		if !strings.Contains(wide, want) {
 			t.Errorf("wide layout missing the glyph key %q:\n%s", want, wide)
 		}
@@ -689,7 +689,7 @@ func TestGlyphKeyAppearsOnlyWhenThereIsRoom(t *testing.T) {
 
 	m.width = 90
 	narrow := plain(m.render())
-	if strings.Contains(narrow, "conversation") {
+	if strings.Contains(narrow, "live conversation") {
 		t.Error("the glyph key should be dropped rather than squeezed")
 	}
 	if !strings.Contains(narrow, "search") {
@@ -714,5 +714,31 @@ func TestKeyHintsNameBothDirections(t *testing.T) {
 	// "n/N next waiting" left it unsaid which of the two goes backwards.
 	if !strings.Contains(out, "next / prev waiting") {
 		t.Errorf("a paired key should say what each half does:\n%s", out)
+	}
+}
+
+func TestGlyphKeyUsesTheStylesItExplains(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("a", "first", "app", 5, time.Hour)}
+	m := newTestModel(t, forestOf(lanes, nil))
+	m.width = 132
+
+	// A legend drawn in one flat colour teaches nothing, since colour here is
+	// meaning: each mark must carry the style it is actually drawn in.
+	styles := map[string]string{}
+	for _, g := range m.mapGlyphs() {
+		styles[g.meaning] = g.style.Render("x")
+	}
+	if styles["live conversation"] == styles["idle"] {
+		t.Error("live and idle conversations must not share a style in the key")
+	}
+	if styles["waiting on you"] == styles["idle"] {
+		t.Error("waiting and idle must not share a style in the key")
+	}
+
+	// And those styles must be the ones the rows use.
+	live := laneInfo("b", "busy", "app", 5, time.Second)
+	live.Activity = model.Activity{LastRole: model.RoleAssistant, LastWasToolCall: true}
+	if got := m.styleFor(live, stateOf(live, now)).Render("x"); got != styles["live conversation"] {
+		t.Error("the key's live style is not the one a working lane is drawn with")
 	}
 }

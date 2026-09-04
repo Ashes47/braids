@@ -578,7 +578,10 @@ column in the sweep screen.
   is stale. The two width bugs this screen has had were both the header and the
   rows computing their own widths and drifting apart.
 - A glyph key sits beside the facts when the terminal is wide enough, and is
-  dropped rather than squeezed when it is not.
+  dropped rather than squeezed when it is not. **Each mark in it is drawn in the
+  style it is drawn in on the screen** — green for alive, the accent for what
+  wants you, grey for the rest. Colour here is meaning, so a key rendered in one
+  flat colour would teach the wrong thing.
 - A paired key says what each half does: `n / N  next / prev marker`, not
   `n/N  next marker`.
 - Animation is limited to a lane growing out of a junction on branch creation.

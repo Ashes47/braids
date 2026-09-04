@@ -81,7 +81,7 @@ func TestLayoutDrawsTreeConnectors(t *testing.T) {
 		laneInfo("b", "second branch", "app", 10, 2*time.Hour),
 	}
 	f := forestOf(lanes, map[string]string{"a": "root", "b": "root"})
-	rows := layout(f, glyphsFor(true))
+	rows := layout(f, glyphsFor(true), nil)
 
 	if len(rows) != 3 {
 		t.Fatalf("want 3 rows, got %d", len(rows))
@@ -227,7 +227,7 @@ func TestCursorStaysInRange(t *testing.T) {
 		lanes = append(lanes, laneInfo(string(rune('a'+i)), "lane", "app", 1, time.Hour))
 	}
 	m := newTestModel(t, forestOf(lanes, nil))
-	m.height = chromeHeight + 2 // room for two rows
+	m.height = m.chromeHeight() + 2 // room for two rows
 
 	for range 20 {
 		m.cursor++
@@ -740,5 +740,40 @@ func TestGlyphKeyUsesTheStylesItExplains(t *testing.T) {
 	live.Activity = model.Activity{LastRole: model.RoleAssistant, LastWasToolCall: true}
 	if got := m.styleFor(live, stateOf(live, now)).Render("x"); got != styles["live conversation"] {
 		t.Error("the key's live style is not the one a working lane is drawn with")
+	}
+}
+
+func TestEveryBindingIsListedBeforeTheGlyphKey(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("a", "first", "app", 5, time.Hour)}
+	m := newTestModel(t, forestOf(lanes, nil))
+	count := func(out, sub string) int { return strings.Count(out, sub) }
+
+	// Wide: every key and the glyph key.
+	m.width = 132
+	wide := plain(m.render())
+	if got := count(wide, "<"); got != len(hints()) {
+		t.Errorf("wide layout listed %d of %d keys", got, len(hints()))
+	}
+	if !strings.Contains(wide, "archived") {
+		t.Error("wide layout should carry the glyph key too")
+	}
+
+	// Middling: the glyph key gives way so that every key still fits.
+	m.width = 100
+	middling := plain(m.render())
+	if got := count(middling, "<"); got != len(hints()) {
+		t.Errorf("a key was dropped before the glyph key: %d of %d listed", got, len(hints()))
+	}
+	if strings.Contains(middling, "live conversation") {
+		t.Error("the glyph key should give way to the keys, not the other way round")
+	}
+
+	// Narrow: whatever survives must include moving, opening and quitting.
+	m.width = 80
+	narrow := plain(m.render())
+	for _, want := range []string{"down / up", "open spine", "quit"} {
+		if !strings.Contains(narrow, want) {
+			t.Errorf("a one-column legend must keep %q:\n%s", want, narrow)
+		}
 	}
 }

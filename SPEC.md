@@ -574,8 +574,12 @@ column in the sweep screen.
   turns — keeping the name and the age, which answer what it is and whether it
   is stale. The two width bugs this screen has had were both the header and the
   rows computing their own widths and drifting apart.
-- A glyph key sits beside the facts when the terminal is wide enough, and is
-  dropped rather than squeezed when it is not. **Each mark in it is drawn in the
+- **Every binding a screen has is in its legend.** A key that works but is not
+  listed may as well not exist, so the header grows rows and drops the glyph key
+  before it drops a key. Only when even one column will not hold them all does
+  it keep what it can — ordered so moving, opening, searching and quitting
+  survive.
+- A glyph key sits beside the facts when there is room left after the keys. **Each mark in it is drawn in the
   style it is drawn in on the screen** — green for alive, the accent for what
   wants you, grey for the rest. Colour here is meaning, so a key rendered in one
   flat colour would teach the wrong thing.

@@ -124,6 +124,7 @@ type Model struct {
 	notice string
 	failed bool
 
+	forest   *graph.Forest
 	mode     mode
 	returnTo mode
 	spine    *spineState
@@ -178,9 +179,10 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		width:          80,
 		height:         24,
 	}
-	m.all = layout(f, m.theme.Glyphs)
-	m.visible = m.all
+	m.forest = f
+	m.all = layout(f, m.theme.Glyphs, nil)
 	m.measure()
+	m.apply()
 	return m
 }
 
@@ -191,7 +193,8 @@ func (m Model) adopt(f *graph.Forest) Model {
 	if m.cursor < len(m.visible) {
 		selected = m.visible[m.cursor].node.Lane.ID
 	}
-	m.all = layout(f, m.theme.Glyphs)
+	m.forest = f
+	m.all = layout(f, m.theme.Glyphs, nil)
 	m.measure()
 	m.apply()
 	for i, r := range m.visible {
@@ -538,16 +541,29 @@ func (m *Model) apply() {
 	if m.cursor >= 0 && m.cursor < len(m.visible) {
 		held = m.visible[m.cursor].node.Lane.ID
 	}
-	m.visible = nil
-	for _, r := range m.all {
-		l := r.node.Lane
-		if m.archived[l.ID] && !m.showArchived {
-			continue
+
+	switch {
+	case m.filter.on():
+		// Filtering drops the tree art: a partial forest with connectors
+		// leading to rows that are not there reads as corruption.
+		m.visible = nil
+		for _, r := range m.all {
+			l := r.node.Lane
+			if m.archived[l.ID] && !m.showArchived {
+				continue
+			}
+			if m.filter.matches(l.Title + " " + l.Project + " " + l.ID) {
+				m.visible = append(m.visible, row{node: r.node})
+			}
 		}
-		if m.filter.on() && !m.filter.matches(l.Title+" "+l.Project+" "+l.ID) {
-			continue
-		}
-		m.visible = append(m.visible, row{node: r.node})
+	case m.hidingAny():
+		// Hiding archived rows keeps the tree, redrawn without them: a branch
+		// whose parent is archived is shown at the level the parent held.
+		m.visible = layout(m.forest, m.theme.Glyphs, func(n *graph.Node) bool {
+			return !m.archived[n.Lane.ID]
+		})
+	default:
+		m.visible = m.all
 	}
 	// Follow the selected lane across the change, so clearing a filter leaves
 	// you where you were rather than back at the top.
@@ -591,7 +607,7 @@ func wrap(cursor, delta, n int) int {
 
 // bodyHeight is the terminal height minus the chrome.
 func (m Model) bodyHeight() int {
-	h := m.height - chromeHeight
+	h := m.height - m.chromeHeight()
 	if h < 1 {
 		return 1
 	}
@@ -833,34 +849,69 @@ func shortID(id string) string {
 
 // layout walks the forest into display rows, drawing the connectors that show
 // which lane forked from which.
-func layout(f *graph.Forest, g Glyphs) []row {
+//
+// show may exclude nodes. An excluded node's children take its place at its own
+// level rather than disappearing with it, so hiding a conversation never
+// removes a branch that was made from it — nor leaves a connector pointing at
+// a row that is not there.
+func layout(f *graph.Forest, g Glyphs, show func(*graph.Node) bool) []row {
 	var out []row
-	var walk func(n *graph.Node, ancestors string, last bool, depth int)
-	walk = func(n *graph.Node, ancestors string, last bool, depth int) {
-		prefix := ""
-		if depth > 0 {
-			prefix = ancestors + g.Branch
-			if last {
-				prefix = ancestors + g.Last
+	var walk func(nodes []*graph.Node, ancestors string, depth int)
+	walk = func(nodes []*graph.Node, ancestors string, depth int) {
+		visible := shown(nodes, show)
+		for i, n := range visible {
+			last := i == len(visible)-1
+			prefix := ""
+			if depth > 0 {
+				prefix = ancestors + g.Branch
+				if last {
+					prefix = ancestors + g.Last
+				}
 			}
-		}
-		out = append(out, row{node: n, prefix: prefix})
+			out = append(out, row{node: n, prefix: prefix})
 
-		childAncestors := ancestors
-		if depth > 0 {
-			childAncestors += g.Pipe
-			if last {
-				childAncestors = ancestors + g.Blank
+			childAncestors := ancestors
+			if depth > 0 {
+				childAncestors += g.Pipe
+				if last {
+					childAncestors = ancestors + g.Blank
+				}
 			}
-		}
-		for i, c := range n.Children {
-			walk(c, childAncestors, i == len(n.Children)-1, depth+1)
+			walk(n.Children, childAncestors, depth+1)
 		}
 	}
-	for i, r := range f.Roots {
-		walk(r, "", i == len(f.Roots)-1, 0)
+	walk(f.Roots, "", 0)
+	return out
+}
+
+// shown resolves a level to the nodes that are actually drawn, replacing each
+// excluded node with its own visible descendants, in place.
+func shown(nodes []*graph.Node, show func(*graph.Node) bool) []*graph.Node {
+	if show == nil {
+		return nodes
+	}
+	var out []*graph.Node
+	for _, n := range nodes {
+		if show(n) {
+			out = append(out, n)
+			continue
+		}
+		out = append(out, shown(n.Children, show)...)
 	}
 	return out
+}
+
+// hidingAny reports whether any conversation on the map is being held back.
+func (m Model) hidingAny() bool {
+	if m.showArchived {
+		return false
+	}
+	for id := range m.archived {
+		if _, ok := m.forestHas[id]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // oneLine lives in spineview.go.

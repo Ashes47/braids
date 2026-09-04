@@ -11,16 +11,19 @@ import (
 // top-right, and the table inside a titled panel. It exists so a wide terminal
 // reads as a dense instrument rather than a mostly-empty list.
 
-// chromeHeight is the number of lines the chrome occupies: the info block, a
-// blank line, the panel's top border, its column header, its bottom border and
-// the status line.
-const chromeHeight = infoLines + 1 + 1 + 1 + 1 + 1
+// chromeHeight is the lines the chrome occupies: the info block, a blank line,
+// the panel's top border, its column header, its bottom border and the status
+// line.
+func (m Model) chromeHeight() int { return m.headerPlan().rows + 5 }
 
 const (
-	infoLines = 4
-	labelCol  = 10
-	hintCol   = 8
-	glyphCol  = 5
+	// infoLines is the header's natural height; it grows to at most maxInfoLines
+	// when a narrow terminal cannot fit every binding in fewer rows.
+	infoLines    = 4
+	maxInfoLines = 6
+	labelCol     = 10
+	hintCol      = 8
+	glyphCol     = 5
 )
 
 type fact struct{ label, value string }
@@ -50,10 +53,14 @@ func (m Model) facts() []fact {
 
 func hints() []hint {
 	return []hint{
+		// Ordered so that the first few survive a one-column legend on a
+		// narrow terminal: moving, opening, searching and quitting.
 		{"j/k", "down / up"}, {"↵", "open spine"},
-		{"n / N", "next / prev waiting"}, {"/", "search"},
-		{"a / d", "archive / delete"}, {"f", "filter"},
-		{"y / o", "copy / open"}, {"q", "quit"},
+		{"/", "search"}, {"f", "filter list"},
+		{"a", "archive"}, {"q", "quit"},
+		{"n / N", "next / prev waiting"}, {"d", "delete"},
+		{"u", "undo delete"}, {"A", "show archived"},
+		{"y", "copy resume"}, {"o", "open terminal"},
 	}
 }
 
@@ -67,6 +74,7 @@ func (m Model) mapGlyphs() []glyph {
 		{g.Lane, m.theme.Alive, "live conversation"},
 		{g.Lane, m.theme.Accent, "waiting on you"},
 		{g.Lane, m.theme.Faint, "idle"},
+		{g.Archived, m.theme.Faint, "archived"},
 		{g.Branch, m.theme.Rail, "branched from above"},
 	}
 }
@@ -93,48 +101,68 @@ func (m Model) archivedNote() string {
 // factsBlock renders labelled facts on the left and key hints on the right. The
 // hint block is padded to a fixed width before being pushed right, so the keys
 // form a clean column instead of a ragged edge.
-func (m Model) factsBlock(facts []fact, keys []hint, glyphs []glyph) string {
-	labelWidth := labelCol
-	for _, f := range facts {
-		labelWidth = max(labelWidth, lipgloss.Width(f.label)+2)
-	}
+// plan is how the header will be laid out for the current screen and width.
+type plan struct {
+	rows, columns                     int
+	labelWidth, hintWidth, glyphWidth int
+	showGlyphs                        bool
+}
+
+// headerPlan sizes the header for whichever screen is showing. It is computed
+// the same way for drawing and for measuring, so the body can never be given
+// room the header has already taken.
+func (m Model) headerPlan() plan {
+	facts, keys, glyphs := m.headerContent()
+
+	p := plan{labelWidth: labelCol, hintWidth: hintCol}
 	factWidth := 0
 	for _, f := range facts {
-		factWidth = max(factWidth, labelWidth+lipgloss.Width(f.value))
+		p.labelWidth = max(p.labelWidth, lipgloss.Width(f.label)+2)
 	}
-	hintWidth := hintCol
+	for _, f := range facts {
+		factWidth = max(factWidth, p.labelWidth+lipgloss.Width(f.value))
+	}
 	for _, k := range keys {
-		hintWidth = max(hintWidth, hintCol+lipgloss.Width(k.action))
+		p.hintWidth = max(p.hintWidth, hintCol+lipgloss.Width(k.action))
 	}
-	glyphWidth := 0
 	for _, g := range glyphs {
-		glyphWidth = max(glyphWidth, glyphCol+lipgloss.Width(g.meaning))
+		p.glyphWidth = max(p.glyphWidth, glyphCol+lipgloss.Width(g.meaning))
 	}
 
-	// Choose the widest layout that fits, dropping columns rather than letting
-	// the header spill past the edge of the terminal.
-	columns, showGlyphs := m.fitColumns(factWidth, hintWidth, glyphWidth, len(keys) > 0, len(glyphs) > 0)
-	rows := len(keys)
-	if columns == 2 {
-		rows = (len(keys) + 1) / 2
+	p.columns, p.showGlyphs = m.fitColumns(factWidth, p.hintWidth, p.glyphWidth, len(keys), len(glyphs) > 0)
+	p.rows = len(keys)
+	if p.columns > 1 {
+		p.rows = (len(keys) + p.columns - 1) / p.columns
 	}
-	rows = min(max(rows, 1), infoLines)
+	// Grow rather than drop a binding: a key that works but is not listed may
+	// as well not exist. Beyond maxInfoLines the header would cost more of the
+	// screen than the legend is worth.
+	p.rows = min(max(p.rows, len(facts), len(glyphs), infoLines), maxInfoLines)
+	return p
+}
 
-	lines := make([]string, 0, infoLines)
-	for i := range infoLines {
+func (m Model) factsBlock(facts []fact, keys []hint, glyphs []glyph) string {
+	p := m.headerPlan()
+	labelWidth, hintWidth, glyphWidth := p.labelWidth, p.hintWidth, p.glyphWidth
+	columns, showGlyphs, rows := p.columns, p.showGlyphs, p.rows
+
+	lines := make([]string, 0, rows)
+	for i := range rows {
 		left := ""
 		if i < len(facts) {
 			left = m.theme.Label.Render(padRight(facts[i].label+":", labelWidth)) +
 				m.theme.Value.Render(facts[i].value)
 		}
 		right := ""
-		switch {
-		case columns == 2 && i < rows:
-			right = m.hintCell(keys, i, hintWidth) + " " + m.hintCell(keys, i+rows, hintWidth)
-		case columns == 2:
-			right = strings.Repeat(" ", hintWidth*2+1)
-		case columns == 1:
-			right = m.hintCell(keys, i, hintWidth)
+		for c := range columns {
+			if c > 0 {
+				right += " "
+			}
+			if i < rows {
+				right += m.hintCell(keys, i+c*rows, hintWidth)
+			} else {
+				right += strings.Repeat(" ", hintWidth)
+			}
 		}
 		if showGlyphs {
 			right = m.glyphCell(glyphs, i, glyphWidth) + "  " + right
@@ -144,25 +172,53 @@ func (m Model) factsBlock(facts []fact, keys []hint, glyphs []glyph) string {
 	return strings.Join(lines, "\n")
 }
 
-// fitColumns decides how much of the header the terminal can hold.
-func (m Model) fitColumns(factWidth, hintWidth, glyphWidth int, haveHints, haveGlyphs bool) (columns int, glyphs bool) {
-	room := m.width - 3 // one space either side of the gap, one for the margin
-	fits := func(width int) bool { return factWidth+width <= room }
-
-	if !haveHints {
-		return 0, haveGlyphs && fits(glyphWidth)
-	}
-	twoCols := hintWidth*2 + 1
+// headerContent is what the current screen puts in its header.
+func (m Model) headerContent() ([]fact, []hint, []glyph) {
 	switch {
-	case haveGlyphs && fits(glyphWidth+2+twoCols):
-		return 2, true
-	case fits(twoCols):
-		return 2, false
-	case fits(hintWidth):
-		return 1, false
+	case m.mode == searchMode && m.search != nil:
+		return m.searchFacts(), searchHints(), nil
+	case m.mode == spineMode && m.spine != nil:
+		return m.spineFacts(), spineHints(), m.spineGlyphs()
 	default:
-		return 0, false
+		return m.facts(), hints(), m.mapGlyphs()
 	}
+}
+
+// fitColumns decides how much of the header the terminal can hold: as many
+// columns of keys as fit, then the glyph key if there is still room.
+//
+// Every binding a screen has belongs in its legend — a key that works but is
+// not listed may as well not exist — so width is spent on columns of keys
+// before anything else.
+func (m Model) fitColumns(factWidth, hintWidth, glyphWidth, keys int, haveGlyphs bool) (columns int, glyphs bool) {
+	room := m.width - 3 // a space either side of the gap, and the margin
+	fits := func(width int) bool { return factWidth+width <= room }
+	colsWidth := func(n int) int { return hintWidth*n + (n - 1) }
+
+	most := min((keys+infoLines-1)/infoLines, 3)
+	// Columns needed to list every binding within the header's maximum height.
+	// Listing them all comes first: a key that works but is not shown may as
+	// well not exist, while the glyph key only names what is already on screen.
+	need := max((keys+maxInfoLines-1)/maxInfoLines, 1)
+
+	for n := most; n >= need && haveGlyphs; n-- {
+		if fits(colsWidth(n) + 2 + glyphWidth) {
+			return n, true
+		}
+	}
+	for n := most; n >= need; n-- {
+		if fits(colsWidth(n)) {
+			return n, false
+		}
+	}
+	// Not enough room for every binding: keep as many as will fit, and drop the
+	// glyph key before dropping a key.
+	for n := need - 1; n >= 1; n-- {
+		if fits(colsWidth(n)) {
+			return n, false
+		}
+	}
+	return 0, haveGlyphs && fits(glyphWidth)
 }
 
 // glyphCell renders one line of the glyph key: the mark in its own style, then

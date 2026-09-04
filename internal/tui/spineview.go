@@ -388,6 +388,10 @@ func (m Model) spineTitle() string {
 
 // spineInfo swaps the map's facts for the ones that matter inside a lane.
 func (m Model) spineInfo() string {
+	return m.factsBlock(m.spineFacts(), spineHints(), m.spineGlyphs())
+}
+
+func (m Model) spineFacts() []fact {
 	junctions, alternates := 0, 0
 	for _, seg := range m.spine.segs {
 		if len(seg.Alternates) > 0 {
@@ -407,13 +411,19 @@ func (m Model) spineInfo() string {
 		{"Branches", describeBranches(alternates, forks)},
 		{"Agents", fmt.Sprintf("%d", agents)},
 	}
-	keys := []hint{
-		{"j/k", "down / up"}, {"b", "branch here"},
-		{"p", "promote agent"}, {"/", "search"},
-		{"↵", "open branch/agent"}, {"n / N", "next / prev marker"},
-		{"y / o", "copy / open"}, {"esc", "back"},
+	return facts
+}
+
+// spineHints are every binding the spine has.
+func spineHints() []hint {
+	return []hint{
+		{"j/k", "down / up"}, {"↵", "open branch/agent"},
+		{"b", "branch here"}, {"/", "search"},
+		{"esc", "back"}, {"q", "quit"},
+		{"n / N", "next / prev marker"}, {"p", "promote agent"},
+		{"f", "filter turns"}, {"a", "archive"},
+		{"y", "copy resume"}, {"o", "open terminal"},
 	}
-	return m.factsBlock(facts, keys, m.spineGlyphs())
 }
 
 // spineGlyphs explains the marks a conversation is drawn with, each in the

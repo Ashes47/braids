@@ -158,3 +158,45 @@ func TestDeleteFromTheSpineIsRedirected(t *testing.T) {
 		t.Fatal("nothing should have been deleted")
 	}
 }
+
+func TestArchivingKeepsTheTree(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("root", "the original", "app", 20, time.Hour),
+		laneInfo("kid", "a branch", "app", 5, time.Hour),
+		laneInfo("grandkid", "a branch of the branch", "app", 3, time.Hour),
+	}
+	m, _ := keepingModel(t, lanes)
+	m = m.adopt(forestOf(lanes, map[string]string{"kid": "root", "grandkid": "kid"}))
+
+	connectors := func(m Model) []string {
+		out := make([]string, 0, len(m.visible))
+		for _, r := range m.visible {
+			out = append(out, r.prefix)
+		}
+		return out
+	}
+	if got := connectors(m); got[0] != "" || got[1] == "" || got[2] == "" {
+		t.Fatalf("the unfiltered map should be a tree, got prefixes %q", got)
+	}
+
+	// Archiving the middle conversation must not flatten the map, and must not
+	// take its branch away with it.
+	for i, r := range m.visible {
+		if r.node.Lane.ID == "kid" {
+			m.cursor = i
+		}
+	}
+	m = press(m, "a")
+	if len(m.visible) != 2 {
+		t.Fatalf("want root and grandkid, got %d rows", len(m.visible))
+	}
+	if m.visible[1].node.Lane.ID != "grandkid" {
+		t.Errorf("a branch of an archived conversation should remain, got %q", m.visible[1].node.Lane.ID)
+	}
+	if m.visible[1].prefix == "" {
+		t.Error("it should still be drawn under the conversation that survives")
+	}
+	if !strings.Contains(plain(m.render()), "1 archived hidden") {
+		t.Error("the title should say something is held back")
+	}
+}

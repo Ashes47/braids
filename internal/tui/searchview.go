@@ -218,6 +218,18 @@ func (m Model) searchTitle() string {
 }
 
 func (m Model) searchInfo() string {
+	return m.factsBlock(m.searchFacts(), searchHints(), nil)
+}
+
+// searchHints are every binding the search screen has.
+func searchHints() []hint {
+	return []hint{
+		{"↵", "jump to turn"}, {"tab", "change scope"},
+		{"↑ / ↓", "down / up"}, {"esc", "back"},
+	}
+}
+
+func (m Model) searchFacts() []fact {
 	s := m.search
 	timing := "—"
 	if s.elapsed > 0 {
@@ -227,17 +239,12 @@ func (m Model) searchInfo() string {
 	if s.scope != "" {
 		scope = "this conversation"
 	}
-	facts := []fact{
+	return []fact{
 		{"Query", orDash(s.input.text)},
 		{"Scope", scope},
 		{"Hits", fmt.Sprintf("%d", len(s.hits))},
 		{"Took", timing},
 	}
-	keys := []hint{
-		{"↵", "jump to turn"}, {"tab", "change scope"},
-		{"↑ / ↓", "down / up"}, {"esc", "back"},
-	}
-	return m.factsBlock(facts, keys, nil)
 }
 
 // orDash keeps an empty fact readable rather than blank.

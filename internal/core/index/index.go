@@ -34,7 +34,9 @@ DROP TABLE IF EXISTS parts;
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS lanes;
 DROP TABLE IF EXISTS subagents;
-DROP TABLE IF EXISTS compactions;`
+DROP TABLE IF EXISTS compactions;
+DROP TABLE IF EXISTS docs;
+DROP TABLE IF EXISTS memory_marks;`
 
 const schema = `
 CREATE TABLE IF NOT EXISTS lanes (
@@ -244,8 +246,8 @@ type Hit struct {
 	At      time.Time
 }
 
-// Open opens or creates the index at path.
-func Open(path string) (*Index, error) {
+// connect opens the database file and sets the pragmas every caller needs.
+func connect(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open index: %w", err)
@@ -262,14 +264,31 @@ func Open(path string) (*Index, error) {
 			return nil, errors.Join(fmt.Errorf("apply %s: %w", pragma, err), db.Close())
 		}
 	}
-	dropped, err := migrate(db)
+	return db, nil
+}
+
+// Open opens the index at path, or makes an empty one where there is no file
+// yet. It refuses an index written by another version rather than repairing
+// it: see ErrSchemaChanged.
+func Open(path string) (*Index, error) {
+	db, err := connect(path)
 	if err != nil {
+		return nil, err
+	}
+	stale, err := outOfDate(db)
+	if err != nil {
+		return nil, errors.Join(err, db.Close())
+	}
+	if stale {
+		return nil, errors.Join(ErrSchemaChanged, db.Close())
+	}
+	if err := create(db); err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
 	if err := restrict(path); err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
-	return &Index{db: db, recreated: dropped}, nil
+	return &Index{db: db}, nil
 }
 
 // restrict keeps the index to its owner. It holds the full text of every
@@ -298,27 +317,70 @@ func restrict(path string) error {
 	return nil
 }
 
-// migrate brings the database to the current schema, discarding an older one,
-// and reports whether it discarded anything. A caller that ignores that is a
-// caller showing an empty map to somebody who has just upgraded.
-func migrate(db *sql.DB) (bool, error) {
+// ErrSchemaChanged says the index on disk was written by a braids that stored
+// things differently.
+//
+// Opening it does not repair it, deliberately. Repairing means dropping
+// everything and reading the transcripts again, which only two callers are in
+// a position to do: `braids index`, whose whole job it is, and the map, which
+// re-reads before it draws. A search that quietly dropped the data and then
+// answered from whatever table it had not got to yet would be a wrong answer
+// wearing the shape of a right one, which is the thing this codebase refuses
+// to do anywhere else.
+var ErrSchemaChanged = errors.New("the index was written by another version of braids (run: braids index)")
+
+// outOfDate reports whether the stored schema is one this build understands.
+func outOfDate(db *sql.DB) (bool, error) {
 	var version int
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return false, fmt.Errorf("read schema version: %w", err)
 	}
-	dropped := version != schemaVersion && version != 0
-	if version != schemaVersion {
-		if _, err := db.Exec(dropAll); err != nil {
-			return false, fmt.Errorf("drop stale schema v%d: %w", version, err)
-		}
+	if version == schemaVersion {
+		return false, nil
 	}
+	// A version of zero is either a file that has never held a schema, which is
+	// simply new, or one written before braids stamped them at all. Telling
+	// those apart means looking for a table: without this the second is opened
+	// as though it were the first, and the tables it already has, with whatever
+	// columns they had, are left in place to fail on the first insert.
+	var tables int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'
+		 AND name IN ('lanes', 'messages', 'parts')`).Scan(&tables); err != nil {
+		return false, fmt.Errorf("look for existing tables: %w", err)
+	}
+	return tables > 0, nil
+}
+
+// create makes the tables and stamps the version. It is idempotent.
+func create(db *sql.DB) error {
 	if _, err := db.Exec(schema); err != nil {
-		return false, fmt.Errorf("create schema: %w", err)
+		return fmt.Errorf("create schema: %w", err)
 	}
 	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion)); err != nil {
-		return false, fmt.Errorf("stamp schema version: %w", err)
+		return fmt.Errorf("stamp schema version: %w", err)
 	}
-	return dropped, nil
+	return nil
+}
+
+// Migrate discards an index written by another version and makes an empty one
+// at the current schema. Whoever calls it must fill it: it returns holding
+// nothing at all.
+func Migrate(path string) (*Index, error) {
+	db, err := connect(path)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(dropAll); err != nil {
+		return nil, errors.Join(fmt.Errorf("discard the old index: %w", err), db.Close())
+	}
+	if err := create(db); err != nil {
+		return nil, errors.Join(err, db.Close())
+	}
+	if err := restrict(path); err != nil {
+		return nil, errors.Join(err, db.Close())
+	}
+	return &Index{db: db, recreated: true}, nil
 }
 
 // Recreated reports that opening this index threw away an older schema, so it

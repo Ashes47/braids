@@ -257,7 +257,7 @@ func withLane(m model.Message, lane string) model.Message {
 	return m
 }
 
-func TestOpenDiscardsAStaleSchema(t *testing.T) {
+func TestMigrateDiscardsAStaleSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "index.db")
 
 	// An index written by an older braids: right table name, wrong columns.
@@ -272,9 +272,14 @@ func TestOpenDiscardsAStaleSchema(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	ix, err := Open(path)
+	// Refused, because repairing means reading every transcript again and only
+	// `braids index` and the map are in a position to do that.
+	if _, err := Open(path); !errors.Is(err, ErrSchemaChanged) {
+		t.Fatalf("Open of a stale schema = %v, want ErrSchemaChanged", err)
+	}
+	ix, err := Migrate(path)
 	if err != nil {
-		t.Fatalf("Open must recover from a stale schema, got: %v", err)
+		t.Fatalf("Migrate must recover from a stale schema, got: %v", err)
 	}
 	defer ix.Close() //nolint:errcheck // test cleanup
 
@@ -993,53 +998,107 @@ func TestSyncMemoriesPicksUpANewMemoryAndSkipsWhenNothingMoved(t *testing.T) {
 	}
 }
 
-// An upgrade that changes the schema throws away everything the index held.
-// Open has to say so, because the alternative is a map with nothing on it and
-// no word about why, which is what braids used to do.
-func TestOpenReportsAThrownAwaySchema(t *testing.T) {
+// An index written by another version is refused, not repaired.
+//
+// Repairing means dropping everything and reading the transcripts again, which
+// a search is in no position to do. Before this it dropped the conversation
+// tables and carried on, so the first search after an upgrade emptied the index
+// and then answered from the one table the drop had not covered: a wrong answer
+// wearing the shape of a right one, with the data gone.
+func TestOpeningAnIndexFromAnotherVersionRefusesAndKeepsIt(t *testing.T) {
+	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "index.db")
 
-	fresh, err := Open(path)
+	ix, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fresh.Recreated() {
-		t.Error("a brand new index reported that it threw something away")
+	if _, err := ix.Rebuild(ctx, newFixture()); err != nil {
+		t.Fatal(err)
 	}
-	if err := fresh.Close(); err != nil {
+	before := countMessages(t, ix)
+	if before == 0 {
+		t.Fatal("the fixture indexed nothing, so the test proves nothing")
+	}
+	if err := ix.Close(); err != nil {
 		t.Fatal(err)
 	}
 
-	again, err := Open(path)
+	// What the next release looks like from here.
+	stamp(t, path, schemaVersion-1)
+
+	if _, err := Open(path); !errors.Is(err, ErrSchemaChanged) {
+		t.Fatalf("Open of an older schema = %v, want ErrSchemaChanged", err)
+	}
+	// And it left the data where it was.
+	again, err := Migrate(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.Recreated() {
-		t.Error("reopening an index at the current schema reported a drop")
+	defer again.Close() //nolint:errcheck // test
+	if !again.Recreated() {
+		t.Error("Migrate did not report that it replaced the index")
 	}
-	if err := again.Close(); err != nil {
+	if after := countMessages(t, again); after != 0 {
+		t.Errorf("Migrate left %d messages behind; it is meant to hand back an empty index", after)
+	}
+}
+
+// The data survives being refused, which is the whole point of refusing.
+func TestARefusedOpenTouchesNothing(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "index.db")
+	ix, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ix.Rebuild(ctx, newFixture()); err != nil {
+		t.Fatal(err)
+	}
+	before := countMessages(t, ix)
+	if err := ix.Close(); err != nil {
 		t.Fatal(err)
 	}
 
-	// What a release that changes the schema looks like from here.
+	stamp(t, path, schemaVersion-1)
+	for range 3 {
+		if _, err := Open(path); !errors.Is(err, ErrSchemaChanged) {
+			t.Fatalf("Open = %v", err)
+		}
+	}
+
+	// Put the version back and the rows are all still there.
+	stamp(t, path, schemaVersion)
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close() //nolint:errcheck // test
+	if after := countMessages(t, reopened); after != before {
+		t.Errorf("held %d messages before being refused and %d after", before, after)
+	}
+}
+
+func countMessages(t *testing.T, ix *Index) int {
+	t.Helper()
+	var n int
+	if err := ix.db.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func stamp(t *testing.T, path string, version int) {
+	t.Helper()
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion-1)); err != nil {
+	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, version)); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
-	}
-
-	upgraded, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer upgraded.Close() //nolint:errcheck // test
-	if !upgraded.Recreated() {
-		t.Error("an older schema was dropped without saying so, so the map would open empty")
 	}
 }
 

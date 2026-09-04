@@ -373,14 +373,19 @@ func openIndex(dbFlag string) (*index.Index, error) {
 	return openExisting(path)
 }
 
-// createIndex opens the index, making it if this is the first run. Only
-// `braids index` may do this.
+// createIndex opens the index, making it if this is the first run and
+// replacing it if it was written by another version. Only `braids index` may
+// do either, because both end in reading every transcript again.
 func createIndex(dbFlag string) (*index.Index, error) {
 	path, err := resolveDB(dbFlag)
 	if err != nil {
 		return nil, err
 	}
-	return index.Open(path)
+	ix, err := index.Open(path)
+	if errors.Is(err, index.ErrSchemaChanged) {
+		return index.Migrate(path)
+	}
+	return ix, err
 }
 
 // openExisting opens an index that has to be there already. Only `braids index`
@@ -392,6 +397,20 @@ func openExisting(path string) (*index.Index, error) {
 		return nil, fmt.Errorf("no index at %s (run: braids index)", path)
 	}
 	return index.Open(path)
+}
+
+// openOrRebuild is the map's way in. It may replace an index written by
+// another version, because unlike a search it reads every transcript again
+// before it draws anything, so nobody is shown an empty screen.
+func openOrRebuild(path string) (*index.Index, error) {
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("no index at %s (run: braids index)", path)
+	}
+	ix, err := index.Open(path)
+	if errors.Is(err, index.ErrSchemaChanged) {
+		return index.Migrate(path)
+	}
+	return ix, err
 }
 
 func cmdMap(args []string, out *printer) error {
@@ -410,7 +429,7 @@ func cmdMap(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
-	ix, err := openExisting(dbPath)
+	ix, err := openOrRebuild(dbPath)
 	if err != nil {
 		return err
 	}
@@ -647,6 +666,9 @@ func cmdMap(args []string, out *printer) error {
 			return err
 		}
 		if _, err := ix.SyncMemories(ctx, src); err != nil {
+			return err
+		}
+		if err := ix.SyncDocs(ctx, src); err != nil {
 			return err
 		}
 		forest, err := tui.Forest(ctx, ix, provenance.All(), names.All())

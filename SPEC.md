@@ -158,6 +158,15 @@ not there says so, because quietly creating an empty one answers a mistyped
 `--db` with "no matches", which is a wrong answer wearing the shape of a right
 one, and leaves a database behind where the typo pointed.
 
+The same rule holds for an index written by a different version, and it took a
+release to learn it. Opening one used to drop the tables and carry on, so the
+first search after an upgrade emptied the index and then answered from the one
+table the drop did not cover, reporting hits from a history it had just
+deleted. Opening now refuses and leaves every row where it is. Two callers may
+repair it, because both read every transcript again before showing anybody
+anything: `braids index`, whose job it is, and the map, which re-reads before it
+draws and says so while it does.
+
 The index holds the full text of every message it has read, so `~/.braids` is
 `0700` and the file is `0600`, tightened on every open rather than only at
 creation. An earlier version left it world readable.

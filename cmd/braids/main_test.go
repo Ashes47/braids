@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +15,8 @@ import (
 	"time"
 
 	"github.com/Ashes47/braids/internal/perms"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/Ashes47/braids/internal/brand"
 	"github.com/Ashes47/braids/internal/core/model"
@@ -745,5 +749,72 @@ func TestSearchNarrowsByProjectAndDate(t *testing.T) {
 	}
 	if len(none.Hits) != 0 {
 		t.Errorf("--until 1999 returned %d hits", len(none.Hits))
+	}
+}
+
+// After an upgrade that changes how things are stored, a read has to refuse
+// rather than repair. Repairing means reading every transcript again, and a
+// search doing that quietly would empty the index and then answer from
+// whatever it had not dropped yet.
+func TestReadsRefuseAnIndexFromAnotherVersionAndIndexRepairsIt(t *testing.T) {
+	root := fixtureRoot(t)
+	db := filepath.Join(t.TempDir(), "index.db")
+	runCmd(t, "index", "--root", root, "--db", db)
+
+	before := rowsIn(t, db, "messages")
+	if before == 0 {
+		t.Fatal("the fixture indexed nothing, so the test proves nothing")
+	}
+	stampVersion(t, db, 1)
+
+	for _, args := range [][]string{
+		{"search", "--db", db, "blobstore"},
+		{"lanes", "--db", db},
+		{"explain", "--db", db, "."},
+	} {
+		err := run(args, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "another version") {
+			t.Errorf("run(%v) = %v, want it to refuse the index", args, err)
+		}
+	}
+	if after := rowsIn(t, db, "messages"); after != before {
+		t.Errorf("a refused read changed the index: %d messages became %d", before, after)
+	}
+
+	// The one command whose job it is puts it right.
+	out := runCmd(t, "index", "--root", root, "--db", db)
+	if !strings.Contains(out, "1 lanes") {
+		t.Errorf("index did not rebuild after the version changed: %q", out)
+	}
+	if after := rowsIn(t, db, "messages"); after != before {
+		t.Errorf("rebuilt to %d messages, want the %d it had", after, before)
+	}
+}
+
+func rowsIn(t *testing.T, path, table string) int {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close() //nolint:errcheck // test
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func stampVersion(t *testing.T, path string, version int) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, version)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

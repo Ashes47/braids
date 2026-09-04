@@ -1028,6 +1028,9 @@ REFERENCE = f"""
      "waiting states fall back to what the transcript can prove. <code>braids hooks --install</code>"),
     ("hook reads an event on stdin",
      "you typed <code>braids hook</code>. You wanted <code>braids hooks</code>"),
+    ("the index was written by another version of braids",
+     "you have upgraded. Run <code>braids index</code> once, or just open the "
+     "map, which re-reads by itself. Nothing is lost either way"),
     ("N conversations grew and produced no new messages",
      "braids could read them before and cannot now, which is what a format "
      "change looks like while it happens. <code>braids index</code> names them"),

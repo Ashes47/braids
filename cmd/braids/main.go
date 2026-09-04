@@ -59,7 +59,7 @@ usage:
   braids work [--lane ID] [--path SUB]   browse the work products a session left
               [--orphans] [--reclaim]    ...or find and reclaim ownerless ones
   braids memories [--project NAME]       what a project remembers, and whether
-                                         the index still agrees with the files
+                  [--root DIR]           the index still agrees with the files
   braids promote --lane ID --agent ID    turn a subagent into its own conversation
   braids merge --lane ID --from ID       join a branch back, as a new conversation
   braids hooks [--install|--remove]      let sessions report when they block
@@ -1018,8 +1018,8 @@ func cmdMerge(args []string, out *printer) error {
 	}
 	if !*asJSON {
 		out.printf("%s: %d turns, %d of them not in %s\n%s: %d turns not in %s\n",
-			orDash(base.Title), plan.BaseTurns, plan.BaseOnlyTurns, orDash(incoming.Title),
-			orDash(incoming.Title), plan.IncomingTurns, orDash(base.Title))
+			orUnnamed(base.Title), plan.BaseTurns, plan.BaseOnlyTurns, orUnnamed(incoming.Title),
+			orUnnamed(incoming.Title), plan.IncomingTurns, orUnnamed(base.Title))
 		if !plan.Worthwhile() {
 			out.printf("\nnothing to join: one already contains the other\n")
 		}
@@ -1065,9 +1065,21 @@ func twoLanes(ctx context.Context, ix *index.Index, a, b string) (index.LaneInfo
 }
 
 // orDash keeps an unnamed conversation readable in a sentence.
-func orDash(s string) string {
+// orUnnamed labels a conversation that has no title. It exists, it just has
+// not been named.
+func orUnnamed(s string) string {
 	if s == "" {
 		return "(unnamed)"
+	}
+	return s
+}
+
+// orNone marks something absent. A memory with no recorded origin was not
+// written by an unnamed conversation — no conversation was recorded at all,
+// and "(unnamed)" would claim one existed.
+func orNone(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "—"
 	}
 	return s
 }
@@ -1781,15 +1793,19 @@ func cmdMemories(args []string, out *printer) error {
 	fs := newFlagSet("memories")
 	fs.SetOutput(out)
 	project := fs.String("project", "", "only this project")
+	root := fs.String("root", "", "transcript root (default ~/.claude/projects)")
 	asJSON := jsonFlag(fs)
 	if err := parse(fs, args, out); err != nil {
 		return err
 	}
-	root, err := claudecode.DefaultRoot()
-	if err != nil {
-		return err
+	dir := *root
+	if dir == "" {
+		var err error
+		if dir, err = claudecode.DefaultRoot(); err != nil {
+			return err
+		}
 	}
-	sets, err := memorySets(claudecode.New(root), *project)
+	sets, err := memorySets(claudecode.New(dir), *project)
 	if err != nil {
 		return err
 	}
@@ -1850,7 +1866,7 @@ func printMemories(sets []memory.Set, out *printer) error {
 			}
 			rows = append(rows, fmt.Sprintf("%s\t%s\t%d\t%s\t%s",
 				truncate(name, 34), m.Kind, len(m.Links),
-				m.Modified.Format("01-02"), orDash(shortID(m.Origin))))
+				m.Modified.Format("01-02"), orNone(shortID(m.Origin))))
 		}
 		for _, r := range rows {
 			if _, err := fmt.Fprintln(tw, r); err != nil {

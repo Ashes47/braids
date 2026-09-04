@@ -26,6 +26,20 @@ var slugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 // ErrNotFound says a set holds no memory by that name.
 var ErrNotFound = errors.New("no such memory")
 
+// named checks that a name identifies one memory inside the set, and nothing
+// else anywhere.
+//
+// A name reaches these functions from a listing today, but they delete and move
+// files: the guard belongs at the destructive call rather than in whichever
+// caller happens to supply the name. "../../something" joined to a directory
+// is a path outside it, and Remove would have deleted whatever was there.
+func named(name string) error {
+	if !slugPattern.MatchString(name) {
+		return fmt.Errorf("%q is not a memory name: lowercase words joined by dashes", name)
+	}
+	return nil
+}
+
 // indexRow is one line of the index.
 type indexRow struct {
 	slug, title, hook string
@@ -39,6 +53,9 @@ type indexRow struct {
 // how braids sends it to the bin rather than destroying it, and its index row
 // goes with it.
 func Remove(loc Location, name string, discard func(path string) error) error {
+	if err := named(name); err != nil {
+		return err
+	}
 	path := filepath.Join(loc.Dir, name+".md")
 	if _, err := os.Stat(path); err != nil {
 		return fmt.Errorf("%w: %s", ErrNotFound, name)
@@ -72,8 +89,11 @@ func Remove(loc Location, name string, discard func(path string) error) error {
 // that leaves fourteen memories pointing at a name that no longer exists has
 // traded one tidy name for fourteen broken references.
 func Rename(loc Location, from, to string) (relinked int, err error) {
-	if !slugPattern.MatchString(to) {
-		return 0, fmt.Errorf("%q is not a usable name: lowercase words joined by dashes", to)
+	if err := named(from); err != nil {
+		return 0, err
+	}
+	if err := named(to); err != nil {
+		return 0, err
 	}
 	if from == to {
 		return 0, nil
@@ -94,8 +114,8 @@ func Rename(loc Location, from, to string) (relinked int, err error) {
 		return 0, fmt.Errorf("read %s: %w", fromPath, err)
 	}
 	renamed := renameField(string(body), to)
-	if err := os.WriteFile(fromPath, []byte(renamed), 0o600); err != nil {
-		return 0, fmt.Errorf("write %s: %w", fromPath, err)
+	if err := rewrite(fromPath, []byte(renamed)); err != nil {
+		return 0, err
 	}
 	if err := os.Rename(fromPath, toPath); err != nil {
 		return 0, fmt.Errorf("rename %s: %w", from, err)
@@ -188,8 +208,8 @@ func relink(loc Location, from, to string) (int, error) {
 		if hits == 0 {
 			continue
 		}
-		if err := os.WriteFile(path, []byte(strings.ReplaceAll(string(body), old, replacement)), 0o600); err != nil {
-			return count, fmt.Errorf("write %s: %w", path, err)
+		if err := rewrite(path, []byte(strings.ReplaceAll(string(body), old, replacement))); err != nil {
+			return count, err
 		}
 		count += hits
 	}
@@ -257,6 +277,11 @@ func readRows(path string) (header []string, rows []indexRow, err error) {
 
 // writeRows replaces the index atomically: a half-written index is a session
 // that loads half a memory set.
+//
+// The file's own mode is kept. This is the harness's file, not braids', and
+// normalising its permissions on the way past is a change nobody asked for —
+// braids writes 0600 for the files it creates itself, which is not the same
+// thing as deciding what everyone else's should be.
 func writeRows(path string, header []string, rows []indexRow) error {
 	var out strings.Builder
 	for _, line := range header {
@@ -290,11 +315,28 @@ func writeRows(path string, header []string, rows []indexRow) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close index: %w", err)
 	}
-	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
-		return fmt.Errorf("restrict index: %w", err)
+	mode := os.FileMode(0o600) // a file braids is creating is braids' to set
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := os.Chmod(tmp.Name(), mode); err != nil {
+		return fmt.Errorf("set the mode of %s: %w", filepath.Base(path), err)
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return fmt.Errorf("place index: %w", err)
+	}
+	return nil
+}
+
+// rewrite replaces a memory's contents, keeping the mode it already had. These
+// are the harness's files; braids is editing them, not adopting them.
+func rewrite(path string, body []byte) error {
+	mode := os.FileMode(0o600)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := os.WriteFile(path, body, mode); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
 }

@@ -192,3 +192,99 @@ func TestIndexIsWrittenSafely(t *testing.T) {
 		t.Errorf("the index lost its heading:\n%s", indexBody(t, loc))
 	}
 }
+
+// Curation deletes and moves files, so a name that is not one memory inside
+// the set is refused at the destructive call — not in whichever caller happens
+// to supply it. "../precious" joined to a directory is a path outside it.
+func TestCurationRefusesANameThatIsNotOneOfItsOwn(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(root, "precious.md")
+	if err := os.WriteFile(outside, []byte("---\nname: precious\n---\n\nkeep me\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "memory")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "kept.md"),
+		[]byte("---\nname: kept\ndescription: d\nmetadata:\n  type: project\n---\n\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, IndexFile),
+		[]byte("# Memory index\n\n- [Kept](kept.md) — d\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loc := Location{Project: "p", Dir: dir}
+
+	for _, name := range []string{
+		"../precious", "../../precious", "/etc/passwd", "sub/dir", "", ".", "..",
+		"Not A Slug", "trailing-", "UPPER",
+	} {
+		if err := Remove(loc, name, func(string) error {
+			t.Fatalf("Remove(%q) reached the point of deleting something", name)
+			return nil
+		}); err == nil {
+			t.Errorf("Remove(%q) was allowed", name)
+		}
+		if _, err := Rename(loc, name, "somewhere"); err == nil {
+			t.Errorf("Rename(from=%q) was allowed", name)
+		}
+		if _, err := Rename(loc, "kept", name); err == nil {
+			t.Errorf("Rename(to=%q) was allowed", name)
+		}
+	}
+
+	// Nothing outside was touched, and the memory that was there still is.
+	if _, err := os.Stat(outside); err != nil {
+		t.Errorf("a file outside the memory directory was affected: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "kept.md")); err != nil {
+		t.Errorf("the memory in the set was affected: %v", err)
+	}
+}
+
+// These are the harness's files. braids edits them; it does not adopt them, so
+// it leaves their permissions as it found them.
+func TestCurationKeepsTheModeItFound(t *testing.T) {
+	loc := curateSet(t)
+	for _, name := range []string{IndexFile, "shard-manifest.md", "reader-contract.md"} {
+		if err := os.Chmod(filepath.Join(loc.Dir, name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Rename(loc, "reader-contract", "reader-ordering"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if _, _, err := Repair(loc); err != nil {
+		t.Fatalf("Repair: %v", err)
+	}
+	for _, name := range []string{IndexFile, "shard-manifest.md", "reader-ordering.md"} {
+		info, err := os.Stat(filepath.Join(loc.Dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o644 {
+			t.Errorf("%s is now mode %o, was 0644 before braids touched it", name, got)
+		}
+	}
+
+	// A file braids creates is braids' own to set.
+	fresh := filepath.Join(t.TempDir(), "memory")
+	if err := os.MkdirAll(fresh, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fresh, "only.md"),
+		[]byte("---\nname: only\ndescription: d\nmetadata:\n  type: project\n---\n\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Repair(Location{Project: "p", Dir: fresh}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(fresh, IndexFile))
+	if err != nil {
+		t.Fatalf("Repair did not create the index it needed: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		t.Errorf("an index braids created is mode %o, readable beyond its owner", perm)
+	}
+}

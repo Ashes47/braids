@@ -609,3 +609,37 @@ func TestMemoriesReportsWhatTheIndexOmits(t *testing.T) {
 		t.Errorf("memories = %+v", p.Memories)
 	}
 }
+
+// A memory with no recorded origin was not written by an unnamed conversation:
+// no conversation was recorded at all, and saying "(unnamed)" claims one.
+func TestMemoriesMarksAnAbsentOriginAsNothing(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "-p", "memory")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("with-origin.md", "---\nname: with-origin\ndescription: d\nmetadata:\n  type: project\n"+
+		"  originSessionId: abc12345-0000-4000-8000-000000000001\n---\n\nbody\n")
+	write("no-origin.md", "---\nname: no-origin\ndescription: d\nmetadata:\n  type: feedback\n---\n\nbody\n")
+	write("MEMORY.md", "# Memory index\n\n- [With](with-origin.md) — d\n- [Without](no-origin.md) — d\n")
+
+	out := runCmd(t, "memories", "--root", root)
+	if strings.Contains(out, "(unnamed)") {
+		t.Errorf("an absent origin is reported as an unnamed conversation:\n%s", out)
+	}
+	if !strings.Contains(out, "abc1234") {
+		t.Errorf("a recorded origin is missing:\n%s", out)
+	}
+	if !strings.Contains(out, "—") {
+		t.Errorf("an absent origin is not marked as absent:\n%s", out)
+	}
+	// --root also makes the command reachable anywhere, like index and work.
+	if !strings.Contains(out, "no-origin") || !strings.Contains(out, "with-origin") {
+		t.Errorf("--root did not read the set:\n%s", out)
+	}
+}

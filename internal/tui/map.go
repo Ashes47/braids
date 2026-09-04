@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/Ashes47/braids/internal/core/graph"
+	"github.com/Ashes47/braids/internal/core/hooks"
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/model"
 	"github.com/Ashes47/braids/internal/core/trash"
@@ -95,6 +96,10 @@ type Options struct {
 	Restore func(entryID string) error
 	// Purge removes a deleted conversation for good.
 	Purge func(entryID string) error
+	// LiveEvents is what sessions have reported about themselves, newest per
+	// session. Without it braids reads state from the files alone, which
+	// cannot tell a running tool from one waiting on a person.
+	LiveEvents func() (map[string]hooks.Event, error)
 	// Changes signals that transcripts moved on disk. With it the map follows
 	// live sessions; without it the map is a snapshot.
 	Changes <-chan struct{}
@@ -143,6 +148,8 @@ type Model struct {
 	branch         func(string, int, string, bool) (string, error)
 	refresh        func() (*graph.Forest, error)
 	changes        <-chan struct{}
+	liveFn         func() (map[string]hooks.Event, error)
+	live           map[string]hooks.Event
 	resumeCmd      func(string) (string, error)
 	spawn          func(string) error
 	terminal       string
@@ -212,6 +219,7 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		branch:         opts.Branch,
 		refresh:        opts.Refresh,
 		changes:        opts.Changes,
+		liveFn:         opts.LiveEvents,
 		resumeCmd:      opts.ResumeCommand,
 		spawn:          opts.Spawn,
 		terminal:       opts.Terminal,
@@ -231,6 +239,7 @@ func NewModel(f *graph.Forest, opts Options) Model {
 	m.forest = f
 	m.all = layout(f, m.theme.Glyphs, nil)
 	m.measure()
+	m.refreshLive()
 	m.apply()
 	return m
 }
@@ -241,6 +250,7 @@ func (m Model) adopt(f *graph.Forest) Model {
 	m.forest = f
 	m.all = layout(f, m.theme.Glyphs, nil)
 	m.measure()
+	m.refreshLive()
 	m.apply() // holds the reader's place, or the row above it if it is gone
 	m.clamp()
 
@@ -253,6 +263,25 @@ func (m Model) adopt(f *graph.Forest) Model {
 		}
 	}
 	return m
+}
+
+// refreshLive reloads what sessions have reported. A failure leaves the map
+// reading state from the files, which is what it did before hooks existed.
+func (m *Model) refreshLive() {
+	if m.liveFn == nil {
+		return
+	}
+	if live, err := m.liveFn(); err == nil {
+		m.live = live
+	}
+}
+
+// liveFor is what a conversation last reported, if anything.
+func (m Model) liveFor(laneID string) *hooks.Event {
+	if e, ok := m.live[laneID]; ok {
+		return &e
+	}
+	return nil
 }
 
 // measure decides which optional columns to draw.
@@ -540,7 +569,7 @@ func (m Model) deleteLane() Model {
 		return m.withNotice("nothing to delete here", true)
 	}
 	info := m.visible[m.cursor].node.Lane
-	if stateOf(info, m.now()) == stateWorking {
+	if stateOf(info, m.liveFor(info.ID), m.now()) == stateWorking {
 		return m.withNotice("that conversation is still running — stop it first", true)
 	}
 	bytes, err := m.deleteFn(lane)
@@ -795,7 +824,7 @@ func (m Model) emptyMessage() string {
 func (m Model) waitingCount() int {
 	n := 0
 	for _, r := range m.all {
-		if waiting(r.node.Lane, m.now()) {
+		if waiting(r.node.Lane, m.liveFor(r.node.Lane.ID), m.now()) {
 			n++
 		}
 	}
@@ -806,7 +835,7 @@ func (m Model) waitingCount() int {
 func (m Model) nextWaiting(from, step int) int {
 	for i := 1; i <= len(m.visible); i++ {
 		at := (from + i*step + len(m.visible)*i) % len(m.visible)
-		if waiting(m.visible[at].node.Lane, m.now()) {
+		if waiting(m.visible[at].node.Lane, m.liveFor(m.visible[at].node.Lane.ID), m.now()) {
 			return at
 		}
 	}
@@ -886,7 +915,7 @@ func (m Model) rowParts(r row) (plain, styled string) {
 	g := m.theme.Glyphs
 	lane := r.node.Lane
 
-	state := stateOf(lane, m.now())
+	state := stateOf(lane, m.liveFor(lane.ID), m.now())
 	glyphStyle := m.styleFor(lane, state)
 	mark := g.Lane
 	if m.archived[lane.ID] {

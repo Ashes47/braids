@@ -5,6 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/Ashes47/braids/internal/core/hooks"
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/model"
 )
@@ -21,6 +22,9 @@ const freshWindow = 6 * time.Hour
 type laneState string
 
 const (
+	// stateNeedsYou: the session said it is waiting on a person. Only a hook
+	// can report this; the transcript alone cannot tell it from working.
+	stateNeedsYou laneState = "needs you"
 	// stateYourTurn: the assistant answered and nobody has replied.
 	stateYourTurn laneState = "your turn"
 	// stateWorking: a tool call is outstanding and the file is still moving.
@@ -44,7 +48,18 @@ const (
 // Files cannot distinguish a tool that is running from one waiting for
 // permission — both are an unanswered call. Saying "working" is the honest
 // reading; a hook is what would let braids say "needs you".
-func stateOf(lane index.LaneInfo, now time.Time) laneState {
+// staleBlock is how far the transcript may move past a reported block before
+// the file is believed instead. A session that carried on without saying so —
+// because the hook was removed, or the session predates it — should not look
+// blocked forever.
+const staleBlock = 30 * time.Second
+
+func stateOf(lane index.LaneInfo, live *hooks.Event, now time.Time) laneState {
+	// A session that said it is waiting outranks anything inferred, for as
+	// long as the transcript has not moved on past it.
+	if live != nil && hooks.Blocked(*live) && lane.Updated.Sub(live.At) < staleBlock {
+		return stateNeedsYou
+	}
 	switch {
 	case lane.Messages == 0 || lane.Activity.LastRole == "":
 		return stateEmpty
@@ -62,8 +77,10 @@ func stateOf(lane index.LaneInfo, now time.Time) laneState {
 }
 
 // waiting reports whether a conversation is owed something by a person.
-func waiting(lane index.LaneInfo, now time.Time) bool {
-	switch stateOf(lane, now) {
+func waiting(lane index.LaneInfo, live *hooks.Event, now time.Time) bool {
+	switch stateOf(lane, live, now) {
+	case stateNeedsYou:
+		return true
 	case stateYourTurn:
 		return now.Sub(lane.Updated) < freshWindow
 	case stateStopped, stateUnanswered:
@@ -80,6 +97,8 @@ func (m Model) styleFor(lane index.LaneInfo, state laneState) lipgloss.Style {
 	switch state {
 	case stateWorking, stateThinking:
 		return m.theme.Alive
+	case stateNeedsYou:
+		return m.theme.Accent
 	case stateStopped, stateUnanswered:
 		return m.theme.Column
 	case stateYourTurn:

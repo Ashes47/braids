@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Ashes47/braids/internal/core/graph"
+	"github.com/Ashes47/braids/internal/core/hooks"
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/model"
 	"github.com/Ashes47/braids/internal/core/sidecar"
@@ -46,6 +47,7 @@ usage:
   braids agents --lane ID                list the subagents a conversation spawned
   braids promote --lane ID --agent ID    turn a subagent into its own conversation
   braids merge --lane ID --from ID       join a branch back, as a new conversation
+  braids hooks [--install|--remove]      let sessions report when they block
   braids version
 
 map flags:
@@ -97,6 +99,10 @@ func run(args []string, w io.Writer) error {
 		return cmdPromote(args[1:], out)
 	case "merge":
 		return cmdMerge(args[1:], out)
+	case "hooks":
+		return cmdHooks(args[1:], out)
+	case "hook":
+		return cmdHook()
 	case "agents":
 		return cmdAgents(args[1:], out)
 	case "version":
@@ -197,7 +203,7 @@ func cmdMap(args []string, out *printer) error {
 	// still opens as a snapshot.
 	var changes <-chan struct{}
 	if !*print {
-		if w, err := watch.New(root); err == nil {
+		if w, err := watch.New(root, filepath.Dir(dbPath)); err == nil {
 			defer w.Close() //nolint:errcheck // closing on exit
 			changes = w.Changes()
 		}
@@ -259,9 +265,16 @@ func cmdMap(args []string, out *printer) error {
 		LoadAgentSpine: func(laneID, agentID string) ([]graph.Segment, error) {
 			return agentSpine(ctx, ix, root, laneID, agentID)
 		},
-		Origins:  provenance.All(),
-		Names:    names.All(),
-		Changes:  changes,
+		Origins: provenance.All(),
+		Names:   names.All(),
+		Changes: changes,
+		LiveEvents: func() (map[string]hooks.Event, error) {
+			events, err := hooks.Read(filepath.Join(filepath.Dir(dbPath), "events.jsonl"))
+			if err != nil {
+				return nil, err
+			}
+			return hooks.Latest(events), nil
+		},
 		Archived: shelf.All(),
 		Rename: func(laneID, name string) error {
 			if name == "" {
@@ -753,6 +766,96 @@ func orDash(s string) string {
 		return "(unnamed)"
 	}
 	return s
+}
+
+// cmdHook records one hook payload. It is what the harness runs, so it must
+// never fail loudly: an error here is printed in the middle of someone's
+// session, and nothing braids observes is worth interrupting work for.
+func cmdHook() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil //nolint:nilerr // a hook that cannot find home simply records nothing
+	}
+	_ = hooks.Record(filepath.Join(home, ".braids", "events.jsonl"), os.Stdin)
+	return nil
+}
+
+func cmdHooks(args []string, out *printer) error {
+	fs := flag.NewFlagSet("hooks", flag.ContinueOnError)
+	install := fs.Bool("install", false, "ask sessions to report when they block")
+	remove := fs.Bool("remove", false, "stop asking")
+	settings := fs.String("settings", "", "settings file (default ~/.claude/settings.json)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	path := *settings
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("locate home directory: %w", err)
+		}
+		path = filepath.Join(home, ".claude", "settings.json")
+	}
+	command, err := hookCommand()
+	if err != nil {
+		return err
+	}
+
+	switch {
+	case *install && *remove:
+		return errors.New("choose one of --install or --remove")
+	case *install:
+		added, err := hooks.Install(path, command)
+		if err != nil {
+			return err
+		}
+		if len(added) == 0 {
+			out.printf("already installed in %s\n", path)
+			return out.Err()
+		}
+		out.printf("installed in %s for %s\n", path, strings.Join(added, ", "))
+		out.printf("  a copy of the previous file is beside it\n")
+		out.printf("  sessions already running will not report until restarted\n")
+		return out.Err()
+	case *remove:
+		removed, err := hooks.Remove(path, command)
+		if err != nil {
+			return err
+		}
+		if len(removed) == 0 {
+			out.printf("not installed in %s\n", path)
+			return out.Err()
+		}
+		out.printf("removed from %s for %s\n", path, strings.Join(removed, ", "))
+		return out.Err()
+	}
+
+	on, err := hooks.Installed(path, command)
+	if err != nil {
+		return err
+	}
+	out.printf("settings: %s\ncommand:  %s\n", path, command)
+	if len(on) == 0 {
+		out.printf("status:   not installed — braids cannot tell a running tool from one\n")
+		out.printf("          waiting on you. `braids hooks --install` changes that.\n")
+		return out.Err()
+	}
+	out.printf("status:   reporting %s\n", strings.Join(on, ", "))
+	return out.Err()
+}
+
+// hookCommand is what the harness will run. It is the binary's own path, so a
+// braids that moves takes its hook with it.
+func hookCommand() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("locate braids: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		resolved = exe
+	}
+	return resolved + " hook", nil
 }
 
 // agentSpine reads a subagent's own transcript so it can be looked at before

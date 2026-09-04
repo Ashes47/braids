@@ -738,7 +738,7 @@ func TestGlyphKeyUsesTheStylesItExplains(t *testing.T) {
 	// And those styles must be the ones the rows use.
 	live := laneInfo("b", "busy", "app", 5, time.Second)
 	live.Activity = model.Activity{LastRole: model.RoleAssistant, LastWasToolCall: true}
-	if got := m.styleFor(live, stateOf(live, now)).Render("x"); got != styles["live conversation"] {
+	if got := m.styleFor(live, stateOf(live, nil, now)).Render("x"); got != styles["live conversation"] {
 		t.Error("the key's live style is not the one a working lane is drawn with")
 	}
 }

@@ -59,6 +59,7 @@ Every design decision below rests on something measured on this machine
 | `parentUuid` names bookkeeping, not turns | A message's parent is usually an `attachment`; resolving through them is what makes a chain reconstruct at all |
 | Merge works end to end | ROOT, STEM, TRUNK spliced with LEAFA, LEAFB resumed as one linear conversation holding all five |
 | Worktree branches work end to end | `--worktree` put a resumed branch in `.claude/worktrees/<name>` on its own git branch; two of them edited the same file with neither touching the other or the main tree |
+| Hook payloads carry what is needed | `hook_event_name`, `session_id`, `cwd`, `transcript_path`, plus per-event fields — captured from real payloads rather than assumed |
 | Work products dwarf conversations | 3.5 GB of scratch and job records against 365 MB of transcript, all of it in two conversations |
 | Job directories use the short ID | `~/.claude/jobs/9419fd9c`, not the full session UUID the transcript is filed under |
 | 35 compactions across this history | Parsed for free: a boundary is announced one record before the summary that replaces what it dropped, so it rides the existing pass |
@@ -416,10 +417,24 @@ its last turn, so the map names it rather than guessing from file times:
 counts them. That is the switchboard for everything except one case.
 
 **What files cannot say** is whether an outstanding tool call is *running* or
-*waiting for permission*: both are an assistant turn with no result yet. Naming
-it `working` is the honest reading. A `PermissionRequest` or `Notification` hook
-is what would let braids say `needs you` and mean it — and that, plus the
-ordered queue below, is what remains of this screen.
+*waiting for permission*: both are an assistant turn with no result yet. A hook
+can, and `braids hooks --install` asks the harness to report it. A session that
+says it is waiting shows as `needs you`, which outranks anything inferred — until
+the transcript moves more than 30 seconds past the report, after which the file
+is the better witness again.
+
+**Installing edits a settings file the user depends on**, which is the only
+thing braids does that is not purely additive. So it merges rather than writes:
+every hook already there is kept, braids' own entry is added beside it, a copy
+of the previous file is left next to it, `--remove` takes only what was added,
+and a settings file that cannot be parsed is refused rather than replaced by a
+guess. On this machine that meant adding to eight events already carrying
+another tool's hooks without disturbing any of them.
+
+The hook writes to a log rather than a socket, so it works whether or not braids
+is running: events that arrive while it is closed are still there when it opens.
+Only the fields braids acts on are modelled — the rest of a payload differs per
+event and per version, and guessing at it would age badly.
 
 ### 6.5 Branch — inline at the junction, never a modal
 

@@ -29,8 +29,12 @@ type Watcher struct {
 	once    sync.Once
 }
 
-// New starts watching root and every project directory beneath it.
-func New(root string) (*Watcher, error) {
+// New starts watching each root and every directory immediately beneath it.
+//
+// braids watches two places: where the harness writes transcripts, and where
+// sessions report what they are waiting on. Both change the map, so both wake
+// it the same way.
+func New(roots ...string) (*Watcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, fmt.Errorf("start watcher: %w", err)
@@ -40,8 +44,10 @@ func New(root string) (*Watcher, error) {
 		changes: make(chan struct{}, 1),
 		done:    make(chan struct{}),
 	}
-	if err := w.watchTree(root); err != nil {
-		return nil, err
+	for _, root := range roots {
+		if err := w.watchTree(root); err != nil {
+			return nil, err
+		}
 	}
 	go w.run()
 	return w, nil
@@ -60,6 +66,9 @@ func (w *Watcher) Close() error {
 // watchTree adds the root and its immediate project directories. fsnotify is
 // not recursive, and transcripts live exactly one level down.
 func (w *Watcher) watchTree(root string) error {
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", root, err)
+	}
 	if err := w.fs.Add(root); err != nil {
 		return fmt.Errorf("watch %s: %w", root, err)
 	}
@@ -126,7 +135,8 @@ func (w *Watcher) run() {
 	}
 }
 
-// interesting filters out everything that is not a transcript moving.
+// interesting filters out everything that is not a transcript or an event log
+// moving. Both are JSONL, which is the whole test.
 func interesting(event fsnotify.Event) bool {
 	if event.Op == fsnotify.Chmod {
 		return false

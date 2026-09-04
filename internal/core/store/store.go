@@ -70,6 +70,17 @@ type MergePlan struct {
 	// BaseTurns and IncomingTurns count only conversational turns, which is
 	// what a person is deciding about.
 	BaseTurns, IncomingTurns int
+	// BaseOnlyTurns is how many turns the base has that the branch does not.
+	// When it is zero the branch already contains the base, and merging would
+	// produce a copy of the branch rather than joining anything.
+	BaseOnlyTurns int
+}
+
+// Worthwhile reports whether a merge would actually join two histories rather
+// than duplicate one. A merge is only ever useful when both sides carried on
+// after they parted: if only one did, the other is already contained in it.
+func (p MergePlan) Worthwhile() bool {
+	return p.BaseOnlyTurns > 0 && p.IncomingTurns > 0
 }
 
 // Merger joins a branch back into the conversation it left, as a new

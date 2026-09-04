@@ -770,9 +770,9 @@ func mergeModel(t *testing.T) (Model, *[]string) {
 	m := NewModel(forestOf(lanes, nil), Options{
 		ASCII:     true,
 		LoadSpine: func(string) ([]graph.Segment, error) { return demoSegments(), nil },
-		PlanMerge: func(base, incoming string) (int, error) {
+		PlanMerge: func(base, incoming string) (int, int, error) {
 			*done = append(*done, "plan:"+base+"/"+incoming)
-			return 14, nil
+			return 14, 6, nil
 		},
 		Merge: func(base, incoming, name string) (string, error) {
 			*done = append(*done, fmt.Sprintf("merge:%s/%s:%s", base, incoming, name))
@@ -795,7 +795,7 @@ func TestMergeAsksBeforeItActs(t *testing.T) {
 		t.Fatalf("m should plan the merge first: %v", *done)
 	}
 	out := plain(m.renderSpine())
-	for _, want := range []string{"merge try option c into this?", "14 turns", "enter yes", "esc no"} {
+	for _, want := range []string{"merge try option c into this?", "14 of its turns join your 6", "enter yes", "esc no"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the question should say what it costs, missing %q:\n%s", want, out)
 		}
@@ -843,5 +843,31 @@ func TestMergeNeedsABranchSelected(t *testing.T) {
 	}
 	if !strings.Contains(plain(m.renderSpine()), "pick one to merge") {
 		t.Error("expected guidance")
+	}
+}
+
+func TestMergeIsRefusedWhenTheBranchAlreadyHasEverything(t *testing.T) {
+	m, done := mergeModel(t)
+	// The branch left and this conversation never carried on, so the branch
+	// holds all of it: joining them would only copy the branch.
+	m.planMergeFn = func(string, string) (int, int, error) { return 2, 0, nil }
+	m = m.openSpine()
+	m, _ = m.spineKey("j")
+	m, _ = m.spineKey("m")
+
+	if m.spine.merging != nil {
+		t.Fatal("a merge that would only copy the branch must not be offered")
+	}
+	out := plain(m.renderSpine())
+	if !strings.Contains(out, "already contains this whole conversation") {
+		t.Errorf("the reason should be given:\n%s", out)
+	}
+	if !strings.Contains(out, "open it instead") {
+		t.Error("it should say what to do instead")
+	}
+	for _, d := range *done {
+		if strings.HasPrefix(d, "merge:") {
+			t.Error("nothing should have been merged")
+		}
 	}
 }

@@ -870,14 +870,29 @@ func (m Model) planMerge() Model {
 		s.notice, s.failed = "merging is unavailable for this source", true
 		return m
 	}
-	turns, err := m.planMergeFn(s.lane.ID, row.fork.Lane.ID)
+	carried, ours, err := m.planMergeFn(s.lane.ID, row.fork.Lane.ID)
 	if err != nil {
 		s.notice, s.failed = err.Error(), true
 		return m
 	}
-	s.merging, s.mergeTurns = row.fork, turns
-	s.notice, s.failed = fmt.Sprintf("merge %s into this? %d turns would be carried over · enter yes · esc no",
-		branchName(row.fork), turns), false
+	// A branch that left and was never followed already holds this whole
+	// conversation, so joining them would write a copy of the branch. Merging
+	// is for when both sides carried on after they parted.
+	if ours == 0 {
+		s.notice, s.failed = fmt.Sprintf(
+			"%s already contains this whole conversation — open it instead of merging",
+			branchName(row.fork)), true
+		return m
+	}
+	if carried == 0 {
+		s.notice, s.failed = fmt.Sprintf("%s has nothing this conversation does not already have",
+			branchName(row.fork)), true
+		return m
+	}
+	s.merging, s.mergeTurns = row.fork, carried
+	s.notice, s.failed = fmt.Sprintf(
+		"merge %s into this? %d of its turns join your %d · enter yes · esc no",
+		branchName(row.fork), carried, ours), false
 	return m
 }
 

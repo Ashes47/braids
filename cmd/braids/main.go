@@ -221,13 +221,13 @@ func cmdMap(args []string, out *printer) error {
 		Source:    "claudecode",
 		IndexPath: dbPath,
 		LoadSpine: tui.SpineLoader(ctx, ix),
-		PlanMerge: func(base, incoming string) (int, error) {
+		PlanMerge: func(base, incoming string) (int, int, error) {
 			req, err := mergeRequest(ctx, ix, base, incoming, "")
 			if err != nil {
-				return 0, err
+				return 0, 0, err
 			}
 			plan, err := claudecode.New(root).PlanMerge(ctx, req)
-			return plan.IncomingTurns, err
+			return plan.IncomingTurns, plan.BaseOnlyTurns, err
 		},
 		Merge: func(base, incoming, name string) (string, error) {
 			req, err := mergeRequest(ctx, ix, base, incoming, name)
@@ -704,8 +704,12 @@ func cmdMerge(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
-	out.printf("%s (%d turns) + %d turns from %s · %d records already shared\n",
-		orDash(base.Title), plan.BaseTurns, plan.IncomingTurns, orDash(incoming.Title), plan.Shared)
+	out.printf("%s: %d turns, %d of them not in %s\n%s: %d turns not in %s\n",
+		orDash(base.Title), plan.BaseTurns, plan.BaseOnlyTurns, orDash(incoming.Title),
+		orDash(incoming.Title), plan.IncomingTurns, orDash(base.Title))
+	if !plan.Worthwhile() {
+		out.printf("\nnothing to join: one already contains the other\n")
+	}
 	if *dry {
 		return out.Err()
 	}

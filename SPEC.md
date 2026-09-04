@@ -598,6 +598,14 @@ Carried records are given fresh IDs. Reusing them would leave a conversation
 sharing message IDs with the branch, which is precisely what braids reads as a
 fork — the merged lane would draw as a branch of the thing it merged.
 
+**A merge only makes sense when both sides carried on after they parted.** A
+branch that left and was never followed already holds the whole conversation it
+came from, so joining them would write a copy of the branch under a new name.
+braids refuses that and says which one to open instead. The case merge exists
+for is the other one: you branched at turn 20 to try something, went back and
+kept working in the original, and now want both in one context — which is
+exactly what happens when two agents work from the same point at once.
+
 **A merge is never one keystroke.** It is the only action that combines two
 histories, so `m` reports what it would carry over and waits: *merge try option
 c into this? 14 turns would be carried over · enter yes · esc no*. Fourteen
@@ -766,7 +774,8 @@ needs-you — are declared as optional `Capabilities`, never assumed.
    browse and recover from. Multi-select, the filtered sweep and reclaiming job
    artifacts remain.
 10. ~~**Merge.**~~ **Done**: a splice of real turns into a new conversation,
-    behind a preview of what it would carry over.
+    behind a preview of what it would carry over, and refused where it would
+    only duplicate a branch.
 
 Steps 1–2 are already a tool worth opening.
 

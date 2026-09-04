@@ -19,11 +19,13 @@ func (s *Source) PlanMerge(_ context.Context, req store.MergeRequest) (store.Mer
 		return store.MergePlan{}, err
 	}
 	shared, unique := split(base, incoming)
+	_, baseOnly := split(incoming, base)
 	return store.MergePlan{
 		Shared:        len(shared),
 		Incoming:      len(unique),
 		BaseTurns:     countTurns(base),
 		IncomingTurns: countTurns(unique),
+		BaseOnlyTurns: countTurns(baseOnly),
 	}, nil
 }
 
@@ -45,6 +47,14 @@ func (s *Source) Merge(ctx context.Context, req store.MergeRequest) (model.Lane,
 	_, unique := split(base, incoming)
 	if len(unique) == 0 {
 		return model.Lane{}, errors.New("merge: that branch has nothing the conversation does not already have")
+	}
+	// A merge is only worth making when both sides carried on after they
+	// parted. If this one did not, the branch already contains it and merging
+	// would write a copy of the branch under a new name.
+	if _, baseOnly := split(incoming, base); len(baseOnly) == 0 {
+		return model.Lane{}, fmt.Errorf(
+			"merge: %s already contains everything in this conversation, so merging would only copy it",
+			nameOf(req.Incoming))
 	}
 
 	newID, err := newSessionID()
@@ -70,6 +80,17 @@ func (s *Source) Merge(ctx context.Context, req store.MergeRequest) (model.Lane,
 		Updated: info.ModTime(),
 		Size:    info.Size(),
 	}, nil
+}
+
+// nameOf is what to call a conversation in a message about it.
+func nameOf(lane model.Lane) string {
+	if lane.Title != "" {
+		return lane.Title
+	}
+	if len(lane.ID) > 8 {
+		return lane.ID[:8]
+	}
+	return lane.ID
 }
 
 func readBoth(req store.MergeRequest) (base, incoming []line, err error) {

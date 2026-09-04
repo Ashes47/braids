@@ -176,7 +176,10 @@ func TestMergeKeepsItsOwnName(t *testing.T) {
 		"base.jsonl": {
 			`{"type":"custom-title","customTitle":"the original","sessionId":"base"}`,
 			`{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"base","message":{"role":"user","content":"one"}}`,
-			`{"type":"last-prompt","leafUuid":"u1","sessionId":"base"}`,
+			// The base carried on after the branch left, or there would be
+			// nothing to merge.
+			`{"type":"user","uuid":"b1","parentUuid":"u1","sessionId":"base","message":{"role":"user","content":"base carried on"}}`,
+			`{"type":"last-prompt","leafUuid":"b1","sessionId":"base"}`,
 		},
 		"side.jsonl": {
 			`{"type":"custom-title","customTitle":"the branch","sessionId":"side"}`,
@@ -221,5 +224,71 @@ func TestMergeKeepsItsOwnName(t *testing.T) {
 	}
 	if n := strings.Count(string(body), `"type":"last-prompt"`); n != 1 {
 		t.Errorf("merged transcript holds %d leaf markers, want exactly its own", n)
+	}
+}
+
+func TestMergeRefusesWhenTheBranchAlreadyContainsTheBase(t *testing.T) {
+	// A branch cut from a conversation that then never carried on is a strict
+	// superset of it. Merging them would write a copy of the branch.
+	root := writeLanes(t, "-p", map[string][]string{
+		"base.jsonl": {
+			`{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"base","message":{"role":"user","content":"one"}}`,
+			`{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"base","message":{"role":"assistant","content":[{"type":"text","text":"ONE"}]}}`,
+		},
+		"side.jsonl": {
+			`{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"side","message":{"role":"user","content":"one"}}`,
+			`{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"side","message":{"role":"assistant","content":[{"type":"text","text":"ONE"}]}}`,
+			`{"type":"user","uuid":"s1","parentUuid":"a1","sessionId":"side","message":{"role":"user","content":"two"}}`,
+		},
+	})
+	s := New(root)
+	lanes, err := s.Lanes(context.Background())
+	if err != nil {
+		t.Fatalf("Lanes: %v", err)
+	}
+	var base, side model.Lane
+	for _, l := range lanes {
+		if l.ID == "base" {
+			base = l
+		} else {
+			side = l
+		}
+	}
+	side.Title = "the branch"
+
+	plan, err := s.PlanMerge(context.Background(), store.MergeRequest{Base: base, Incoming: side})
+	if err != nil {
+		t.Fatalf("PlanMerge: %v", err)
+	}
+	if plan.BaseOnlyTurns != 0 {
+		t.Errorf("BaseOnlyTurns = %d, want 0 — this conversation added nothing after the branch left",
+			plan.BaseOnlyTurns)
+	}
+	if plan.Worthwhile() {
+		t.Error("a merge that would only copy the branch is not worthwhile")
+	}
+
+	_, err = s.Merge(context.Background(), store.MergeRequest{Base: base, Incoming: side})
+	if err == nil {
+		t.Fatal("want a refusal")
+	}
+	if !strings.Contains(err.Error(), "already contains everything") ||
+		!strings.Contains(err.Error(), "the branch") {
+		t.Errorf("err = %v, want it to name the branch and say why", err)
+	}
+}
+
+func TestAMergeWorthMakingIsAllowed(t *testing.T) {
+	s, base, side := mergeFixture(t)
+	plan, err := s.PlanMerge(context.Background(), store.MergeRequest{Base: base, Incoming: side})
+	if err != nil {
+		t.Fatalf("PlanMerge: %v", err)
+	}
+	// Both sides carried on after they parted, so neither contains the other.
+	if plan.BaseOnlyTurns != 2 || plan.IncomingTurns != 2 {
+		t.Errorf("plan = %+v, want two turns unique to each side", plan)
+	}
+	if !plan.Worthwhile() {
+		t.Error("this is exactly the case a merge exists for")
 	}
 }

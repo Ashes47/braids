@@ -152,6 +152,14 @@ func writeMerged(ctx context.Context, path, newID, name string, base, unique []l
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			// Records with no identity are the file's own bookkeeping — its
+			// title, its mode, the leaf it was left on — and belong to the file
+			// rather than to the conversation. Copying them would let the
+			// base's title overwrite the merged one, since a reader takes the
+			// last title it sees.
+			if l.uuid == "" {
+				continue
+			}
 			rewritten, err := retarget(l.raw, newID)
 			if err != nil {
 				return err

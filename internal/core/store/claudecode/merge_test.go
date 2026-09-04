@@ -168,3 +168,58 @@ func TestMergeRefusesWhatCannotBeMerged(t *testing.T) {
 		t.Errorf("merging a conversation into itself by another name should be refused, got %v", err)
 	}
 }
+
+func TestMergeKeepsItsOwnName(t *testing.T) {
+	// The base carries a title of its own. Copying it would land after the
+	// merged conversation's title and win, because a reader takes the last.
+	root := writeLanes(t, "-p", map[string][]string{
+		"base.jsonl": {
+			`{"type":"custom-title","customTitle":"the original","sessionId":"base"}`,
+			`{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"base","message":{"role":"user","content":"one"}}`,
+			`{"type":"last-prompt","leafUuid":"u1","sessionId":"base"}`,
+		},
+		"side.jsonl": {
+			`{"type":"custom-title","customTitle":"the branch","sessionId":"side"}`,
+			`{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"side","message":{"role":"user","content":"one"}}`,
+			`{"type":"user","uuid":"s1","parentUuid":"u1","sessionId":"side","message":{"role":"user","content":"two"}}`,
+		},
+	})
+	s := New(root)
+	lanes, err := s.Lanes(context.Background())
+	if err != nil {
+		t.Fatalf("Lanes: %v", err)
+	}
+	var base, side model.Lane
+	for _, l := range lanes {
+		if l.ID == "base" {
+			base = l
+		} else {
+			side = l
+		}
+	}
+
+	merged, err := s.Merge(context.Background(), store.MergeRequest{
+		Base: base, Incoming: side, Name: "the original + the branch",
+	})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	enriched, err := s.Enrich(context.Background(), merged)
+	if err != nil {
+		t.Fatalf("Enrich: %v", err)
+	}
+	if enriched.Title != "the original + the branch" {
+		t.Errorf("merged conversation is called %q — a copied title overwrote its own", enriched.Title)
+	}
+
+	body, err := os.ReadFile(merged.Path)
+	if err != nil {
+		t.Fatalf("read merged: %v", err)
+	}
+	if n := strings.Count(string(body), `"type":"custom-title"`); n != 1 {
+		t.Errorf("merged transcript holds %d titles, want exactly its own", n)
+	}
+	if n := strings.Count(string(body), `"type":"last-prompt"`); n != 1 {
+		t.Errorf("merged transcript holds %d leaf markers, want exactly its own", n)
+	}
+}

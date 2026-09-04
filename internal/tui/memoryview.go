@@ -136,9 +136,9 @@ func (m Model) memoryKey(key string) Model {
 		s.cursor = len(s.shown) - 1
 		m = m.nextMemory(-1, true)
 	case "n":
-		return m.nextFlagged(1)
+		return m.nextMarked(1)
 	case "N":
-		return m.nextFlagged(-1)
+		return m.nextMarked(-1)
 	case "enter", "l", "right":
 		return m.readMemory()
 	case "c":
@@ -377,7 +377,7 @@ func (m Model) memoryFacts() []fact {
 func memoryHints() []hint {
 	return []hint{
 		{"j/k", "down / up"}, {"↵", "read it"},
-		{"c", "the conversation"}, {"n / N", "next / prev flagged"},
+		{"c", "the conversation"}, {"n / N", "next / prev marked"},
 		{"r", "rename"}, {"i", "repair the index"},
 		{"d", "delete"}, {"f", "filter"},
 		{"esc", "back"},
@@ -403,7 +403,7 @@ func (m Model) memoryGlyphs() []glyph {
 	g := m.theme.Glyphs
 	return []glyph{
 		{g.Failed, m.theme.Urgent, "not in the index — never loaded"},
-		{g.Agent, m.theme.Accent, "points at a memory that is missing"},
+		{g.Agent, m.theme.Accent, "links to one not written yet"},
 	}
 }
 
@@ -468,18 +468,19 @@ func (m Model) memoryMarks(r memoryRow, entry memory.Memory) (plain, styled stri
 	return plain, styled
 }
 
-// flagged reports whether a memory has anything wrong with it, which is what
-// n and N step between.
-func (m Model) flagged(r memoryRow) bool {
+// marked reports whether a memory carries either mark: not in the index, which
+// is broken, or waiting on a memory not written yet, which is a note. n and N
+// step between both, because both are worth walking to.
+func (m Model) marked(r memoryRow) bool {
 	if r.memory == nil {
 		return false
 	}
 	return !r.memory.Listed || len(danglingFrom(r.set, r.memory.Name)) > 0
 }
 
-// nextFlagged moves to the next memory with a flag on it. Nothing flagged is
-// said rather than silently doing nothing.
-func (m Model) nextFlagged(step int) Model {
+// nextMarked moves to the next memory carrying a mark. Nothing marked is said
+// rather than silently doing nothing.
+func (m Model) nextMarked(step int) Model {
 	s := m.memories
 	if len(s.shown) == 0 {
 		return m
@@ -487,15 +488,38 @@ func (m Model) nextFlagged(step int) Model {
 	at := s.cursor
 	for range len(s.shown) {
 		at = wrap(at, step, len(s.shown))
-		if m.flagged(s.shown[at]) {
+		if m.marked(s.shown[at]) {
 			s.cursor = at
 			s.notice = ""
 			m.clampMemories()
 			return m
 		}
 	}
-	s.notice, s.failed = "nothing here is unlisted or pointing at a missing memory", false
+	s.notice, s.failed = "nothing here is unlisted, and no link is waiting on a memory", false
 	return m
+}
+
+// looseNote names the links a memory is waiting on, and says they are not a
+// fault.
+//
+// A link to a memory that does not exist yet is how the convention marks
+// something worth writing later, so braids reports it and repairs nothing: the
+// only ways to "fix" one are to delete somebody's note, invent the memory it
+// points at, or guess which existing memory was meant.
+func looseNote(r memoryRow) string {
+	if r.memory == nil {
+		return ""
+	}
+	loose := danglingFrom(r.set, r.memory.Name)
+	if len(loose) == 0 {
+		return ""
+	}
+	targets := make([]string, 0, len(loose))
+	for _, l := range loose {
+		targets = append(targets, "[["+l.To+"]]")
+	}
+	return fmt.Sprintf(" · %s is waiting on %s, which is a note rather than a fault",
+		r.memory.Name, strings.Join(targets, " and "))
 }
 
 // danglingFrom is the loose links one memory has.
@@ -694,7 +718,11 @@ func (m Model) repairMemoryIndex() Model {
 	m = m.reloadMemories()
 	switch {
 	case added == 0 && dropped == 0:
-		m.memories.notice = fmt.Sprintf("%s: the index already agrees with the files", row.project)
+		// Saying only "nothing to do" while the row under the cursor wears a
+		// mark reads as a refusal to explain. The mark is about links, which
+		// are not the index's business.
+		m.memories.notice = fmt.Sprintf("%s: the index already agrees with the files%s",
+			row.project, looseNote(row))
 	default:
 		m.memories.notice = fmt.Sprintf("%s: listed %d that nothing loaded, dropped %d pointing at nothing",
 			row.project, added, dropped)

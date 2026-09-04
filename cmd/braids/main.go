@@ -1868,8 +1868,11 @@ func printMemories(sets []memory.Set, out *printer) error {
 		for _, slug := range set.Orphaned {
 			out.printf("  ⚠ %s names %s, which is not there\n", memory.IndexFile, slug)
 		}
+		// Separated from the two warnings above on purpose: a link to a memory
+		// that does not exist yet is how the convention marks something worth
+		// writing later, so it is reported without being called a fault.
 		for _, link := range set.Dangling() {
-			out.printf("  · %s points at [[%s]], which does not exist yet\n", link.From, link.To)
+			out.printf("  · %s is waiting on [[%s]], not written yet\n", link.From, link.To)
 		}
 	}
 	return out.Err()

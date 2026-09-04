@@ -570,6 +570,16 @@ the index omits is broken. An index row with no file is a stale pointer. A link
 to a name that does not exist yet is a legitimate note to self, and braids says
 so rather than calling it a fault.
 
+That distinction has to survive into the wording, or it does not exist. Calling
+a loose link "points at a memory that is missing" invites someone to press the
+repair key on it, get told the index is already right, and reasonably conclude
+braids is broken — the mark says fix me, the message says nothing to fix, and
+both are true of different things. So the legend says "links to one not written
+yet", and repairing an index that needs nothing says which link the row is
+waiting on and that it is a note. There is no key to fix one: the only ways are
+to delete somebody's note, invent the memory it points at, or guess which
+existing memory was meant.
+
 `↵` reads the memory itself. The list says what braids knows *about* one — its
 kind, its links, whether the index loads it, which conversation wrote it — and
 that is not what you came to check. The text is wrapped to the frame, scrolls,

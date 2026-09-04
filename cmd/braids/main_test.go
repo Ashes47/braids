@@ -569,7 +569,7 @@ func TestMemoriesReportsWhatTheIndexOmits(t *testing.T) {
 		"listed", "hidden",
 		"hidden is not in MEMORY.md, so nothing ever loads it",
 		"MEMORY.md names gone, which is not there",
-		"listed points at [[nowhere]]",
+		"listed is waiting on [[nowhere]]",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("memories output is missing %q:\n%s", want, out)

@@ -594,3 +594,62 @@ func TestHeaderIsSizedFromTheScreenItDraws(t *testing.T) {
 		}
 	}
 }
+
+// Repair on a memory whose only mark is a loose link must say why it left it
+// alone. "The index already agrees with the files" is true and unhelpful while
+// the row under the cursor is visibly marked.
+func TestRepairExplainsALooseLink(t *testing.T) {
+	idle := []index.LaneInfo{laneInfo("a", "finished", "SpinAds", 10, 72*time.Hour)}
+	sets := func() ([]memory.Set, error) {
+		return []memory.Set{{
+			Location: memory.Location{Project: "SpinAds", Dir: "/m"},
+			Memories: []memory.Memory{{
+				Name: "dodo-payments-liver", Kind: "project", Modified: now, Listed: true,
+				Links: []string{"spinads-billing-model"},
+			}},
+		}}, nil
+	}
+	m := NewModel(forestOf(idle, nil), Options{
+		ASCII: true, Source: "claudecode", LoadMemories: sets,
+		RepairMemoryIndex: func(string) (int, int, error) { return 0, 0, nil },
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 110, 24
+	m = m.openMemories()
+
+	// The row is marked, and the mark is the link one, not the index one.
+	entry, ok := m.memoryCursor()
+	if !ok {
+		t.Fatal("no memory under the cursor")
+	}
+	row := m.memories.shown[m.memories.cursor]
+	if !m.marked(row) || !entry.Listed {
+		t.Fatalf("the fixture is not the case under test: marked=%v listed=%v", m.marked(row), entry.Listed)
+	}
+
+	m = m.repairMemoryIndex()
+	notice := m.memories.notice
+	for _, want := range []string{
+		"already agrees", "dodo-payments-liver", "[[spinads-billing-model]]", "note rather than a fault",
+	} {
+		if !strings.Contains(notice, want) {
+			t.Errorf("notice %q is missing %q", notice, want)
+		}
+	}
+	if m.memories.failed {
+		t.Error("a correct index was reported as a failure")
+	}
+
+	// The legend calls it what it is, not "missing".
+	var meanings []string
+	for _, g := range m.memoryGlyphs() {
+		meanings = append(meanings, g.meaning)
+	}
+	joined := strings.Join(meanings, " | ")
+	if strings.Contains(joined, "missing") {
+		t.Errorf("the legend still calls a loose link missing: %s", joined)
+	}
+	if !strings.Contains(joined, "not written yet") {
+		t.Errorf("the legend does not say what the mark means: %s", joined)
+	}
+}

@@ -1289,3 +1289,57 @@ func TestPreviewIsCutOnACharacterBoundary(t *testing.T) {
 		t.Errorf("a short preview was altered: %q", got)
 	}
 }
+
+// A rebuild drops every table and writes them again. Where the new contents are
+// smaller than the old, the pages the old ones used stay free inside the file
+// rather than going back to the disk, and nothing later reuses them all. On a
+// real history that was 77 MB of a 201 MB file against 124 MB for the same data
+// freshly written.
+func TestRebuildGivesTheSpaceBack(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "index.db")
+	ix, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Close() //nolint:errcheck // test
+
+	base := time.Unix(1_700_000_000, 0)
+	corpus := func(n int) *fakeSource {
+		src := &fakeSource{
+			lanes:    []model.Lane{{ID: "l", Source: "fake", Path: "/t/l.jsonl"}},
+			messages: map[string][]model.Message{"l": {}},
+		}
+		for i := range n {
+			src.messages["l"] = append(src.messages["l"], model.Message{
+				ID: fmt.Sprintf("m%d", i), LaneID: "l", Role: model.RoleUser,
+				At: base.Add(time.Duration(i) * time.Second),
+				Parts: []model.Part{{Kind: model.PartText,
+					Text: strings.Repeat("a lot of searchable words ", 60)}},
+			})
+		}
+		return src
+	}
+
+	if _, err := ix.Rebuild(ctx, corpus(6000)); err != nil {
+		t.Fatal(err)
+	}
+	big, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The transcripts shrank: conversations were deleted, or one was trimmed.
+	if _, err := ix.Rebuild(ctx, corpus(50)); err != nil {
+		t.Fatal(err)
+	}
+	small, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if small.Size() >= big.Size()/2 {
+		t.Errorf("the index held %d bytes for a large corpus and still holds %d for a "+
+			"small one, so a rebuild is not giving the space back",
+			big.Size(), small.Size())
+	}
+}

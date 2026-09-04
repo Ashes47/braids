@@ -95,7 +95,8 @@ being worked in the whole time. Each row says what it was taken from.
 | Incremental sync is worth having | 9.2 s to rebuild everything against **47 ms** when one transcript moved |
 | Stored mtimes are second-precision | Comparing a raw `ModTime` marks every lane changed forever, turning an incremental sync silently into a full one |
 | Tailing beats re-reading | The largest transcript here took **3,306 ms** to parse from byte zero and **43 ms** to read from the last offset |
-| Search is cheap | 1 to 6 ms across about 62,000 indexed units. The index costs about 190 MB, roughly half the transcripts, because searching text means keeping a copy of it |
+| Search is cheap | 1 to 6 ms across about 62,000 indexed units. The index costs about 125 MB against 380 MB of transcripts, because searching text means keeping a copy of it: two thirds of the file is that copy and the search structure over it |
+| A rebuild leaves free pages behind | 77 MB of a 201 MB file, against 124 MB for the same data freshly written, so Rebuild reclaims them |
 | Work products dwarf conversations | 3.3 GB of scratch against 360 MB of transcript, most of it held by two conversations out of thirty-three |
 | Job directories use the short ID | `~/.claude/jobs/9419fd9c`, not the full session UUID the transcript is filed under |
 | Most work products are not text | 3,757 of 12,819 are binary, and the largest is 242 MB |

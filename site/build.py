@@ -198,11 +198,12 @@ BODY = f"""
     <tr><td>Re-index after a turn lands in a 145 MB conversation</td><td>about 40 ms</td></tr>
     <tr><td>Re-index when nothing changed</td><td>under 1 ms</td></tr>
     <tr><td>Search across about 62,000 indexed units</td><td>1 to 6 ms</td></tr>
-    <tr><td>Index on disk</td><td>about 190 MB</td></tr>
+    <tr><td>Index on disk</td><td>about 125 MB</td></tr>
   </table>
   <p class="note">
-    That last row is the honest cost. The index runs about half the size of the
-    transcripts, because searching text means keeping a copy of it.
+    That last row is the honest cost: about a third of the transcripts, because
+    searching text means keeping a copy of it. Two thirds of the index is that
+    copy and the search structure over it.
   </p>
 </div></section>
 

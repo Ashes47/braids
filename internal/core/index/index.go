@@ -398,6 +398,22 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 	if err := tx.Commit(); err != nil {
 		return Stats{}, fmt.Errorf("commit: %w", err)
 	}
+	// Give the space back. Rebuilding drops every table and writes them again,
+	// which leaves the pages the old ones used free inside the file and not
+	// returned to the disk. On a real history that was 77 MB of a 201 MB file,
+	// against 124 MB for the same data freshly written. It costs about a
+	// second, only ever after a full rebuild, and it cannot run in a
+	// transaction, which is why it is here rather than above.
+	if _, err := ix.db.ExecContext(ctx, `VACUUM`); err != nil {
+		return Stats{}, fmt.Errorf("reclaim space: %w", err)
+	}
+	// And fold the write-ahead log back in, because in WAL mode the vacuum is
+	// written there and the file on disk does not shrink until it is. Without
+	// this the space comes back when braids exits, which is not when somebody
+	// watching a disk is looking.
+	if _, err := ix.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		return Stats{}, fmt.Errorf("checkpoint after reclaiming: %w", err)
+	}
 	stats.Duration = time.Since(start)
 	return stats, nil
 }

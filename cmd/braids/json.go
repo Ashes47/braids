@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Ashes47/braids/internal/core/artifacts"
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/store"
 )
@@ -124,4 +125,44 @@ func orEmpty(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+type entryOut struct {
+	Name  string    `json:"name"`
+	Path  string    `json:"path"`
+	Dir   bool      `json:"dir"`
+	Bytes int64     `json:"bytes"`
+	Files int       `json:"files"`
+	At    time.Time `json:"at"`
+	// Reserved marks the harness's own record of a job. braids shows it so the
+	// sizes add up, and refuses to delete it.
+	Reserved bool `json:"reserved"`
+}
+
+type orphanOut struct {
+	Job   string    `json:"job"`
+	Path  string    `json:"path"`
+	Bytes int64     `json:"bytes"`
+	Files int       `json:"files"`
+	At    time.Time `json:"at"`
+}
+
+// workOut is one level of a job directory, with the totals a caller would
+// otherwise have to add up itself.
+func workOut(lane, dir string, entries []artifacts.Entry) any {
+	rows := make([]entryOut, 0, len(entries))
+	var bytes int64
+	var files int
+	for _, e := range entries {
+		rows = append(rows, entryOut{e.Name, e.Path, e.Dir, e.Bytes, e.Files, e.At, e.Reserved})
+		bytes += e.Bytes
+		files += e.Files
+	}
+	return struct {
+		Lane    string     `json:"lane"`
+		Path    string     `json:"path"`
+		Entries []entryOut `json:"entries"`
+		Bytes   int64      `json:"bytes"`
+		Files   int        `json:"files"`
+	}{lane, dir, rows, bytes, files}
 }

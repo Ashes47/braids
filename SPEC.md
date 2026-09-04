@@ -508,6 +508,42 @@ narrow one loses nothing to spacing.
 one respectively — coloured only when stdout is a terminal, because escape codes
 in a pipe are noise in somebody's grep.
 
+### 6.4b Work products — a size browser, not a file list
+
+A session's scratch outweighs its transcript by an order of magnitude: 3.3 GB
+against 363 MB on this machine, all of it under `tmp/`, and nine files account
+for 1.3 GB of it. Deleting the lot was the only option braids offered, which is
+the wrong shape for a conversation whose transcript you want and whose 231 MB
+JSON dump you do not.
+
+So `w` opens the same shape `du` and `ncdu` settled on: one level at a time,
+heaviest first, directories weighed by everything beneath them. Twelve thousand
+files at thirteen levels deep listed flat would be accurate and useless; the
+question is always which single branch is holding the room, and two keystrokes
+answer it.
+
+`state.json` and `timeline.jsonl` are shown and refused. They are the harness's
+own record of a job — `state.json` says what the session is doing right now —
+and removing either would corrupt its view of a job that may still be running.
+Everything the space is actually in sits under `tmp/`.
+
+Deleting goes to the bin like everything else, and says so plainly: *moved to
+the bin — still holding 231 MB until it expires*. Someone reclaiming a disk is
+watching a disk, not a list, and a bin that silently keeps the bytes would make
+braids a liar.
+
+**Work products change without the transcript changing**, which the index could
+not see: `Sync` re-reads a conversation only when its transcript moved, so a
+deleted scratch file left the map's work column reporting the old size until
+something unrelated happened to that conversation. Measuring means walking the
+directories — tens of milliseconds against a few gigabytes — so it is too
+expensive to do on every refresh and is instead done by whatever changed them:
+deleting one file, deleting them all, or restoring any of it from the bin.
+
+Artifacts whose conversation is gone are found by `braids work --orphans` and
+reclaimed with `--reclaim`. Nothing will ever look at them again, and nothing
+else would ever clear them up.
+
 ### 6.5 Branch — inline at the junction, never a modal
 
 ```

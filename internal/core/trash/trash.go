@@ -72,7 +72,10 @@ func (b *Bin) Discard(label string, paths []string) (Entry, error) {
 		if err != nil {
 			return entry, fmt.Errorf("stat %s: %w", from, err)
 		}
-		to := filepath.Join(dest, filepath.Base(from))
+		to := filepath.Join(dest, relocate(from))
+		if err := os.MkdirAll(filepath.Dir(to), 0o700); err != nil {
+			return entry, errors.Join(fmt.Errorf("make room for %s: %w", from, err), b.Restore(entry))
+		}
 		if err := os.Rename(from, to); err != nil {
 			// Put back what has already moved rather than leaving a
 			// conversation half-deleted.
@@ -228,4 +231,19 @@ func validID(id string) error {
 		return fmt.Errorf("not a bin entry: %q", id)
 	}
 	return nil
+}
+
+// relocate turns a source path into its place inside one bin entry, keeping the
+// directories it came from.
+//
+// Naming by basename alone collides: two scratch files both called data.json,
+// discarded together from different directories, map to a single destination.
+// The second move overwrites the first and the bin has silently lost a file it
+// promised to keep. Source paths are unique, so mirroring them cannot collide.
+func relocate(from string) string {
+	path := filepath.Clean(from)
+	if volume := filepath.VolumeName(path); volume != "" {
+		path = path[len(volume):]
+	}
+	return strings.TrimPrefix(path, string(filepath.Separator))
 }

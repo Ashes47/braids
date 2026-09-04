@@ -105,6 +105,13 @@ producing a duplicate wearing a new name.
 **Promote** — a subagent's transcript is a conversation too. Turn one into a lane
 of its own and carry on from where it left off.
 
+**Work products** — a session's scratch usually dwarfs its transcript: 3.3 GB
+against 363 MB here, with nine files holding 1.3 GB of it. `w` opens it as a
+size browser — heaviest first, directories weighed by what is under them, `↵` to
+descend — so you can bin one 231 MB dump and keep the rest. The harness's own
+record of a job is shown and refused. `braids work --orphans` finds the sets
+whose conversation is gone.
+
 **Bin** — deleting moves files aside with a manifest and a 14-day retention, so
 nothing you delete is gone the moment you regret it.
 
@@ -135,6 +142,8 @@ braids index [--full]                   index new and changed transcripts
 braids search QUERY [--kind K] [--limit N]
 braids lanes                            list indexed conversations
 braids agents  --lane ID                list the subagents a conversation spawned
+braids work    --lane ID [--path SUB]   browse a session's work products
+braids work    --orphans [--reclaim]    find, and reclaim, ownerless ones
 braids branch  --lane ID --at TURN [--workspace]
 braids promote --lane ID --agent ID     turn a subagent into its own conversation
 braids merge   --lane ID --from ID [--plan]

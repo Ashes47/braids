@@ -208,3 +208,61 @@ func TestBinRefusesAnIDThatIsNotOneOfItsOwn(t *testing.T) {
 		t.Errorf("a directory outside the bin was removed: %v", err)
 	}
 }
+
+// Several files sharing a basename, discarded together — what selecting scratch
+// files from different directories does. Naming destinations by basename alone
+// silently overwrote one with the other and lost it.
+func TestDiscardKeepsFilesThatShareAName(t *testing.T) {
+	root := t.TempDir()
+	want := map[string]string{}
+	var paths []string
+	for _, sub := range []string{"a", "b", "a/deeper"} {
+		dir := filepath.Join(root, sub)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "data.json")
+		body := "contents of " + sub
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		want[path] = body
+		paths = append(paths, path)
+	}
+
+	bin := New(filepath.Join(root, "bin"))
+	entry, err := bin.Discard("three files, one name", paths)
+	if err != nil {
+		t.Fatalf("Discard: %v", err)
+	}
+	if len(entry.Items) != len(paths) {
+		t.Fatalf("recorded %d items, want %d", len(entry.Items), len(paths))
+	}
+	// Each has its own place in the bin, or one of them is already gone.
+	seen := map[string]bool{}
+	for _, item := range entry.Items {
+		if seen[item.To] {
+			t.Fatalf("two files share the destination %s", item.To)
+		}
+		seen[item.To] = true
+	}
+	for path := range want {
+		if _, err := os.Stat(path); err == nil {
+			t.Errorf("%s was not moved", path)
+		}
+	}
+
+	if err := bin.Restore(entry); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	for path, body := range want {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("lost %s: %v", path, err)
+			continue
+		}
+		if string(got) != body {
+			t.Errorf("%s came back as %q, want %q", path, got, body)
+		}
+	}
+}

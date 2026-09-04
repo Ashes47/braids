@@ -51,6 +51,15 @@ type Sidechains interface {
 	Subagents(ctx context.Context, lane model.Lane) ([]model.Subagent, error)
 }
 
+// Measurer re-measures a conversation's work products.
+//
+// They change without the transcript changing — deleting a scratch file leaves
+// the conversation untouched — so an index that re-reads only what moved will
+// never notice. Whatever changed them has to say so.
+type Measurer interface {
+	Artifacts(laneID string) (path string, bytes int64)
+}
+
 // MergeRequest describes joining a branch back into the conversation it left.
 type MergeRequest struct {
 	// Base is the conversation to carry on from.

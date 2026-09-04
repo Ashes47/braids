@@ -14,6 +14,7 @@ import (
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/model"
 	"github.com/Ashes47/braids/internal/core/trash"
+	"github.com/Ashes47/braids/internal/format"
 )
 
 // Column widths for the right-hand block. Everything left of it flexes.
@@ -90,6 +91,13 @@ type Options struct {
 	// DeleteWork moves a conversation's work products to the bin, leaving the
 	// conversation itself alone.
 	DeleteWork func(laneID string) (int64, error)
+	// LoadWork lists one level of a conversation's work products. dir is
+	// relative to the top of them; empty means the top.
+	LoadWork func(laneID, dir string) (WorkLevel, error)
+	// DiscardPaths moves particular files or directories to the bin, returning
+	// how much was moved. It is how one heavy scratch file is reclaimed without
+	// taking the rest of a session's work with it.
+	DiscardPaths func(label string, paths []string) (int64, error)
 	// LoadBin lists what has been deleted and not yet expired.
 	LoadBin func() ([]trash.Entry, error)
 	// Restore brings a deleted conversation back.
@@ -133,6 +141,7 @@ const (
 	spineMode
 	searchMode
 	binMode
+	workMode
 )
 
 // Model is the Map: every conversation and every branch as a single forest.
@@ -168,6 +177,8 @@ type Model struct {
 	deleteFn     func(string) (int64, error)
 	deleteWorkFn func(string) (int64, error)
 	loadBin      func() ([]trash.Entry, error)
+	loadWork     func(laneID, dir string) (WorkLevel, error)
+	discardPaths func(label string, paths []string) (int64, error)
 	restoreFn    func(string) error
 	purgeFn      func(string) error
 	// showArchived reveals what has been put away, so it can be brought back.
@@ -183,6 +194,7 @@ type Model struct {
 	stack    []*spineState
 	search   *searchState
 	bin      *binState
+	work     *workState
 
 	all     []row
 	visible []row
@@ -236,6 +248,8 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		renameFn:       opts.Rename,
 		deleteFn:       opts.Delete,
 		deleteWorkFn:   opts.DeleteWork,
+		loadWork:       opts.LoadWork,
+		discardPaths:   opts.DiscardPaths,
 		loadBin:        opts.LoadBin,
 		restoreFn:      opts.Restore,
 		purgeFn:        opts.Purge,
@@ -404,6 +418,8 @@ func (m Model) View() tea.View {
 	switch {
 	case m.mode == binMode && m.bin != nil:
 		return tea.View{Content: m.renderBin(), AltScreen: true}
+	case m.mode == workMode && m.work != nil:
+		return tea.View{Content: m.renderWork(), AltScreen: true}
 	case m.mode == searchMode && m.search != nil:
 		return tea.View{Content: m.renderSearch(), AltScreen: true}
 	case m.mode == spineMode && m.spine != nil:
@@ -443,6 +459,9 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key == "u" && m.loadBin != nil {
 		return m.openBin(), nil
 	}
+	if m.mode == workMode {
+		return m.workKey(key), nil
+	}
 	if key == "/" && m.searchFn != nil {
 		return m.openSearch(), nil
 	}
@@ -471,6 +490,8 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.deleteLane(), nil
 	case "D":
 		return m.deleteWork(), nil
+	case "w":
+		return m.openWork(), nil
 	case "n":
 		m.cursor = m.nextWaiting(m.cursor, 1)
 	case "N":
@@ -1140,19 +1161,9 @@ func orBlank(n int64) string {
 	return humanBytes(n)
 }
 
-// humanBytes renders a transcript size compactly.
-func humanBytes(n int64) string {
-	switch {
-	case n >= 1<<30:
-		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
-	case n >= 1<<20:
-		return fmt.Sprintf("%.0f MB", float64(n)/(1<<20))
-	case n >= 1<<10:
-		return fmt.Sprintf("%.0f kB", float64(n)/(1<<10))
-	default:
-		return fmt.Sprintf("%d B", n)
-	}
-}
+// humanBytes renders a size compactly. Shared with the command line, so a
+// number reads the same in a table as it does on a screen.
+func humanBytes(n int64) string { return format.Bytes(n) }
 
 // homeDir is a variable so tests can pin it.
 var homeDir = os.UserHomeDir
@@ -1216,4 +1227,12 @@ func padLeft(s string, width int) string {
 		return repeat(" ", gap) + s
 	}
 	return s
+}
+
+// selected is the row under the cursor, or false when the list is empty.
+func (m Model) selected() (row, bool) {
+	if m.cursor < 0 || m.cursor >= len(m.visible) {
+		return row{}, false
+	}
+	return m.visible[m.cursor], true
 }

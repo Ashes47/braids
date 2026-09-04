@@ -857,3 +857,38 @@ func BuildMatch(q string) string {
 	}
 	return strings.Join(quoted, " ")
 }
+
+// RefreshArtifacts re-measures every conversation's work products and stores
+// what changed.
+//
+// Sync re-reads a conversation only when its transcript moved, which is right:
+// nothing else can change what was said. But work products live outside the
+// transcript, and deleting one leaves the conversation untouched — so the sizes
+// on the map would stay as they were until something unrelated happened to the
+// conversation. Whatever deletes or restores work products calls this.
+//
+// Measuring means walking the directories, tens of milliseconds against a few
+// gigabytes, so it is called after an explicit action rather than on every
+// refresh.
+func (ix *Index) RefreshArtifacts(ctx context.Context, src store.Source) error {
+	measurer, ok := src.(store.Measurer)
+	if !ok {
+		return nil // a source with no work products has nothing to re-measure
+	}
+	lanes, err := ix.Lanes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, lane := range lanes {
+		path, bytes := measurer.Artifacts(lane.ID)
+		if path == lane.ArtifactPath && bytes == lane.ArtifactBytes {
+			continue
+		}
+		if _, err := ix.db.ExecContext(ctx,
+			`UPDATE lanes SET artifact_path = ?, artifacts = ? WHERE id = ?`,
+			path, bytes, lane.ID); err != nil {
+			return fmt.Errorf("update work products of %s: %w", lane.ID, err)
+		}
+	}
+	return nil
+}

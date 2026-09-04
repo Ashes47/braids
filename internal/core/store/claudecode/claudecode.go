@@ -117,17 +117,17 @@ func (s *Source) Enrich(_ context.Context, lane model.Lane) (model.Lane, error) 
 		return lane, err
 	}
 	lane.Title, lane.Cwd = title, cwd
-	lane.ArtifactPath, lane.ArtifactBytes = s.artifacts(lane.ID)
+	lane.ArtifactPath, lane.ArtifactBytes = s.Artifacts(lane.ID)
 	return lane, nil
 }
 
-// artifacts locates a conversation's work products and measures them.
+// Artifacts locates a conversation's work products and measures them.
 //
 // Claude Code keeps them outside the transcript, beside the projects directory,
 // and they dwarf it: 3.2 GB against 392 MB of conversation on this machine,
 // almost all of it scratch files. Measuring costs a directory walk of a few
 // thousand entries, which is milliseconds.
-func (s *Source) artifacts(laneID string) (path string, bytes int64) {
+func (s *Source) Artifacts(laneID string) (path string, bytes int64) {
 	// Job directories are named by the short form of the session ID, not the
 	// whole UUID the transcript is filed under.
 	if len(laneID) < shortIDLen {
@@ -472,3 +472,23 @@ var (
 	_ store.Enricher   = (*Source)(nil)
 	_ store.Sidechains = (*Source)(nil)
 )
+
+// JobsRoot is where the harness keeps work products: one directory per session,
+// named by the first characters of its ID, beside the transcripts.
+func (s *Source) JobsRoot() string { return filepath.Join(filepath.Dir(s.root), "jobs") }
+
+// ReservedArtifact reports whether a name at the top of a job directory is the
+// harness's own record of that job rather than work a tool produced.
+//
+// state.json is live — it holds what the session is doing right now — and
+// timeline.jsonl is its history. Removing either would corrupt the harness's
+// view of a job that may still be running, so braids shows them and refuses to
+// touch them. Everything the space is actually in sits under tmp/.
+func ReservedArtifact(name string) bool {
+	switch name {
+	case "state.json", "timeline.jsonl":
+		return true
+	default:
+		return false
+	}
+}

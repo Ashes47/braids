@@ -474,3 +474,58 @@ func TestBraidsDirectoryIsPrivate(t *testing.T) {
 		t.Errorf("~/.braids is mode %o, reachable beyond its owner", perm)
 	}
 }
+
+// The work command browses one level at a time and will not be walked out of
+// the tree the caller asked about.
+func TestWorkBrowsesAndStaysInside(t *testing.T) {
+	root := t.TempDir()
+	// Job directories are named by the first eight characters of the session
+	// ID, so the fixture uses an ID shaped like a real one.
+	const session = "a1b2c3d4-0000-4000-8000-000000000001"
+	job := filepath.Join(root, "jobs", session[:8])
+	for rel, size := range map[string]int{
+		"tmp/huge.json": 4000, "tmp/small.txt": 20, "state.json": 30,
+	} {
+		path := filepath.Join(job, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, make([]byte, size), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	projects := filepath.Join(root, "projects", "-p")
+	if err := os.MkdirAll(projects, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"type":"ai-title","aiTitle":"work","sessionId":"` + session + `"}` + "\n" +
+		`{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-09-01T10:00:00Z",` +
+		`"message":{"role":"user","content":"hi"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(projects, session+".jsonl"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	db := filepath.Join(t.TempDir(), "index.db")
+	runCmd(t, "index", "--root", filepath.Join(root, "projects"), "--db", db)
+
+	if out := runCmd(t, "work", "--lane", session[:8], "--db", db); !strings.Contains(out, "tmp/") {
+		t.Errorf("work = %q, want it to list tmp", out)
+	}
+	// Descending, and the reserved file named for what it is.
+	deeper := runCmd(t, "work", "--lane", session[:8], "--path", "tmp", "--db", db)
+	if !strings.Contains(deeper, "huge.json") {
+		t.Errorf("work --path tmp = %q", deeper)
+	}
+	if top := runCmd(t, "work", "--lane", session[:8], "--db", db); !strings.Contains(top, "harness") {
+		t.Errorf("state.json is not marked as the harness's own: %q", top)
+	}
+
+	// A path from a command line must not walk out of the job directory.
+	if err := run([]string{"work", "--lane", session[:8], "--path", "../../..", "--db", db}, io.Discard); err == nil ||
+		!strings.Contains(err.Error(), "outside") {
+		t.Errorf("traversal = %v, want a refusal", err)
+	}
+	if err := run([]string{"work", "--db", db}, io.Discard); err == nil {
+		t.Error("work with neither --lane nor --orphans was accepted")
+	}
+}

@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"github.com/Ashes47/braids/internal/brand"
+	"github.com/Ashes47/braids/internal/core/artifacts"
 	"github.com/Ashes47/braids/internal/core/graph"
 	"github.com/Ashes47/braids/internal/core/hooks"
 	"github.com/Ashes47/braids/internal/core/index"
@@ -33,6 +34,7 @@ import (
 	"github.com/Ashes47/braids/internal/core/store/claudecode"
 	"github.com/Ashes47/braids/internal/core/trash"
 	"github.com/Ashes47/braids/internal/core/watch"
+	"github.com/Ashes47/braids/internal/format"
 	"github.com/Ashes47/braids/internal/launch"
 	"github.com/Ashes47/braids/internal/tui"
 )
@@ -53,10 +55,20 @@ usage:
   braids branch --lane ID --at TURN      cut a new conversation at that turn
                  [--workspace]           ...with a git worktree of its own
   braids agents --lane ID                list the subagents a conversation spawned
+  braids work [--lane ID] [--path SUB]   browse the work products a session left
+              [--orphans] [--reclaim]    ...or find and reclaim ownerless ones
   braids promote --lane ID --agent ID    turn a subagent into its own conversation
   braids merge --lane ID --from ID       join a branch back, as a new conversation
   braids hooks [--install|--remove]      let sessions report when they block
   braids version
+
+map keys (a selection; the screen lists them all):
+  w                open the work products a session left behind, as a size
+                   browser: heaviest first, ↵ to descend, d to bin one
+
+map keys (the screen lists them all; this one is new):
+  w                browse the work products a session left behind — heaviest
+                   first, ↵ to descend, d to move one to the bin
 
 map flags:
   --ascii          use narrow ASCII glyphs (for terminals that draw
@@ -118,6 +130,8 @@ func run(args []string, w io.Writer) error {
 		return cmdHook(args[1:], out)
 	case "agents":
 		return cmdAgents(args[1:], out)
+	case "work":
+		return cmdWork(args[1:], out)
 	case "version", "-v", "--version":
 		out.mark(brand.Small())
 		out.printf("braids %s (%s)\n", version, commit)
@@ -137,7 +151,7 @@ func run(args []string, w io.Writer) error {
 // known is every command name braids answers to. A test walks it against the
 // dispatch above, so a command cannot be added without being offered here.
 var known = []string{
-	"map", "index", "search", "lanes", "branch", "agents",
+	"map", "index", "search", "lanes", "branch", "agents", "work",
 	"promote", "merge", "hooks", "hook", "version", "help",
 }
 
@@ -333,6 +347,7 @@ func cmdMap(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
+	src := claudecode.New(root)
 	// Watching is a convenience, not a requirement: if it cannot start, the map
 	// still opens as a snapshot.
 	var changes <-chan struct{}
@@ -354,7 +369,7 @@ func cmdMap(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
-	bin := trash.New(filepath.Join(filepath.Dir(dbPath), "trash"))
+	bin := binAt(dbPath)
 	spawn, terminal := spawner(ctx, ix, kinds)
 	opts := tui.Options{
 		ASCII:     *ascii,
@@ -366,7 +381,7 @@ func cmdMap(args []string, out *printer) error {
 			if err != nil {
 				return 0, 0, err
 			}
-			plan, err := claudecode.New(root).PlanMerge(ctx, req)
+			plan, err := src.PlanMerge(ctx, req)
 			return plan.IncomingTurns, plan.BaseOnlyTurns, err
 		},
 		Merge: func(base, incoming, name string) (string, error) {
@@ -374,7 +389,7 @@ func cmdMap(args []string, out *printer) error {
 			if err != nil {
 				return "", err
 			}
-			lane, err := claudecode.New(root).Merge(ctx, req)
+			lane, err := src.Merge(ctx, req)
 			if err != nil {
 				return "", err
 			}
@@ -427,7 +442,41 @@ func cmdMap(args []string, out *printer) error {
 			return discardLane(ctx, ix, bin, laneID)
 		},
 		DeleteWork: func(laneID string) (int64, error) {
-			return discardWork(ctx, ix, bin, laneID)
+			bytes, err := discardWork(ctx, ix, bin, laneID)
+			if err != nil {
+				return bytes, err
+			}
+			return bytes, ix.RefreshArtifacts(ctx, src)
+		},
+		LoadWork: func(laneID, dir string) (tui.WorkLevel, error) {
+			lane, err := findLane(ctx, ix, laneID)
+			if err != nil {
+				return tui.WorkLevel{}, err
+			}
+			if lane.ArtifactPath == "" {
+				return tui.WorkLevel{}, fmt.Errorf("%s left no work products", shortID(lane.ID))
+			}
+			at, err := within(lane.ArtifactPath, dir)
+			if err != nil {
+				return tui.WorkLevel{}, err
+			}
+			entries, err := artifacts.Read(at, claudecode.ReservedArtifact)
+			if err != nil {
+				return tui.WorkLevel{}, err
+			}
+			return tui.WorkLevel{Root: lane.ArtifactPath, Dir: at, Entries: entries}, nil
+		},
+		DiscardPaths: func(label string, paths []string) (int64, error) {
+			entry, err := bin.Discard(label, paths)
+			if err != nil {
+				return 0, err
+			}
+			// The conversation's transcript did not move, so nothing else will
+			// notice that its work products shrank.
+			if err := ix.RefreshArtifacts(ctx, src); err != nil {
+				return entry.Bytes, err
+			}
+			return entry.Bytes, nil
 		},
 		LoadBin: func() ([]trash.Entry, error) {
 			// Expire on open, so the count and the deadlines shown are true.
@@ -437,8 +486,12 @@ func cmdMap(args []string, out *printer) error {
 			return bin.List()
 		},
 		Restore: func(id string) error {
-			_, err := bin.RestoreByID(id)
-			return err
+			if _, err := bin.RestoreByID(id); err != nil {
+				return err
+			}
+			// Work products can come back as well as go, and the same
+			// blindness applies: nothing about the conversation moved.
+			return ix.RefreshArtifacts(ctx, src)
 		},
 		Purge: bin.Purge,
 		ResumeCommand: func(laneID string) (string, error) {
@@ -464,7 +517,7 @@ func cmdMap(args []string, out *printer) error {
 			return id, nil
 		},
 		Refresh: func() (*graph.Forest, error) {
-			if _, err := ix.Sync(ctx, claudecode.New(root)); err != nil {
+			if _, err := ix.Sync(ctx, src); err != nil {
 				return nil, err
 			}
 			return tui.Forest(ctx, ix, provenance.All(), names.All())
@@ -1469,4 +1522,202 @@ func truncate(s string, n int) string {
 		return string(r[:n])
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// cmdWork browses work products, and reclaims the ones nothing owns any more.
+func cmdWork(args []string, out *printer) error {
+	fs := newFlagSet("work")
+	fs.SetOutput(out)
+	laneRef := fs.String("lane", "", "conversation whose work products to list")
+	sub := fs.String("path", "", "directory within them to list, relative to the top")
+	orphans := fs.Bool("orphans", false, "list work products whose conversation is gone")
+	reclaim := fs.Bool("reclaim", false, "with --orphans, move them to the bin")
+	db := fs.String("db", "", "index location")
+	asJSON := jsonFlag(fs)
+	if err := parse(fs, args, out); err != nil {
+		return err
+	}
+	if (*laneRef == "") == !*orphans {
+		return errors.New("choose one of --lane or --orphans")
+	}
+
+	dbPath, err := resolveDB(*db)
+	if err != nil {
+		return err
+	}
+	ix, err := openExisting(dbPath)
+	if err != nil {
+		return err
+	}
+	defer ix.Close() //nolint:errcheck // read-only
+
+	ctx := context.Background()
+	root, err := claudecode.DefaultRoot()
+	if err != nil {
+		return err
+	}
+	src := claudecode.New(root)
+
+	if *orphans {
+		return workOrphans(ctx, ix, src, binAt(dbPath), *reclaim, *asJSON, out)
+	}
+	lane, err := findLane(ctx, ix, *laneRef)
+	if err != nil {
+		return err
+	}
+	if lane.ArtifactPath == "" {
+		return fmt.Errorf("%s left no work products", shortID(lane.ID))
+	}
+	dir, err := within(lane.ArtifactPath, *sub)
+	if err != nil {
+		return err
+	}
+	entries, err := artifacts.Read(dir, claudecode.ReservedArtifact)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return out.emit(workOut(lane.ID, dir, entries))
+	}
+	return printWork(dir, entries, out)
+}
+
+// within resolves a path inside a job directory, refusing to leave it. The
+// argument comes from a command line, and "../.." would otherwise walk out of
+// the tree the caller asked about.
+func within(root, sub string) (string, error) {
+	if sub == "" {
+		return root, nil
+	}
+	dir := filepath.Clean(filepath.Join(root, sub))
+	if dir != root && !strings.HasPrefix(dir, root+string(filepath.Separator)) {
+		return "", fmt.Errorf("%q is outside the work products", sub)
+	}
+	return dir, nil
+}
+
+func printWork(dir string, entries []artifacts.Entry, out *printer) error {
+	if len(entries) == 0 {
+		out.printf("%s is empty\n", dir)
+		return out.Err()
+	}
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	rows := []string{"SIZE\tFILES\tNAME"}
+	var total int64
+	for _, e := range entries {
+		name := e.Name
+		switch {
+		case e.Dir:
+			name += "/"
+		case e.Reserved:
+			name += "   (the harness's own record)"
+		}
+		rows = append(rows, fmt.Sprintf("%s\t%d\t%s", format.Bytes(e.Bytes), e.Files, name))
+		total += e.Bytes
+	}
+	for _, r := range rows {
+		if _, err := fmt.Fprintln(tw, r); err != nil {
+			return fmt.Errorf("write work products: %w", err)
+		}
+	}
+	if err := tw.Flush(); err != nil {
+		return fmt.Errorf("write work products: %w", err)
+	}
+	out.printf("\n%s in %d entries · %s\n", format.Bytes(total), len(entries), dir)
+	return out.Err()
+}
+
+// workOrphans reports the work products of conversations braids no longer
+// knows about, and with --reclaim moves them to the bin. Nothing will ever look
+// at them again, and nothing else will ever clear them up.
+func workOrphans(ctx context.Context, ix *index.Index, src *claudecode.Source,
+	bin *trash.Bin, reclaim, asJSON bool, out *printer,
+) error {
+	lanes, err := ix.Lanes(ctx)
+	if err != nil {
+		return err
+	}
+	known := make([]string, 0, len(lanes))
+	for _, l := range lanes {
+		known = append(known, l.ID)
+	}
+	jobs, err := artifacts.Jobs(src.JobsRoot())
+	if err != nil {
+		return err
+	}
+	orphans := artifacts.Orphans(jobs, known)
+
+	var reclaimed int64
+	if reclaim && len(orphans) > 0 {
+		paths := make([]string, 0, len(orphans))
+		for _, o := range orphans {
+			paths = append(paths, o.Path)
+		}
+		entry, err := bin.Discard("work products with no conversation", paths)
+		if err != nil {
+			return err
+		}
+		reclaimed = entry.Bytes
+	}
+
+	if asJSON {
+		rows := make([]orphanOut, 0, len(orphans))
+		for _, o := range orphans {
+			rows = append(rows, orphanOut{o.ID, o.Path, o.Bytes, o.Files, o.At})
+		}
+		return out.emit(struct {
+			Orphans   []orphanOut `json:"orphans"`
+			Bytes     int64       `json:"bytes"`
+			Reclaimed int64       `json:"reclaimed_bytes"`
+		}{rows, totalBytes(orphans), reclaimed})
+	}
+	if len(orphans) == 0 {
+		out.printf("every set of work products still has its conversation\n")
+		return out.Err()
+	}
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	rows := []string{"JOB\tSIZE\tFILES\tLAST WRITTEN"}
+	for _, o := range orphans {
+		rows = append(rows, fmt.Sprintf("%s\t%s\t%d\t%s",
+			o.ID, format.Bytes(o.Bytes), o.Files, lastWritten(o.At)))
+	}
+	for _, r := range rows {
+		if _, err := fmt.Fprintln(tw, r); err != nil {
+			return fmt.Errorf("write orphans: %w", err)
+		}
+	}
+	if err := tw.Flush(); err != nil {
+		return fmt.Errorf("write orphans: %w", err)
+	}
+	switch {
+	case reclaim:
+		out.printf("\nmoved %s to the bin · recover with `braids` and `u`\n", format.Bytes(reclaimed))
+	default:
+		out.printf("\n%s in %d sets · `braids work --orphans --reclaim` bins them\n",
+			format.Bytes(totalBytes(orphans)), len(orphans))
+	}
+	return out.Err()
+}
+
+func totalBytes(jobs []artifacts.Job) int64 {
+	var total int64
+	for _, j := range jobs {
+		total += j.Bytes
+	}
+	return total
+}
+
+// binAt is where deleted things wait: beside the index, so one braids
+// directory holds everything braids owns.
+func binAt(dbPath string) *trash.Bin {
+	return trash.New(filepath.Join(filepath.Dir(dbPath), "trash"))
+}
+
+// lastWritten dates a set of work products, or says nothing for an empty one:
+// a zero time printed as 0001-01-01 reads as a fault rather than as absence.
+func lastWritten(at time.Time) string {
+	if at.IsZero() {
+		return "—"
+	}
+	return at.Format("2006-01-02")
 }

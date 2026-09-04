@@ -12,6 +12,7 @@ import (
 
 	"github.com/Ashes47/braids/internal/core/model"
 	"github.com/Ashes47/braids/internal/core/store"
+	"github.com/Ashes47/braids/internal/core/store/claudecode"
 )
 
 // fakeSource is a Source backed by in-memory fixtures.
@@ -524,4 +525,80 @@ func TestIndexIsPrivateToItsOwner(t *testing.T) {
 	if perm := info.Mode().Perm(); perm&0o077 != 0 {
 		t.Errorf("reopening a loose index left it at mode %o", perm)
 	}
+}
+
+// Work products change without the transcript changing, so Sync — which
+// re-reads only what moved — cannot see it. The map carries a work-products
+// column, and a stale number there is a lie about a disk.
+func TestRefreshArtifactsSeesWhatSyncCannot(t *testing.T) {
+	root := t.TempDir()
+	projects := filepath.Join(root, "projects", "-p")
+	if err := os.MkdirAll(projects, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const session = "a1b2c3d4-0000-4000-8000-000000000001"
+	body := `{"type":"ai-title","aiTitle":"work","sessionId":"` + session + `"}` + "\n" +
+		`{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-09-01T10:00:00Z",` +
+		`"message":{"role":"user","content":"hi"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(projects, session+".jsonl"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job := filepath.Join(root, "jobs", session[:8], "tmp")
+	if err := os.MkdirAll(job, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	scratch := filepath.Join(job, "dump.json")
+	if err := os.WriteFile(scratch, make([]byte, 4096), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	ix, err := Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer ix.Close() //nolint:errcheck // test cleanup
+
+	src := claudecode.New(filepath.Join(root, "projects"))
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	before := laneOf(t, ctx, ix, session)
+	if before.ArtifactBytes < 4096 {
+		t.Fatalf("indexed work products as %d bytes, want at least the scratch file", before.ArtifactBytes)
+	}
+
+	// Take the scratch file away. The transcript has not moved.
+	if err := os.Remove(scratch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatalf("Sync after delete: %v", err)
+	}
+	if stale := laneOf(t, ctx, ix, session); stale.ArtifactBytes != before.ArtifactBytes {
+		t.Log("Sync noticed on its own; the guard below is then belt and braces")
+	}
+
+	if err := ix.RefreshArtifacts(ctx, src); err != nil {
+		t.Fatalf("RefreshArtifacts: %v", err)
+	}
+	if after := laneOf(t, ctx, ix, session); after.ArtifactBytes >= before.ArtifactBytes {
+		t.Errorf("work products still recorded as %d bytes, was %d before the delete",
+			after.ArtifactBytes, before.ArtifactBytes)
+	}
+}
+
+func laneOf(t *testing.T, ctx context.Context, ix *Index, id string) LaneInfo {
+	t.Helper()
+	lanes, err := ix.Lanes(ctx)
+	if err != nil {
+		t.Fatalf("Lanes: %v", err)
+	}
+	for _, l := range lanes {
+		if l.ID == id {
+			return l
+		}
+	}
+	t.Fatalf("no lane %s", id)
+	return LaneInfo{}
 }

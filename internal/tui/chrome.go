@@ -395,7 +395,7 @@ func (m Model) framed(content string) string {
 // statusLine is the bottom line: what is being typed, or what is selected.
 func (m Model) statusLine() string {
 	if m.naming.active {
-		return " " + m.theme.Label.Render("renaming — enter saves, esc cancels")
+		return " " + m.theme.Label.Render("renaming: enter saves, esc cancels")
 	}
 	if m.filter.active {
 		return m.typingLine(m.filter)

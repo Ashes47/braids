@@ -31,34 +31,79 @@ func Run(ctx context.Context, ix *index.Index, opts Options) error {
 	return nil
 }
 
-// Render draws a single frame of the map and returns it. It exists so the map
-// can be inspected without a terminal — for screenshots, for debugging, and
-// for golden tests that would otherwise need a pty.
-func Render(forest *graph.Forest, opts Options, laneID, query string, width, height int) string {
+// Shot names one frame to draw, without a terminal.
+//
+// Screens past the map are reached with keys, so a shot carries the keys to
+// press rather than a screen name. They go through the same router the running
+// program uses and the frame comes from the same View, which is what keeps a
+// screenshot honest: it is the screen, drawn by the code that draws the
+// screen, not a second rendering written to resemble it.
+type Shot struct {
+	Lane   string   // conversation to put the cursor on first
+	Query  string   // the search screen, for this query
+	Keys   []string // pressed in order, once the cursor is placed
+	Width  int
+	Height int
+}
+
+// RenderShot draws one frame and returns it. It exists so the map can be
+// inspected without a terminal: for the screenshots on braids.chat, for
+// debugging, and for golden tests that would otherwise need a pty.
+func RenderShot(forest *graph.Forest, opts Options, shot Shot) string {
 	m := NewModel(forest, opts)
-	m.width, m.height = max(width, minFrameWidth), max(height, minFrameHeight)
+	m.width, m.height = max(shot.Width, minFrameWidth), max(shot.Height, minFrameHeight)
 	m.clamp()
-	if query != "" {
+	if shot.Lane != "" {
+		for i, r := range m.visible {
+			if strings.HasPrefix(r.node.Lane.ID, shot.Lane) {
+				m.cursor = i
+				break
+			}
+		}
+	}
+	// Search is opened directly rather than by pressing "/", because the
+	// router only claims that key when a search function is wired, and a
+	// caller asking for the search screen means it.
+	if shot.Query != "" {
 		m = m.openSearch()
-		for _, r := range query {
+		for _, r := range shot.Query {
 			m = m.searchKey(string(r))
 		}
-		return m.renderSearch()
+		return m.View().Content
 	}
-	if laneID == "" {
-		return m.render()
+	var model tea.Model = m
+	for _, key := range shot.Keys {
+		model, _ = model.Update(keyPress(key))
 	}
-	for i, r := range m.visible {
-		if strings.HasPrefix(r.node.Lane.ID, laneID) {
-			m.cursor = i
-			break
-		}
+	return model.(Model).View().Content
+}
+
+// keyPress builds the message a keystroke arrives as. Named keys are spelled
+// the way the hints spell them.
+func keyPress(key string) tea.KeyPressMsg {
+	switch key {
+	case "enter", "↵":
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
+	case "esc":
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
+	case "tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab}
+	case "up":
+		return tea.KeyPressMsg{Code: tea.KeyUp}
+	case "down":
+		return tea.KeyPressMsg{Code: tea.KeyDown}
 	}
-	m = m.openSpine()
-	if m.spine == nil {
-		return m.render()
+	return tea.KeyPressMsg{Code: []rune(key)[0], Text: key}
+}
+
+// Render draws the map, one lane's spine, or the search screen. It is what the
+// command line's --print calls, which needs no other screen.
+func Render(forest *graph.Forest, opts Options, laneID, query string, width, height int) string {
+	shot := Shot{Lane: laneID, Query: query, Width: width, Height: height}
+	if query == "" && laneID != "" {
+		shot.Keys = []string{"enter"}
 	}
-	return m.renderSpine()
+	return RenderShot(forest, opts, shot)
 }
 
 // SpineLoader returns a loader that reduces a lane to its spine on demand.

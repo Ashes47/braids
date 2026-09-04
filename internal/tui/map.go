@@ -669,7 +669,7 @@ func (m Model) deleteLane() Model {
 	}
 	info := m.visible[m.cursor].node.Lane
 	if stateOf(info, m.liveFor(info.ID), m.now()) == stateWorking {
-		return m.withNotice("that conversation is still running — stop it first", true)
+		return m.withNotice("that conversation is still running: stop it first", true)
 	}
 	bytes, err := m.deleteFn(lane)
 	if err != nil {
@@ -719,7 +719,7 @@ func (m Model) selectedLane() (string, bool) {
 func (m Model) copyResume() (tea.Model, tea.Cmd) {
 	lane, ok := m.selectedLane()
 	if !ok || m.resumeCmd == nil {
-		return m.withNotice("nothing to resume here — promote the agent first", true), nil
+		return m.withNotice("nothing to resume here: promote the agent first", true), nil
 	}
 	command, err := m.resumeCmd(lane)
 	if err != nil {
@@ -737,10 +737,10 @@ func (m Model) openTerminal() (tea.Model, tea.Cmd) {
 	if m.spawn == nil {
 		updated, cmd := m.copyResume()
 		return updated.(Model).withNotice(
-			"no terminal configured — command copied; set BRAIDS_SPAWN to open one", true), cmd
+			"no terminal configured: command copied, set BRAIDS_SPAWN to open one", true), cmd
 	}
 	if err := m.spawn(lane); err != nil {
-		return m.withNotice("could not open a terminal — "+err.Error(), true), nil
+		return m.withNotice("could not open a terminal: "+err.Error(), true), nil
 	}
 	return m.withNotice(fmt.Sprintf("opened %s in %s", shortID(lane), m.terminal), false), nil
 }
@@ -923,7 +923,7 @@ func (m Model) emptyMessage() string {
 	if m.filter.on() {
 		return fmt.Sprintf("nothing matches %q", m.filter.text)
 	}
-	return "no conversations indexed yet — run: braids index"
+	return "no conversations indexed yet (run: braids index)"
 }
 
 // waitingCount is how many conversations are owed something by a person.

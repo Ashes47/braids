@@ -166,7 +166,7 @@ func (m Model) discardWorkEntry() Model {
 	case !ok || m.discardPaths == nil:
 		return m
 	case entry.Reserved:
-		w.notice, w.failed = "that is the harness's own record of the job, not work — braids leaves it alone", true
+		w.notice, w.failed = "that is the harness's own record of the job, not work: braids leaves it alone", true
 		return m
 	}
 	bytes, err := m.discardPaths("work products: "+entry.Name, []string{entry.Path})
@@ -182,7 +182,7 @@ func (m Model) discardWorkEntry() Model {
 	m.work.cursor = max(min(was, len(m.work.shown)-1), 0)
 	// Say plainly that the room is not back yet: the bin still holds it, and a
 	// person deleting a 231 MB dump is watching a disk, not a list.
-	m.work.notice = fmt.Sprintf("%s moved to the bin — still holding %s until it expires",
+	m.work.notice = fmt.Sprintf("%s moved to the bin, still holding %s until it expires",
 		entry.Name, humanBytes(bytes))
 	m.work.failed = false
 	m.clampWork()
@@ -419,7 +419,7 @@ func (m Model) readingWorkFacts() []fact {
 	doc := m.work.reading
 	kind := "text"
 	if doc.peek.Binary {
-		kind = "data — not shown"
+		kind = "data, not shown"
 	}
 	showing := "all of it"
 	if doc.peek.Truncated() {
@@ -455,7 +455,7 @@ func (m Model) renderWorkFile() string {
 	case doc.peek.Binary:
 		// Named, not drawn, and told what to do instead.
 		lines := []string{
-			m.theme.Empty.Render("this is data rather than text — " + humanBytes(doc.entry.Bytes) + " of it"),
+			m.theme.Empty.Render("this is data rather than text: " + humanBytes(doc.entry.Bytes) + " of it"),
 			m.theme.Label.Render("y copies the path, to open it in something that can read it"),
 		}
 		for _, line := range lines {

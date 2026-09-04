@@ -402,7 +402,7 @@ func (m Model) memoryInfo() string {
 func (m Model) memoryGlyphs() []glyph {
 	g := m.theme.Glyphs
 	return []glyph{
-		{g.Failed, m.theme.Urgent, "not in the index — never loaded"},
+		{g.Failed, m.theme.Urgent, "not in the index, never loaded"},
 		{g.Agent, m.theme.Accent, "links to one not written yet"},
 	}
 }
@@ -678,7 +678,7 @@ func (m Model) guardMemoryEdit(project string) (Model, bool) {
 	if !live {
 		return m, true
 	}
-	m.memories.notice = fmt.Sprintf("%q is running — braids will not edit memories under it", truncate(who, 40))
+	m.memories.notice = fmt.Sprintf("%q is running, so braids will not edit memories under it", truncate(who, 40))
 	m.memories.failed = true
 	return m, false
 }

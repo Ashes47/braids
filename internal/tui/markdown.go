@@ -33,12 +33,24 @@ func (m Model) prose(text string, width int) []string {
 	if width < 8 {
 		width = 8
 	}
-	var out []string
+	var out, paragraph []string
 	fenced := false
+	// A paragraph is styled as one piece rather than line by line, because
+	// markdown reflows it and emphasis may open on one line and close on the
+	// next. Read a line at a time, `**narrow the / lock**` is two unmatched
+	// marks and the reader shows the asterisks, which is what it used to do.
+	flush := func() {
+		if len(paragraph) == 0 {
+			return
+		}
+		out = append(out, m.proseLine(strings.Join(paragraph, " "), width)...)
+		paragraph = nil
+	}
 	for _, line := range strings.Split(text, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
 			// The fence itself is a marker, not content. Showing it would be
 			// showing punctuation the reader did not write for them.
+			flush()
 			fenced = !fenced
 			continue
 		}
@@ -48,9 +60,32 @@ func (m Model) prose(text string, width int) []string {
 			out = append(out, m.clipCode(line, width)...)
 			continue
 		}
-		out = append(out, m.proseLine(line, width)...)
+		if strings.TrimSpace(line) == "" {
+			flush()
+			out = append(out, "")
+			continue
+		}
+		if m.standalone(line) {
+			flush()
+			out = append(out, m.proseLine(line, width)...)
+			continue
+		}
+		if len(paragraph) == 0 {
+			paragraph = append(paragraph, strings.TrimRight(line, " \t"))
+			continue
+		}
+		paragraph = append(paragraph, strings.TrimSpace(line))
 	}
+	flush()
 	return out
+}
+
+// standalone reports whether a line is a block of its own rather than
+// paragraph text: a heading, a list item or a quote. It asks blockOf rather
+// than repeating its rules, so the two cannot disagree about what a bullet is.
+func (m Model) standalone(line string) bool {
+	_, marker, body, _ := m.blockOf(line)
+	return marker != "" || body != strings.TrimRight(strings.TrimLeft(line, " \t"), " \t")
 }
 
 // clipCode lays out a line of a fenced block, breaking rather than reflowing.

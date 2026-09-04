@@ -105,7 +105,14 @@ MEMORIES = {
                         "The checkout handler held its lock across the tax service call, so a 40ms\n"
                         "median turned into a stall at 200 concurrent carts. The rule: **narrow the\n"
                         "lock to the state it protects**, and let the remote call happen outside it.\n"
-                        "See [[tax-service-latency]].\n"),
+                        "\n"
+                        "## How it showed up\n"
+                        "\n"
+                        "- 80% of carts completed, the rest sat until the tax call timed out\n"
+                        "- `p99` went to 611ms while the median stayed at 41ms\n"
+                        "- the receipt total is computed after the deferral, so it has to rejoin\n"
+                        "\n"
+                        "See [[tax-service-latency]] for what the call actually costs.\n"),
     "tax-service-latency": ("reference", "What the tax service actually costs, measured",
                             "Median 40ms, p99 610ms, and it times out rather than erroring when the\n"
                             "route is down. Anything that waits on it synchronously inherits that p99.\n"),
@@ -117,15 +124,37 @@ MEMORIES = {
                       "against the code path, and say what you ran.\n"),
 }
 
+# Work products: how big, and what a line of it looks like. The size is what
+# the browser sorts on and the line is what the peek screen shows, so a file
+# padded with "{}" makes an honest screenshot of a screen with nothing in it.
+# {i} counts up, so a long file does not repeat one line forever.
 ARTIFACTS = {
-    "tmp/load-test-200.json": 242_000,
-    "tmp/load-test-500.json": 611_000,
-    "tmp/lock-waits-by-shard.tsv": 18_400,
-    "tmp/handler.orig.go": 9_100,
-    "tmp/row-ids-in.txt": 74_000,
-    "tmp/row-ids-out.txt": 73_000,
-    "tmp/node_modules/left-pad/index.js": 900,
+    "tmp/load-test-500.json": (
+        611_000,
+        '{{"t":{i},"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}}'),
+    "tmp/load-test-200.json": (
+        242_000,
+        '{{"t":{i},"concurrency":200,"p50_ms":41,"p99_ms":98,"stalled":false}}'),
+    "tmp/row-ids-in.txt": (74_000, "row-{i:06d}"),
+    "tmp/row-ids-out.txt": (73_000, "row-{i:06d}"),
+    "tmp/lock-waits-by-shard.tsv": (18_400, "shard-{i:03d}\t{i}\t611"),
+    "tmp/handler.orig.go": (
+        9_100,
+        "\tif err := tax.Quote(ctx, cart); err != nil {{ // line {i}"),
+    "tmp/node_modules/left-pad/index.js": (900, "module.exports = pad; // {i}"),
 }
+
+
+def fill(size: int, line: str) -> bytes:
+    """Repeat line, counting up, until it is about `size` bytes."""
+    out, i = [], 1
+    total = 0
+    while total < size:
+        text = line.format(i=i) + "\n"
+        out.append(text)
+        total += len(text)
+        i += 1
+    return "".join(out).encode()
 
 
 def write_corpus(out: pathlib.Path) -> None:
@@ -191,10 +220,10 @@ def write_corpus(out: pathlib.Path) -> None:
             index.append(f"- [{name.replace('-', ' ').capitalize()}]({name}.md): {description}")
     (memory / "MEMORY.md").write_text("\n".join(index) + "\n")
 
-    for rel, size in ARTIFACTS.items():
+    for rel, (size, line) in ARTIFACTS.items():
         path = out / "jobs" / LANES[0][0][:8] / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"{}\n" * (size // 3))
+        path.write_bytes(fill(size, line))
     (out / "jobs" / LANES[0][0][:8] / "state.json").write_text('{"state":"working"}\n')
 
     origins = {sid: {"Parent": p[0], "ForkSeq": p[1]} for sid, _, _, _, p, _ in LANES if p}
@@ -208,10 +237,10 @@ def main() -> None:
     ap.add_argument("--out", required=True, help="where to build the fake ~/.claude")
     ap.add_argument("--frames", help="write the screenshots here as .ans and .txt")
     ap.add_argument("--width", type=int, default=195,
-                    help="the site's frames, where the whole header fits")
-    ap.add_argument("--narrow", type=int, default=132,
-                    help="the README's frames, which GitHub scales to ~1012px")
+                    help="the width where the whole header fits")
     ap.add_argument("--braids", default="braids", help="the binary to run")
+    ap.add_argument("--shots", default="go run ./scripts/shots",
+                    help="the screenshot tool, for the screens --print cannot reach")
     args = ap.parse_args()
 
     out = pathlib.Path(args.out).expanduser()
@@ -223,32 +252,47 @@ def main() -> None:
     subprocess.run([args.braids, "index", "--root", str(out / "projects"), "--db", str(db)],
                    check=True, capture_output=True)
 
+    lane = LANES[0][0][:8]
+    # name -> (height, tool, arguments). The map, a spine and search come from
+    # the program's own --print, so those three frames go through the same path
+    # a user does. The rest are screens you reach with keys, which --print does
+    # not do and should not grow a flag for, so scripts/shots presses the keys
+    # and draws the frame. The bin comes last: filling it moves a file out of
+    # the work products, and the work frames are taken before that happens.
     shots = {
-        "map": (18, []),
-        "spine": (24, ["--lane", LANES[0][0][:8]]),
-        "search": (20, ["--query", "lock"]),
+        "map": (18, "braids", []),
+        "spine": (24, "braids", ["--lane", lane]),
+        "search": (20, "braids", ["--query", "lock"]),
+        "work": (13, "shots", ["--screen", "work", "--lane", lane]),
+        "file": (18, "shots", ["--screen", "file", "--lane", lane]),
+        "memories": (16, "shots", ["--screen", "memories"]),
+        "memory": (21, "shots", ["--screen", "memory"]),
+        "bin": (12, "shots", ["--screen", "bin", "--discard",
+                              str(out / "jobs" / lane / "tmp" / "row-ids-out.txt")]),
     }
-    # Two widths. The site can give a frame the whole window, so it gets the
-    # width where braids draws the facts, the glyph key, every binding and the
-    # full mark. GitHub renders a README image at about 1012 pixels whatever
-    # its real size, and 195 columns squeezed into that is about five pixels a
-    # character, so the README gets a narrower screen it can actually read.
-    for name, (height, extra) in shots.items():
-        for target, width in (("", args.width), ("narrow", args.narrow)):
-            frame = subprocess.run(
-                [args.braids, "map", "--print", "--width", str(width),
-                 "--height", str(height), "--db", str(db)] + extra,
-                check=True, capture_output=True, text=True).stdout
-            frame = sanitize(frame, str(db))
-            if args.frames:
-                into = pathlib.Path(args.frames).expanduser() / target
-                into.mkdir(parents=True, exist_ok=True)
-                # .ans keeps braids' own colours. .txt is the same frame with
-                # the escapes taken out, for a plain-text paste.
-                (into / f"{name}.ans").write_text(frame + "\n")
-                (into / f"{name}.txt").write_text(plain(frame) + "\n")
-            if not target:
-                print(f"=== {name} ===\n{frame}\n")
+    # 195 columns for every frame, everywhere. It is the width at which all
+    # three screens draw the facts, the glyph key, every binding and the full
+    # mark; below it the header starts dropping them, and it drops them at a
+    # different width per screen, so a narrower set had the mark on search and
+    # not on the map.
+    for name, (height, tool, extra) in shots.items():
+        if tool == "braids":
+            command = [args.braids, "map", "--print", "--db", str(db)]
+        else:
+            command = args.shots.split() + ["--db", str(db),
+                                            "--root", str(out / "projects")]
+        frame = subprocess.run(
+            command + ["--width", str(args.width), "--height", str(height)] + extra,
+            check=True, capture_output=True, text=True).stdout
+        frame = sanitize(frame, str(db))
+        if args.frames:
+            into = pathlib.Path(args.frames).expanduser()
+            into.mkdir(parents=True, exist_ok=True)
+            # .ans keeps braids' own colours. .txt is the same frame with the
+            # escapes taken out, for a plain-text paste.
+            (into / f"{name}.ans").write_text(frame + "\n")
+            (into / f"{name}.txt").write_text(plain(frame) + "\n")
+        print(f"=== {name} ===\n{frame}\n")
 
 
 SGR = re.compile(r"\x1b\[[0-9;]*m")

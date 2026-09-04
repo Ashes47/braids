@@ -124,6 +124,8 @@ producing a duplicate wearing a new name.
 **Promote.** A subagent's transcript is a conversation too. Turn one into a lane
 of its own and carry on from where it left off.
 
+<img src="assets/frames/work.png" alt="braids: a session's work products, heaviest first" width="100%">
+
 **Work products.** A session's scratch usually dwarfs its transcript: 3.3 GB
 against 363 MB here, with nine files holding 1.3 GB of it. `w` opens it as a
 size browser: heaviest first, directories weighed by what is under them, `↵` to
@@ -132,6 +134,8 @@ its head, `y` copies its path, and a binary is named rather than spewed. The har
 record of a job is shown and refused. `braids work --orphans` finds the sets
 whose conversation is gone.
 
+<img src="assets/frames/memories.png" alt="braids: what a project remembers, with the memory nothing loads marked" width="100%">
+
 **Memories.** What a project has told the harness to remember, with the two
 things you cannot see from inside a session: a memory the index omits, which is
 therefore loaded by nothing, and a link pointing at a memory that is gone. `↵`
@@ -139,6 +143,8 @@ reads it as markdown, `c` opens the conversation that wrote it. `d` deletes one
 to the bin, `r` renames it and follows the name through every link, and `i`
 repairs the index. Each of them changes the index in the same breath as the
 file, and is refused while a session in that project is running.
+
+<img src="assets/frames/bin.png" alt="braids: the bin, holding a deleted file for 14 days" width="100%">
 
 **Bin.** Deleting moves files aside with a manifest and a 14-day retention, so
 nothing you delete is gone the moment you regret it.

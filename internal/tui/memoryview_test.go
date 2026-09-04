@@ -320,12 +320,15 @@ func TestMemoryReaderShowsTheText(t *testing.T) {
 func TestMemoryReaderScrollingStaysInBounds(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "long.md")
+	// Sixty paragraphs, not sixty lines: consecutive lines are one paragraph
+	// and the reader reflows them, so a run of short lines would fit on screen
+	// and there would be nothing to scroll.
 	var lines []string
 	for i := range 60 {
 		lines = append(lines, fmt.Sprintf("line %d of the memory", i))
 	}
 	if err := os.WriteFile(path, []byte("---\nname: long\ndescription: d\nmetadata:\n  type: project\n---\n\n"+
-		strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		strings.Join(lines, "\n\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	m := memoryModel(t, func() ([]memory.Set, error) {

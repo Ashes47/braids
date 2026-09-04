@@ -125,32 +125,59 @@ BODY = f"""
   </ul>
 </div></section>
 
+<section id="work"><div class="wrap">
+  <h2><span class="kicker">Work products</span>The gigabytes a session leaves behind</h2>
+  <p class="sub">
+    A session's scratch files usually dwarf its transcript. On one machine it
+    was 3.3&nbsp;GB against 360&nbsp;MB. <kbd>w</kbd> opens what a conversation
+    wrote, heaviest first, with directories weighed by everything under them.
+  </p>
+  {frame("work", cmd="braids", then="<kbd>w</kbd> on a conversation")}
+  <p>
+    <kbd>↵</kbd> descends, or peeks at a file. A binary is named and measured
+    rather than spewed at your terminal, and the harness's own record of the job
+    is shown and refused, because deleting it would confuse the thing that wrote
+    it.
+  </p>
+  {frame("file", cmd="braids", then="<kbd>w</kbd> then <kbd>↵</kbd> on a file")}
+</div></section>
+
+<section id="memories"><div class="wrap">
+  <h2><span class="kicker">Memories</span>What the project remembers, and what it has lost</h2>
+  <p class="sub">
+    Claude Code keeps per-project memories as markdown, with an index listing
+    them. braids shows the two problems you cannot see from inside a session: a
+    memory missing from the index, so nothing ever loads it, and a link
+    pointing at one that was never written.
+  </p>
+  {frame("memories", cmd="braids", then="<kbd>M</kbd>")}
+  <p>
+    <kbd>↵</kbd> reads one with its markdown rendered. <kbd>r</kbd> renames it
+    and follows the name through the file, the frontmatter, the index and every
+    <code>[[link]]</code> that pointed at it. <kbd>c</kbd> jumps to the
+    conversation that wrote it.
+  </p>
+  {frame("memory", cmd="braids", then="<kbd>M</kbd> then <kbd>↵</kbd>")}
+</div></section>
+
+<section id="bin"><div class="wrap">
+  <h2><span class="kicker">The bin</span>Nothing braids deletes is gone</h2>
+  <p class="sub">
+    Everything it deletes moves aside with a manifest and sits there for 14
+    days. Binned files keep the directory structure they came from, so two
+    files called <code>data.json</code> both come back.
+  </p>
+  {frame("bin", cmd="braids", then="<kbd>u</kbd>")}
+</div></section>
+
 <section><div class="wrap">
-  <h2><span class="kicker">Also in the box</span>The things a session leaves behind</h2>
+  <h2><span class="kicker">Also in the box</span>Three more things it does</h2>
   <div class="cols">
-    <div class="card">
-      <h4>Work products</h4>
-      <p>A session's scratch files usually dwarf its transcript. On one machine
-      it was 3.3&nbsp;GB against 360&nbsp;MB. <kbd>w</kbd> opens it heaviest
-      first, so you can bin the 231&nbsp;MB dump and keep everything else.</p>
-    </div>
-    <div class="card">
-      <h4>Memories</h4>
-      <p>What a project told the harness to remember, with the two problems you
-      cannot see from inside a session: a memory missing from the index, so
-      nothing ever loads it, and a link pointing at one that was never
-      written.</p>
-    </div>
     <div class="card">
       <h4>Merge and promote</h4>
       <p>Bring a branch back as a new conversation, spliced from the real turns
       of both. braids refuses when one already contains the other. A subagent's
       transcript can graduate into a conversation of its own.</p>
-    </div>
-    <div class="card">
-      <h4>A bin you can undo</h4>
-      <p>Everything braids deletes moves aside with a manifest and sits there
-      for 14 days. Press <kbd>u</kbd> to get it back.</p>
     </div>
     <div class="card">
       <h4>Hooks, if you want them</h4>

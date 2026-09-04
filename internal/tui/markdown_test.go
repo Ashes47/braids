@@ -142,3 +142,28 @@ func TestProseToleratesNothing(t *testing.T) {
 		}
 	}
 }
+
+// A paragraph is one piece of markdown even when it is typed across several
+// lines, so emphasis may open on one line and close on the next. Read line by
+// line, the marks never match and the reader shows the asterisks.
+func TestEmphasisSpanningALineBreak(t *testing.T) {
+	m := proseModel(t)
+	rendered := m.prose("The rule: **narrow the\nlock to what it protects**, always.", 60)
+	got := escapes.ReplaceAllString(strings.Join(rendered, "\n"), "")
+	if strings.Contains(got, "*") {
+		t.Errorf("emphasis across a line break left its marks:\n%s", got)
+	}
+	if !strings.Contains(got, "narrow the lock to what it protects") {
+		t.Errorf("the paragraph did not reflow:\n%s", got)
+	}
+}
+
+// A heading, a bullet and a quote each stand alone: joining them into the
+// paragraph above would turn a list into a sentence.
+func TestBlocksAreNotJoinedIntoAParagraph(t *testing.T) {
+	m := proseModel(t)
+	lines := m.prose("Some prose here.\n## A heading\n- first\n- second\n> quoted", 60)
+	if len(lines) < 5 {
+		t.Errorf("blocks were joined together:\n%s", strings.Join(lines, "\n"))
+	}
+}

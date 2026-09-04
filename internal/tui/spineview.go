@@ -268,7 +268,7 @@ func (m Model) spineKey(key string) (Model, tea.Cmd) {
 			return m.openAgent(row.agent), nil
 		}
 		if row.fork == nil {
-			s.notice, s.failed = "no branch on this line — press b to make one, or n to find the next split", true
+			s.notice, s.failed = "no branch on this line: press b to make one, or n to find the next split", true
 			return m, nil
 		}
 		return m.openNode(row.fork, true), nil
@@ -690,7 +690,7 @@ func (m Model) startBranch() Model {
 	// The specific reason first: while reading an agent, that is why branching
 	// is refused, whatever else is or is not configured.
 	if s.agentOf != "" {
-		s.notice, s.failed = "this is an agent's transcript — press p to promote it, then branch from it", true
+		s.notice, s.failed = "this is an agent's transcript: press p to promote it, then branch from it", true
 		return m
 	}
 	if m.branch == nil || len(s.visible) == 0 {
@@ -781,7 +781,7 @@ func (m Model) toggleBranchKind() Model {
 	}
 	if m.workspaceOK != nil {
 		if err := m.workspaceOK(s.lane.ID); err != nil {
-			s.notice, s.failed = err.Error()+" — branching as a thought", true
+			s.notice, s.failed = err.Error()+", branching as a thought", true
 			return m
 		}
 	}
@@ -873,7 +873,7 @@ func (m Model) planMerge() Model {
 	s := m.spine
 	row := s.current()
 	if row.fork == nil {
-		s.notice, s.failed = "m joins a branch back — pick one to merge", true
+		s.notice, s.failed = "m joins a branch back: pick one to merge", true
 		return m
 	}
 	if m.planMergeFn == nil || m.mergeFn == nil {
@@ -890,7 +890,7 @@ func (m Model) planMerge() Model {
 	// is for when both sides carried on after they parted.
 	if ours == 0 {
 		s.notice, s.failed = fmt.Sprintf(
-			"%s already contains this whole conversation — open it instead of merging",
+			"%s already contains this whole conversation, so open it instead of merging",
 			branchName(row.fork)), true
 		return m
 	}
@@ -946,7 +946,7 @@ func (m Model) promoteAgent() Model {
 		agentID = row.agent.ID
 	}
 	if agentID == "" {
-		s.notice, s.failed = "p promotes a subagent — none is selected", true
+		s.notice, s.failed = "p promotes a subagent: none is selected", true
 		return m
 	}
 	if m.promote == nil {

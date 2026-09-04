@@ -159,7 +159,7 @@ func run(args []string, w io.Writer) error {
 			return cmdMap(args, out)
 		}
 		if guess := nearest(args[0]); guess != "" {
-			return fmt.Errorf("unknown command %q — did you mean %q?", args[0], guess)
+			return fmt.Errorf("unknown command %q, did you mean %q?", args[0], guess)
 		}
 		return fmt.Errorf("unknown command %q (try: braids help)", args[0])
 	}
@@ -1106,7 +1106,7 @@ func cmdHook(args []string, out *printer) error {
 	// payload they were never going to send.
 	if len(args) > 0 {
 		out.printf("braids hook records one hook payload, read on stdin.\n")
-		out.printf("The harness runs it — you do not.\n\n")
+		out.printf("The harness runs it, not you.\n\n")
 		out.printf("to turn reporting on or off:  braids hooks\n")
 		return errShown
 	}
@@ -1119,7 +1119,7 @@ func cmdHook(args []string, out *printer) error {
 	// quietly. A hook must never fail loudly: an error here would surface as a
 	// broken hook in the middle of somebody's session.
 	if stdinIsTerminal() {
-		return errors.New("hook reads a hook payload on stdin — the harness runs it, not you\n" +
+		return errors.New("hook reads a hook payload on stdin, and the harness runs it, not you\n" +
 			"       to turn reporting on or off, use: braids hooks")
 	}
 	home, err := os.UserHomeDir()
@@ -1198,7 +1198,7 @@ func cmdHooks(args []string, out *printer) error {
 	out.printf("settings: %s\ncommand:  %s\n", path, command)
 	switch {
 	case len(status.Events) == 0:
-		out.printf("status:   not installed — braids cannot tell a running tool from one\n")
+		out.printf("status:   not installed, so braids cannot tell a running tool from one\n")
 		out.printf("          waiting on you. `braids hooks --install` changes that.\n")
 	default:
 		out.printf("status:   reporting %s\n", strings.Join(status.Events, ", "))

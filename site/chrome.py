@@ -151,6 +151,7 @@ NAV = """<nav><div class="wrap">
   </a>
   <span class="spacer"></span>
   <a class="link" href="#what">What it does</a>
+  <a class="link" href="#work">Screens</a>
   <a class="link" href="#local">Local</a>
   <a class="link" href="#commands">Commands</a>
   <a class="link" href="docs/">Docs</a>
@@ -204,11 +205,12 @@ FOOTER = """<footer><div class="wrap">
 </div></footer>"""
 
 
-def nav(home: str = "", extra: str = "") -> str:
-    """The sticky top bar. `extra` is dropped in before the GitHub link."""
+def nav(home: str = "", active: str = "") -> str:
+    """The sticky top bar. `active` is the href of the link to mark as current."""
     out = retarget(NAV, home)
-    if extra:
-        out = out.replace('<a class="link" href=', extra + '<a class="link" href=', 1)
+    if active:
+        out = out.replace(f'<a class="link" href="{active}"',
+                          f'<a class="link on" href="{active}"', 1)
     return out
 
 
@@ -279,6 +281,7 @@ nav .name { font-family:var(--mono); font-weight:600; letter-spacing:.02em; colo
 nav .spacer { flex:1; }
 nav a.link { color:var(--dim); font-size:14px; }
 nav a.link:hover { color:var(--ink); text-decoration:none; }
+nav a.link.on { color:var(--accent); }
 
 /* ---- hero ---- */
 header { padding:72px 0 8px; }

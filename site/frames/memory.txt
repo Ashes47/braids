@@ -1,0 +1,20 @@
+ Memory:     lock-scope-rule        <j/k>   scroll                                                                                           ___.                          __        .___         
+ Kind:       project                <c>     the conversation                                                                                 \_ |__   ______     _____    |__|    __| _/    ______
+ Changed:    2026-09-04             <esc>   back to the list                                                                                  | __ \  \_  __ \   \__  \    |     / __ |    /  ___/
+ Written by: a1b2c3d4               <q>     quit                                                                                              | \_\ \  |  | \/    / __ \_  |    / /_/ |    \___  \
+ Links:      tax-service-latency                                                                                                              |___  /  |__|      (____  / |__|  \____ |   /____  /
+                                                                                                                                                  \/                  \/             \/        \/ 
+
+╭─ lock-scope-rule ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ The checkout handler held its lock across the tax service call, so a 40ms median turned into a stall at 200 concurrent carts. The rule: narrow the lock to the state it protects, and let the   │
+│ remote call happen outside it.                                                                                                                                                                  │
+│                                                                                                                                                                                                 │
+│ How it showed up                                                                                                                                                                                │
+│                                                                                                                                                                                                 │
+│ · 80% of carts completed, the rest sat until the tax call timed out                                                                                                                             │
+│ · p99 went to 611ms while the median stayed at 41ms                                                                                                                                             │
+│ · the receipt total is computed after the deferral, so it has to rejoin                                                                                                                         │
+│                                                                                                                                                                                                 │
+│ See [[tax-service-latency]] for what the call actually costs.                                                                                                                                   │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ A lock must not span a network call. This bit us in checkout

@@ -231,7 +231,9 @@ func (m Model) binInfo() string { return m.factsBlock(m.binFacts(), binHints(), 
 
 func (m Model) binColumns() string {
 	nameWidth := m.binNameWidth()
-	return m.theme.Column.Render(" " + padRight("CONVERSATION", nameWidth) + " " +
+	// Not CONVERSATION: the bin holds whatever braids has deleted, and most of
+	// it is a work product or a memory rather than a conversation.
+	return m.theme.Column.Render(" " + padRight("DELETED ITEM", nameWidth) + " " +
 		padLeft("DELETED", binWhenWidth) + " " + padLeft("SIZE", binSizeWidth) + " " +
 		padLeft("EXPIRES", binExpiryWidth))
 }
@@ -240,9 +242,18 @@ func (m Model) binNameWidth() int {
 	return max(m.contentWidth()-4-binWhenWidth-binSizeWidth-binExpiryWidth, 8)
 }
 
+// deletedAt reads an age as a moment. humanAge answers "now" for anything
+// under a minute, and "now ago" is not something anyone says.
+func deletedAt(age string) string {
+	if age == "now" {
+		return "just now"
+	}
+	return age + " ago"
+}
+
 func (m Model) renderBinRow(entry trash.Entry, selected bool) string {
 	name := padRight(truncate(entry.Label, m.binNameWidth()), m.binNameWidth())
-	when := padLeft(humanAge(m.now().Sub(entry.At))+" ago", binWhenWidth)
+	when := padLeft(deletedAt(humanAge(m.now().Sub(entry.At))), binWhenWidth)
 	size := padLeft(humanBytes(entry.Bytes), binSizeWidth)
 	expiry := padLeft(expiryOf(entry, m.now()), binExpiryWidth)
 

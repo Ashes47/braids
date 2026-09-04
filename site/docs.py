@@ -490,6 +490,7 @@ MEMORIES = f"""
   it, describing it and giving it a type, and bodies link to each other with
   <code>[[name]]</code>.
 </p>
+{frame("memories", cmd="braids", then="<kbd>M</kbd>")}
 <p>Press <kbd>M</kbd> on the map, or:</p>
 {sh('''
 braids memories
@@ -511,6 +512,7 @@ braids memories --json
 </p>
 
 <h2 id="read">Reading one</h2>
+{frame("memory", cmd="braids", then="<kbd>M</kbd> then <kbd>↵</kbd>")}
 <p>
   <kbd>↵</kbd> opens the memory with its markdown rendered: headings, emphasis,
   lists, code, links. <kbd>c</kbd> jumps to the conversation that wrote it, when
@@ -550,6 +552,7 @@ WORK = f"""
   under <code>~/.claude/jobs</code>, heaviest first, with directories weighed
   by everything under them.
 </p>
+{frame("work", cmd="braids", then="<kbd>w</kbd> on a conversation")}
 {keys([
     ("↵", "descend into a directory, or peek at a file"),
     ("d", "move this entry to the bin"),
@@ -557,6 +560,7 @@ WORK = f"""
     ("esc", "up a level, then back to the map"),
     ("y", "copy the path, while reading a file"),
 ])}
+{frame("file", cmd="braids", then="<kbd>w</kbd> then <kbd>↵</kbd> on a file")}
 <p>
   Peeking shows the head of a text file, up to 128 KB. A binary is named and its
   size reported rather than spewed at your terminal. The harness's own record of
@@ -578,6 +582,7 @@ braids work --orphans --reclaim  # move those to the bin
   Nothing braids deletes is gone. It moves aside with a manifest and sits in
   <code>~/.braids/bin</code> for 14 days. Press <kbd>u</kbd> from the map.
 </p>
+{frame("bin", cmd="braids", then="<kbd>u</kbd>")}
 {keys([
     ("↵ / r", "restore it to where it came from"),
     ("d", "delete it for good"),
@@ -958,7 +963,7 @@ def pager(index: int) -> str:
 def build() -> None:
     for i, (slug, label, title, description, body) in enumerate(PAGES):
         html_body = (
-            nav(HOME, extra=f'<a class="link on" href="/docs/">Docs</a>')
+            nav(HOME, active="/docs/")
             + '<div class="wrap"><div class="docs">'
             + sidebar(slug, body)
             + f"<article>{body}{pager(i)}</article>"

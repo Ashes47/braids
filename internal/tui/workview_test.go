@@ -260,7 +260,7 @@ func TestWorkViewerNamesDataAndOffersThePath(t *testing.T) {
 	m, _ = m.workKey("enter")
 
 	out := plain(m.renderWork())
-	for _, want := range []string{"data rather than text", "copies the path", "data — not shown"} {
+	for _, want := range []string{"data rather than text", "copies the path", "data, not shown"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the viewer is missing %q:\n%s", want, out)
 		}

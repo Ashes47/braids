@@ -207,7 +207,10 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True, help="where to build the fake ~/.claude")
     ap.add_argument("--frames", help="write the screenshots here as .ans and .txt")
-    ap.add_argument("--width", type=int, default=78)
+    ap.add_argument("--width", type=int, default=195,
+                    help="the site's frames, where the whole header fits")
+    ap.add_argument("--narrow", type=int, default=132,
+                    help="the README's frames, which GitHub scales to ~1012px")
     ap.add_argument("--braids", default="braids", help="the binary to run")
     args = ap.parse_args()
 
@@ -225,21 +228,27 @@ def main() -> None:
         "spine": (24, ["--lane", LANES[0][0][:8]]),
         "search": (20, ["--query", "lock"]),
     }
+    # Two widths. The site can give a frame the whole window, so it gets the
+    # width where braids draws the facts, the glyph key, every binding and the
+    # full mark. GitHub renders a README image at about 1012 pixels whatever
+    # its real size, and 195 columns squeezed into that is about five pixels a
+    # character, so the README gets a narrower screen it can actually read.
     for name, (height, extra) in shots.items():
-        frame = subprocess.run(
-            [args.braids, "map", "--print", "--width", str(args.width),
-             "--height", str(height), "--db", str(db)] + extra,
-            check=True, capture_output=True, text=True).stdout
-        frame = sanitize(frame, str(db))
-        if args.frames:
-            target = pathlib.Path(args.frames).expanduser()
-            target.mkdir(parents=True, exist_ok=True)
-            # .ans keeps braids' own colours, for the site. .txt is the same
-            # frame with the escapes taken out, for anywhere that cannot show
-            # them: a README, a plain-text paste.
-            (target / f"{name}.ans").write_text(frame + "\n")
-            (target / f"{name}.txt").write_text(plain(frame) + "\n")
-        print(f"=== {name} ===\n{frame}\n")
+        for target, width in (("", args.width), ("narrow", args.narrow)):
+            frame = subprocess.run(
+                [args.braids, "map", "--print", "--width", str(width),
+                 "--height", str(height), "--db", str(db)] + extra,
+                check=True, capture_output=True, text=True).stdout
+            frame = sanitize(frame, str(db))
+            if args.frames:
+                into = pathlib.Path(args.frames).expanduser() / target
+                into.mkdir(parents=True, exist_ok=True)
+                # .ans keeps braids' own colours. .txt is the same frame with
+                # the escapes taken out, for a plain-text paste.
+                (into / f"{name}.ans").write_text(frame + "\n")
+                (into / f"{name}.txt").write_text(plain(frame) + "\n")
+            if not target:
+                print(f"=== {name} ===\n{frame}\n")
 
 
 SGR = re.compile(r"\x1b\[[0-9;]*m")

@@ -76,7 +76,7 @@ frames: install
 	python3 scripts/demo.py --out /tmp/braids-demo --frames site/frames \
 		--width 195 --braids "$(shell go env GOPATH)/bin/braids" >/dev/null
 	for f in map spine search; do \
-		python3 scripts/ansi2svg.py site/frames/$$f.ans assets/frames/$$f.svg; \
+		python3 scripts/ansi2png.py site/frames/narrow/$$f.ans assets/frames/$$f.png; \
 	done
 
 # site-build does the lot: recapture, then regenerate.

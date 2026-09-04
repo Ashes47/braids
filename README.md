@@ -26,7 +26,7 @@ millisecond, and turns any message into the start of a new branch.
 
 It never talks to Claude. It arranges the conversations you have with Claude.
 
-<img src="assets/frames/map.svg" alt="braids: the map, with six conversations and their branches" width="100%">
+<img src="assets/frames/map.png" alt="braids: the map, with six conversations and their branches" width="100%">
 
 <sub>A real frame, colours and all. Every screenshot here is captured by
 <code>scripts/demo.py</code> against a fake <code>~/.claude</code>, never drawn
@@ -99,13 +99,13 @@ braids added.
 **Map.** Every conversation as a tree, with branches shown under the
 conversation they were cut from, and how far behind each one is.
 
-<img src="assets/frames/spine.svg" alt="braids: one conversation reduced to its landmarks" width="100%">
+<img src="assets/frames/spine.png" alt="braids: one conversation reduced to its landmarks" width="100%">
 
 **Spine.** One conversation collapsed to its landmarks: what you asked, what
 came back, where it failed, where it was compacted. A 25,000-turn conversation
 becomes a few hundred lines you can actually read.
 
-<img src="assets/frames/search.svg" alt="braids: one search across conversations, memories and work products" width="100%">
+<img src="assets/frames/search.png" alt="braids: one search across conversations, memories and work products" width="100%">
 
 **Search.** Full text over every message and tool call, plus your memories and
 the names of every work product, in a few milliseconds. Each result says whether

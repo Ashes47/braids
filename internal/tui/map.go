@@ -1153,6 +1153,12 @@ func shortID(id string) string {
 // a row that is not there.
 func layout(f *graph.Forest, g Glyphs, show func(*graph.Node) bool) []row {
 	var out []row
+	if f == nil {
+		// No forest is an empty map, not a crash. Nothing in braids passes
+		// nil today, but a screen that dies rather than drawing nothing is a
+		// crash waiting for the first caller that does.
+		return out
+	}
 	var walk func(nodes []*graph.Node, ancestors string, depth int)
 	walk = func(nodes []*graph.Node, ancestors string, depth int) {
 		visible := shown(nodes, show)

@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"github.com/Ashes47/braids/internal/core/memory"
 )
 
@@ -503,7 +501,7 @@ func (m Model) readMemory() Model {
 	}
 	body, err := memory.Body(entry.Path)
 	doc := &memoryDoc{memory: entry, text: body, err: err}
-	doc.rewrap(m.contentWidth() - 2)
+	m.rewrap(doc, m.contentWidth()-2)
 	m.memories.reading = doc
 	m.memories.notice, m.memories.failed = "", false
 	return m
@@ -544,9 +542,9 @@ func (m *Model) clampReading() {
 	doc.offset = min(max(doc.offset, 0), max(len(doc.lines)-m.bodyHeight(), 0))
 }
 
-// rewrap lays the text out for a frame of this width. Wrapping on words, not
-// characters: a memory is prose.
-func (doc *memoryDoc) rewrap(width int) {
+// rewrap lays the text out for a frame of this width, as markdown: the reader
+// sees emphasis rather than the asterisks that mean it.
+func (m Model) rewrap(doc *memoryDoc, width int) {
 	if width < 20 {
 		width = 20
 	}
@@ -554,7 +552,7 @@ func (doc *memoryDoc) rewrap(width int) {
 		return
 	}
 	doc.width = width
-	doc.lines = strings.Split(ansi.Wordwrap(doc.text, width, " -"), "\n")
+	doc.lines = m.prose(doc.text, width)
 }
 
 func (m Model) readingFacts() []fact {
@@ -570,7 +568,7 @@ func (m Model) readingFacts() []fact {
 
 func (m Model) renderReading() string {
 	doc := m.memories.reading
-	doc.rewrap(m.contentWidth() - 2)
+	m.rewrap(doc, m.contentWidth()-2)
 	m.clampReading()
 
 	var out strings.Builder
@@ -591,7 +589,9 @@ func (m Model) renderReading() string {
 	default:
 		end := min(doc.offset+m.bodyHeight(), len(doc.lines))
 		for i := doc.offset; i < end; i++ {
-			out.WriteString(m.framed(padRight(" "+m.theme.Value.Render(doc.lines[i]), m.contentWidth())) + "\n")
+			// The lines arrive already styled as markdown, so they are placed
+			// rather than styled again.
+			out.WriteString(m.framed(padRight(" "+doc.lines[i], m.contentWidth())) + "\n")
 		}
 		m.fill(&out, blank, m.bodyHeight()-(end-doc.offset))
 	}

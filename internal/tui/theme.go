@@ -64,13 +64,19 @@ type Theme struct {
 	// makes colour stop carrying meaning.
 	Urgent lipgloss.Style
 	Logo   lipgloss.Style
-	Border lipgloss.Style
-	Label  lipgloss.Style
-	Value  lipgloss.Style
-	Panel  lipgloss.Style
-	Footer lipgloss.Style
-	Key    lipgloss.Style
-	Empty  lipgloss.Style
+	// Prose is how a memory's markdown is drawn: emphasis in a terminal is
+	// weight and colour, not the asterisks the writer typed to mean it.
+	Strong   lipgloss.Style
+	Emphasis lipgloss.Style
+	Code     lipgloss.Style
+	Heading  lipgloss.Style
+	Border   lipgloss.Style
+	Label    lipgloss.Style
+	Value    lipgloss.Style
+	Panel    lipgloss.Style
+	Footer   lipgloss.Style
+	Key      lipgloss.Style
+	Empty    lipgloss.Style
 }
 
 // NewTheme builds the theme for the terminal's actual background, so the same
@@ -104,11 +110,18 @@ func NewTheme(isDark, ascii bool) Theme {
 		Urgent: lipgloss.NewStyle().Foreground(accent).Bold(true),
 		// The mark wears the accent, like everything else that is braids' own
 		// voice on the screen rather than the harness's data.
-		Logo:   lipgloss.NewStyle().Foreground(accent),
-		Border: lipgloss.NewStyle().Foreground(faint),
-		Label:  lipgloss.NewStyle().Foreground(muted),
-		Value:  lipgloss.NewStyle().Foreground(fg),
-		Panel:  lipgloss.NewStyle().Foreground(fg).Bold(true),
+		Logo: lipgloss.NewStyle().Foreground(accent),
+		// Emphasis in a terminal is weight and colour, not asterisks.
+		Strong:   lipgloss.NewStyle().Foreground(fg).Bold(true),
+		Emphasis: lipgloss.NewStyle().Foreground(fg).Italic(true),
+		// Code keeps the accent rather than a background: a filled block
+		// behind a word inside a paragraph is heavier than the paragraph.
+		Code:    lipgloss.NewStyle().Foreground(accent),
+		Heading: lipgloss.NewStyle().Foreground(accent).Bold(true),
+		Border:  lipgloss.NewStyle().Foreground(faint),
+		Label:   lipgloss.NewStyle().Foreground(muted),
+		Value:   lipgloss.NewStyle().Foreground(fg),
+		Panel:   lipgloss.NewStyle().Foreground(fg).Bold(true),
 		// Selection is a solid band across the whole row, k9s style: one flat
 		// style rather than nested per-segment colours, so it never tears.
 		Selected: lipgloss.NewStyle().Background(selBg).Foreground(selFg),

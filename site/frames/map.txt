@@ -1,9 +1,9 @@
- Source:         claudecode            ◆    stopped, needs you       <j/k>   down / up            <n / N> next / prev waiting       ___.                        __       .___         
- Index:          ~/.braids/index.db    ●    working                  <↵>     open spine           <d>     delete                    \_ |__   ______   _____    |__|   __| _/    ______
- Lanes:          6                     ●    an open loop             </>     search               <w / D> work / delete all          | __ \  \_  __ \ \__  \    |    / __ |    /  ___/
- Waiting on you: 4                     ●    idle                     <f>     filter list          <u>     deleted / recover          | \_\ \  |  | \/  / __ \_  |   / /_/ |    \___  \
- Hooks:          reporting             ○    archived                 <a>     toggle archive       <M>     memories                   |___  /  |__|    (____  / |__| \____ |   /____  /
- Version:        0.1.0                 ├─   branched from above      <r>     rename               <A>     show archived                  \/                \/            \/        \/ 
+ Source:         claudecode            ◆    stopped, needs you       <j/k>   down / up            <n / N> next / prev waiting        ___.                        __       .___        
+ Index:          ~/.braids/index.db    ●    working                  <↵>     open spine           <d>     delete                     \_ |__   ______   _____    |__|   __| _/   ______
+ Lanes:          6                     ●    an open loop             </>     search               <w / D> work / delete all           | __ \  \_  __ \ \__  \    |    / __ |   /  ___/
+ Waiting on you: 4                     ●    idle                     <f>     filter list          <u>     deleted / recover           | \_\ \  |  | \/  / __ \_  |   / /_/ |   \___  \
+ Hooks:          reporting             ○    archived                 <a>     toggle archive       <M>     memories                    |___  /  |__|    (____  / |__| \____ |  /____  /
+ Version:        0.1.0                 ├─   branched from above      <r>     rename               <A>     show archived                   \/                \/            \/       \/ 
                                                                      <q>     quit                 <y / o> copy / open terminal
 
 ╭─ Conversations(all)[6] ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮

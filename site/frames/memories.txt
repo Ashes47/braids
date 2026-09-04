@@ -1,9 +1,9 @@
- Remembered:   4 in 1 projects    ⚠    not in the index, never loaded     <j/k>   down / up          <d>     delete                 ___.                        __       .___         
- Holding:      2 kB               ⊕    links to one not written yet       <↵>     read it            <f>     filter                 \_ |__   ______   _____    |__|   __| _/    ______
- Never loaded: 1                                                          <c>     the conversation   <esc>   back                    | __ \  \_  __ \ \__  \    |    / __ |    /  ___/
- Index stale:  0                                                          <n / N> next / prev marked                                 | \_\ \  |  | \/  / __ \_  |   / /_/ |    \___  \
- Loose links:  0                                                          <r>     rename                                             |___  /  |__|    (____  / |__| \____ |   /____  /
-                                                                          <i>     repair the index                                       \/                \/            \/        \/ 
+ Remembered:   4 in 1 projects    ⚠    not in the index, never loaded      <j/k>   down / up          <d>     delete                 ___.                        __       .___        
+ Holding:      2 kB               ⊕    links to one not written yet        <↵>     read it            <f>     filter                 \_ |__   ______   _____    |__|   __| _/   ______
+ Never loaded: 1                                                           <c>     the conversation   <esc>   back                    | __ \  \_  __ \ \__  \    |    / __ |   /  ___/
+ Index stale:  0                                                           <n / N> next / prev marked                                 | \_\ \  |  | \/  / __ \_  |   / /_/ |   \___  \
+ Loose links:  0                                                           <r>     rename                                             |___  /  |__|    (____  / |__| \____ |  /____  /
+                                                                           <i>     repair the index                                       \/                \/            \/       \/ 
 
 ╭─ Memories(all)[4] ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ MEMORY                                                                                                                                         KIND        LINKS  CHANGED       FROM│

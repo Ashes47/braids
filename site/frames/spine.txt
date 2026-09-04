@@ -1,9 +1,9 @@
- Lane:     a1b2c3d4        ●    your turn               <j/k>   down / up           <n / N> next / prev ⚠ ⊕ ← ═                     ___.                        __       .___         
- Turns:    24              ●    claude's turn           <↵>     open branch/agent   <p>     promote agent                           \_ |__   ______   _____    |__|   __| _/    ______
- Branches: 3 forked out    ⋯    turns collapsed         <b>     branch here         <f>     filter turns                             | __ \  \_  __ \ \__  \    |    / __ |    /  ___/
- Agents:   0               ⊕    agent it spawned        </>     search              <a>     toggle archive                           | \_\ \  |  | \/  / __ \_  |   / /_/ |    \___  \
-                           ⚠    a tool call failed      <m>     merge branch back   <y>     copy resume                              |___  /  |__|    (____  / |__| \____ |   /____  /
-                           ══   context compacted       <esc>   back                <o>     open terminal                                \/                \/            \/        \/ 
+ Lane:     a1b2c3d4        ●    your turn               <j/k>   down / up           <n / N> next / prev ⚠ ⊕ ← ═                      ___.                        __       .___        
+ Turns:    24              ●    claude's turn           <↵>     open branch/agent   <p>     promote agent                            \_ |__   ______   _____    |__|   __| _/   ______
+ Branches: 3 forked out    ⋯    turns collapsed         <b>     branch here         <f>     filter turns                              | __ \  \_  __ \ \__  \    |    / __ |   /  ___/
+ Agents:   0               ⊕    agent it spawned        </>     search              <a>     toggle archive                            | \_\ \  |  | \/  / __ \_  |   / /_/ |   \___  \
+                           ⚠    a tool call failed      <m>     merge branch back   <y>     copy resume                               |___  /  |__|    (____  / |__| \____ |  /____  /
+                           ══   context compacted       <esc>   back                <o>     open terminal                                 \/                \/            \/       \/ 
                                                         <q>     quit               
 
 ╭─ Spine(Checkout stalls at 80% under load, then…)[13] ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮

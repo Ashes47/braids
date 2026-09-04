@@ -51,6 +51,36 @@ type Sidechains interface {
 	Subagents(ctx context.Context, lane model.Lane) ([]model.Subagent, error)
 }
 
+// MergeRequest describes joining a branch back into the conversation it left.
+type MergeRequest struct {
+	// Base is the conversation to carry on from.
+	Base model.Lane
+	// Incoming is the branch whose divergent turns are brought over.
+	Incoming model.Lane
+	// Name is the display name for the merged conversation.
+	Name string
+}
+
+// MergePlan is what a merge would do, so it can be shown before it is done.
+type MergePlan struct {
+	// Shared is how many records the two conversations already have in common.
+	Shared int
+	// Incoming is how many records would be carried over.
+	Incoming int
+	// BaseTurns and IncomingTurns count only conversational turns, which is
+	// what a person is deciding about.
+	BaseTurns, IncomingTurns int
+}
+
+// Merger joins a branch back into the conversation it left, as a new
+// conversation. Neither of the originals is touched.
+type Merger interface {
+	// PlanMerge reports what a merge would do without doing it.
+	PlanMerge(ctx context.Context, req MergeRequest) (MergePlan, error)
+	// Merge writes the joined conversation.
+	Merge(ctx context.Context, req MergeRequest) (model.Lane, error)
+}
+
 // Promoter turns a subagent's transcript into a conversation of its own.
 type Promoter interface {
 	Promote(ctx context.Context, agent model.Subagent) (model.Lane, error)

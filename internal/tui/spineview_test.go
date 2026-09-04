@@ -762,3 +762,86 @@ func TestAWorkspaceIsAllowedWhereItCanExist(t *testing.T) {
 		t.Error("tab should switch back")
 	}
 }
+
+func mergeModel(t *testing.T) (Model, *[]string) {
+	t.Helper()
+	done := &[]string{}
+	lanes := []index.LaneInfo{laneInfo("base00000001", "the main thread", "app", 40, time.Hour)}
+	m := NewModel(forestOf(lanes, nil), Options{
+		ASCII:     true,
+		LoadSpine: func(string) ([]graph.Segment, error) { return demoSegments(), nil },
+		PlanMerge: func(base, incoming string) (int, error) {
+			*done = append(*done, "plan:"+base+"/"+incoming)
+			return 14, nil
+		},
+		Merge: func(base, incoming, name string) (string, error) {
+			*done = append(*done, fmt.Sprintf("merge:%s/%s:%s", base, incoming, name))
+			return "merged000001", nil
+		},
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 100, 20
+	forkChild(m.visible[0].node, "side00000002", "try option c", 20, 1)
+	return m, done
+}
+
+func TestMergeAsksBeforeItActs(t *testing.T) {
+	m, done := mergeModel(t)
+	m = m.openSpine()
+	m, _ = m.spineKey("j") // onto the fork row
+
+	m, _ = m.spineKey("m")
+	if len(*done) != 1 || (*done)[0] != "plan:base00000001/side00000002" {
+		t.Fatalf("m should plan the merge first: %v", *done)
+	}
+	out := plain(m.renderSpine())
+	for _, want := range []string{"merge try option c into this?", "14 turns", "enter yes", "esc no"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the question should say what it costs, missing %q:\n%s", want, out)
+		}
+	}
+
+	// esc walks it back without merging, and without leaving the spine.
+	m, _ = m.spineKey("esc")
+	if m.spine == nil || m.spine.merging != nil {
+		t.Fatal("esc should cancel the merge, not close the conversation")
+	}
+	if len(*done) != 1 {
+		t.Error("cancelling must not merge")
+	}
+}
+
+func TestMergeCarriesTheBranchBack(t *testing.T) {
+	m, done := mergeModel(t)
+	m = m.openSpine()
+	m, _ = m.spineKey("j")
+	m, _ = m.spineKey("m")
+	m, _ = m.spineKey("enter")
+
+	if len(*done) != 2 || !strings.HasPrefix((*done)[1], "merge:base00000001/side00000002:") {
+		t.Fatalf("enter should carry out the merge: %v", *done)
+	}
+	if !strings.Contains((*done)[1], "the main thread + try option c") {
+		t.Errorf("the merged conversation should be named after both: %v", (*done)[1])
+	}
+	out := plain(m.renderSpine())
+	if !strings.Contains(out, "merged into a new conversation") {
+		t.Errorf("expected confirmation:\n%s", out)
+	}
+	if !strings.Contains(out, "both originals are untouched") {
+		t.Error("the notice must say the originals survive — that is what makes it safe")
+	}
+}
+
+func TestMergeNeedsABranchSelected(t *testing.T) {
+	m, done := mergeModel(t)
+	m = m.openSpine() // cursor on a turn, not a fork
+
+	m, _ = m.spineKey("m")
+	if len(*done) != 0 {
+		t.Fatal("m on a turn should not plan anything")
+	}
+	if !strings.Contains(plain(m.renderSpine()), "pick one to merge") {
+		t.Error("expected guidance")
+	}
+}

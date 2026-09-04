@@ -37,6 +37,11 @@ type spineState struct {
 	filter  filterInput
 	// naming is the branch-name field, opened with `b` on a turn.
 	naming filterInput
+	// merging is the branch waiting to be joined back, held between asking and
+	// confirming so that a merge is never one keystroke.
+	merging *graph.Node
+	// mergeTurns is how many turns that merge would carry over.
+	mergeTurns int
 	// workspace is the kind of branch being made. A thought shares the working
 	// directory and is for exploring; a workspace gets a git worktree of its
 	// own and can be written in while its siblings run.
@@ -245,10 +250,19 @@ func (m Model) spineKey(key string) (Model, tea.Cmd) {
 	}
 	switch key {
 	case "esc", "backspace", "h", "left":
+		if s.merging != nil {
+			s.merging, s.notice, s.failed = nil, "", false
+			return m, nil
+		}
 		return m.closeSpine(), nil
+	case "m":
+		return m.planMerge(), nil
 	case "p":
 		return m.promoteAgent(), nil
 	case "enter", "l", "right":
+		if s.merging != nil {
+			return m.commitMerge(), nil
+		}
 		row := s.current()
 		if row.agent != nil {
 			return m.openAgent(row.agent), nil
@@ -459,7 +473,8 @@ func spineHints() []hint {
 	return []hint{
 		{"j/k", "down / up"}, {"↵", "open branch/agent"},
 		{"b", "branch here"}, {"/", "search"},
-		{"esc", "back"}, {"q", "quit"},
+		{"m", "merge branch back"}, {"esc", "back"},
+		{"q", "quit"},
 		{"n / N", "next / prev branch/agent"}, {"p", "promote agent"},
 		{"f", "filter turns"}, {"a", "toggle archive"},
 		{"y", "copy resume"}, {"o", "open terminal"},
@@ -836,6 +851,63 @@ func promotedName(a *index.SubagentRow) string {
 	default:
 		return a.Type
 	}
+}
+
+// planMerge asks what joining the selected branch back would carry over, and
+// holds it until it is confirmed.
+//
+// A merge is the only action here that combines two histories, so unlike a
+// branch it is never a single keystroke: the count is shown first, because
+// "fourteen turns" and "one turn" are different decisions.
+func (m Model) planMerge() Model {
+	s := m.spine
+	row := s.current()
+	if row.fork == nil {
+		s.notice, s.failed = "m joins a branch back — pick one to merge", true
+		return m
+	}
+	if m.planMergeFn == nil || m.mergeFn == nil {
+		s.notice, s.failed = "merging is unavailable for this source", true
+		return m
+	}
+	turns, err := m.planMergeFn(s.lane.ID, row.fork.Lane.ID)
+	if err != nil {
+		s.notice, s.failed = err.Error(), true
+		return m
+	}
+	s.merging, s.mergeTurns = row.fork, turns
+	s.notice, s.failed = fmt.Sprintf("merge %s into this? %d turns would be carried over · enter yes · esc no",
+		branchName(row.fork), turns), false
+	return m
+}
+
+func (m Model) commitMerge() Model {
+	s := m.spine
+	incoming := s.merging
+	s.merging = nil
+
+	name := s.lane.Title + " + " + branchName(incoming)
+	id, err := m.mergeFn(s.lane.ID, incoming.Lane.ID, name)
+	if err != nil {
+		s.notice, s.failed = err.Error(), true
+		return m
+	}
+	notice := fmt.Sprintf("merged into a new conversation %s · both originals are untouched", shortID(id))
+	if m.refresh != nil {
+		if forest, refreshErr := m.refresh(); refreshErr == nil {
+			m = m.adopt(forest)
+		}
+	}
+	m.spine.notice, m.spine.failed = notice, false
+	return m
+}
+
+// branchName is what to call a branch in a sentence.
+func branchName(n *graph.Node) string {
+	if n.Lane.Title != "" {
+		return n.Lane.Title
+	}
+	return shortID(n.Lane.ID)
 }
 
 // promoteAgent turns the selected subagent into a conversation of its own,

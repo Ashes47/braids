@@ -41,6 +41,11 @@ type Options struct {
 	// LoadSpine reduces one lane to its spine. Passing it as a function keeps
 	// the views free of any dependency on the index.
 	LoadSpine func(laneID string) ([]graph.Segment, error)
+	// PlanMerge reports how many turns joining a branch back would carry over.
+	PlanMerge func(base, incoming string) (int, error)
+	// Merge joins a branch back into a conversation as a new one, returning
+	// the new lane's ID.
+	Merge func(base, incoming, name string) (string, error)
 	// WorkspaceOK reports whether a conversation can take a workspace branch,
 	// explaining why not when it cannot.
 	WorkspaceOK func(laneID string) error
@@ -128,6 +133,8 @@ type Model struct {
 	loadAgents     func(string) ([]index.SubagentRow, error)
 	loadSeams      func(string) ([]index.CompactionRow, error)
 	workspaceOK    func(string) error
+	planMergeFn    func(string, string) (int, error)
+	mergeFn        func(string, string, string) (string, error)
 	promote        func(string, string) (string, error)
 	loadAgentSpine func(string, string) ([]graph.Segment, error)
 	branch         func(string, int, string, bool) (string, error)
@@ -195,6 +202,8 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		loadAgents:     opts.LoadSubagents,
 		loadSeams:      opts.LoadCompactions,
 		workspaceOK:    opts.WorkspaceOK,
+		planMergeFn:    opts.PlanMerge,
+		mergeFn:        opts.Merge,
 		promote:        opts.Promote,
 		loadAgentSpine: opts.LoadAgentSpine,
 		branch:         opts.Branch,

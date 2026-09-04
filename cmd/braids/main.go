@@ -45,6 +45,7 @@ usage:
                  [--workspace]           ...with a git worktree of its own
   braids agents --lane ID                list the subagents a conversation spawned
   braids promote --lane ID --agent ID    turn a subagent into its own conversation
+  braids merge --lane ID --from ID       join a branch back, as a new conversation
   braids version
 
 map flags:
@@ -94,6 +95,8 @@ func run(args []string, w io.Writer) error {
 		return cmdBranch(args[1:], out)
 	case "promote":
 		return cmdPromote(args[1:], out)
+	case "merge":
+		return cmdMerge(args[1:], out)
 	case "agents":
 		return cmdAgents(args[1:], out)
 	case "version":
@@ -218,6 +221,25 @@ func cmdMap(args []string, out *printer) error {
 		Source:    "claudecode",
 		IndexPath: dbPath,
 		LoadSpine: tui.SpineLoader(ctx, ix),
+		PlanMerge: func(base, incoming string) (int, error) {
+			req, err := mergeRequest(ctx, ix, base, incoming, "")
+			if err != nil {
+				return 0, err
+			}
+			plan, err := claudecode.New(root).PlanMerge(ctx, req)
+			return plan.IncomingTurns, err
+		},
+		Merge: func(base, incoming, name string) (string, error) {
+			req, err := mergeRequest(ctx, ix, base, incoming, name)
+			if err != nil {
+				return "", err
+			}
+			lane, err := claudecode.New(root).Merge(ctx, req)
+			if err != nil {
+				return "", err
+			}
+			return lane.ID, nil
+		},
 		WorkspaceOK: func(laneID string) error {
 			lane, err := findLane(ctx, ix, laneID)
 			if err != nil {
@@ -641,6 +663,92 @@ func cmdAgents(args []string, out *printer) error {
 		return fmt.Errorf("write agents: %w", err)
 	}
 	return out.Err()
+}
+
+func cmdMerge(args []string, out *printer) error {
+	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
+	baseRef := fs.String("lane", "", "conversation to carry on from")
+	fromRef := fs.String("from", "", "branch whose turns are brought over")
+	name := fs.String("name", "", "name for the merged conversation")
+	dry := fs.Bool("plan", false, "report what would be carried over, and stop")
+	db := fs.String("db", "", "index location")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *baseRef == "" || *fromRef == "" {
+		return errors.New("merge needs --lane and --from")
+	}
+	dbPath, err := resolveDB(*db)
+	if err != nil {
+		return err
+	}
+	ix, err := index.Open(dbPath)
+	if err != nil {
+		return err
+	}
+	defer ix.Close() //nolint:errcheck // read-only
+
+	ctx := context.Background()
+	base, incoming, err := twoLanes(ctx, ix, *baseRef, *fromRef)
+	if err != nil {
+		return err
+	}
+	root, err := claudecode.DefaultRoot()
+	if err != nil {
+		return err
+	}
+	src := claudecode.New(root)
+	req := store.MergeRequest{Base: base.Lane, Incoming: incoming.Lane, Name: *name}
+
+	plan, err := src.PlanMerge(ctx, req)
+	if err != nil {
+		return err
+	}
+	out.printf("%s (%d turns) + %d turns from %s · %d records already shared\n",
+		orDash(base.Title), plan.BaseTurns, plan.IncomingTurns, orDash(incoming.Title), plan.Shared)
+	if *dry {
+		return out.Err()
+	}
+
+	merged, err := src.Merge(ctx, req)
+	if err != nil {
+		return err
+	}
+	if _, err := ix.Sync(ctx, src); err != nil {
+		return err
+	}
+	out.printf("  new conversation %s\n  resume with: claude --resume %s\n", merged.ID, merged.ID)
+	return out.Err()
+}
+
+// mergeRequest resolves both sides of a merge.
+func mergeRequest(ctx context.Context, ix *index.Index, base, incoming, name string) (store.MergeRequest, error) {
+	first, second, err := twoLanes(ctx, ix, base, incoming)
+	if err != nil {
+		return store.MergeRequest{}, err
+	}
+	return store.MergeRequest{Base: first.Lane, Incoming: second.Lane, Name: name}, nil
+}
+
+// twoLanes resolves a pair of conversations by ID prefix.
+func twoLanes(ctx context.Context, ix *index.Index, a, b string) (index.LaneInfo, index.LaneInfo, error) {
+	first, err := findLane(ctx, ix, a)
+	if err != nil {
+		return index.LaneInfo{}, index.LaneInfo{}, err
+	}
+	second, err := findLane(ctx, ix, b)
+	if err != nil {
+		return index.LaneInfo{}, index.LaneInfo{}, err
+	}
+	return first, second, nil
+}
+
+// orDash keeps an unnamed conversation readable in a sentence.
+func orDash(s string) string {
+	if s == "" {
+		return "(unnamed)"
+	}
+	return s
 }
 
 // agentSpine reads a subagent's own transcript so it can be looked at before

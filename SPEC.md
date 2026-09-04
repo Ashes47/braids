@@ -57,6 +57,7 @@ Every design decision below rests on something measured on this machine
 | …but not fork *direction* | A fork rewrites `sessionId` throughout and records no origin; timestamps are copied too, so nothing in the file says which came first |
 | File birth time does say | Demo tree: root 23:21:00 → fork 23:21:20 → fork 23:21:39 → fork 23:21:49, all correct. APFS reports it; Linux may not |
 | `parentUuid` names bookkeeping, not turns | A message's parent is usually an `attachment`; resolving through them is what makes a chain reconstruct at all |
+| Merge works end to end | ROOT, STEM, TRUNK spliced with LEAFA, LEAFB resumed as one linear conversation holding all five |
 | Worktree branches work end to end | `--worktree` put a resumed branch in `.claude/worktrees/<name>` on its own git branch; two of them edited the same file with neither touching the other or the main tree |
 | Work products dwarf conversations | 3.5 GB of scratch and job records against 365 MB of transcript, all of it in two conversations |
 | Job directories use the short ID | `~/.claude/jobs/9419fd9c`, not the full session UUID the transcript is filed under |
@@ -584,8 +585,26 @@ Topology reassembles itself, because forks are detected by shared uuids.
 **Promote a subagent.** Set `isSidechain: false`, rewrite `sessionId`, drop
 `agentId`, write as a top-level file.
 
-**Merge (later).** Splice a sibling's unique nodes onto the current leaf with
-fresh uuids. Real messages, not a summary. Gated behind a preview.
+**Merge.** `m` on a branch in the spine joins it back, as a **new** conversation
+holding the base in full and then the branch's own turns. Neither original is
+touched — a test hashes both before and after.
+
+It is a splice of real messages, not a summary of them: the turns that happened
+on the branch are carried over as they were written. Anthropic's own request for
+this concedes merge can only ever be summary injection; at the file layer it
+does not have to be.
+
+Carried records are given fresh IDs. Reusing them would leave a conversation
+sharing message IDs with the branch, which is precisely what braids reads as a
+fork — the merged lane would draw as a branch of the thing it merged.
+
+**A merge is never one keystroke.** It is the only action that combines two
+histories, so `m` reports what it would carry over and waits: *merge try option
+c into this? 14 turns would be carried over · enter yes · esc no*. Fourteen
+turns and one turn are different decisions.
+
+Verified end to end: a conversation of ROOT, STEM, TRUNK merged with a branch of
+LEAFA, LEAFB resumed as `ROOT, STEM, TRUNK, LEAFA, LEAFB`.
 
 **Continue a conversation.** `y` copies `claude --resume <id> --name <title>`
 through the terminal's own copy escape (OSC 52), so it works over SSH with no
@@ -746,7 +765,8 @@ needs-you — are declared as optional `Capabilities`, never assumed.
 9. ~~**Housekeeping.**~~ **Done**: archive, delete to a bin, and a bin you can
    browse and recover from. Multi-select, the filtered sweep and reclaiming job
    artifacts remain.
-10. **Merge.** Splice with preview.
+10. ~~**Merge.**~~ **Done**: a splice of real turns into a new conversation,
+    behind a preview of what it would carry over.
 
 Steps 1–2 are already a tool worth opening.
 

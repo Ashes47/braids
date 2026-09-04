@@ -5,7 +5,7 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 PKGS    := ./...
 
-.PHONY: all build install run reindex test race lint vet fmt tidy cover clean ci
+.PHONY: all build install run reindex test race lint vet fmt tidy cover clean ci site site-build
 
 all: build
 
@@ -52,6 +52,19 @@ lint:
 
 tidy:
 	$(GO) mod tidy && git diff --exit-code go.mod go.sum
+
+# site serves braids.chat locally at http://localhost:8787. The page is one
+# static file with no build step, so this is a plain file server — the same
+# thing GitHub Pages does.
+site: site/index.html
+	@echo "braids.chat -> http://localhost:8787  (ctrl-c to stop)"
+	@python3 -m http.server 8787 --directory site
+
+# site-build regenerates the page, including the screenshots. They are real
+# braids output taken against a fake ~/.claude, never drawn by hand.
+site-build: install
+	python3 scripts/demo.py --out /tmp/braids-demo --frames site/frames --width 88 		--braids "$(shell go env GOPATH)/bin/braids" >/dev/null
+	python3 site/build.py
 
 clean:
 	rm -f $(BIN) coverage.out

@@ -1,8 +1,10 @@
- Source:         claudecode
+ Source:         claudecode                                <j/k>   down / up
  Index:          ~/.braids/index.db
- Lanes:          6
- Waiting on you: 4
- Hooks:          reporting
+ Lanes:          6                                         </>     search
+ Waiting on you: 4                                         <f>     filter list
+ Hooks:          reporting                                 <a>     toggle archive
+                                                           <r>     rename
+                                                           <q>     quit
 ╭─ Conversations(all)[6] ──────────────────────────────────────────────────────────────╮
 │  CONVERSATION                   FORK    TURNS      SIZE       WORK    AGE      STATUS│
 │ ● checkout-flow                            24      6 kB    1004 kB     8m  unanswered│

@@ -129,9 +129,18 @@ ul.plain li:last-child { border-bottom:none; }
 ul.plain li::before { content:"—"; position:absolute; left:0; color:var(--accent); }
 ul.plain li strong { color:var(--ink); font-weight:600; }
 
-footer { border-top:1px solid var(--line); padding:38px 0 56px; color:var(--faint); font-size:14px; }
+footer { border-top:1px solid var(--line); padding:42px 0 56px; color:var(--faint); font-size:14px; }
 footer .row { display:flex; flex-wrap:wrap; gap:26px; align-items:baseline; }
 footer .spacer { flex:1; }
+footer .footcols { margin-top:0; gap:26px; }
+footer .footcols > div { display:flex; flex-direction:column; gap:7px; }
+footer h5 {
+  margin:0 0 5px; font-family:var(--mono); font-size:11.5px; font-weight:500;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--dim);
+}
+footer .footcols a { color:var(--faint); }
+footer .footcols a:hover { color:var(--ink); text-decoration:none; }
+footer .bottom { margin-top:34px; padding-top:20px; border-top:1px solid var(--line); font-size:13px; }
 @media (max-width:640px) {
   figure.frame pre { font-size:9.5px; }
   header { padding:44px 0 0; }
@@ -148,6 +157,7 @@ footer .spacer { flex:1; }
   <a class="link" href="#commands">Commands</a>
   <a class="link" href="docs/">Docs</a>
   <a class="link" href="https://github.com/Ashes47/braids">GitHub</a>
+  <a class="link" href="#star">★ Star</a>
 </div></nav>
 
 <header><div class="wrap">
@@ -186,11 +196,13 @@ footer .spacer { flex:1; }
     left at. The state column is the part you actually scan: who is owed
     something, and by whom.
   </p>
-  <figure class="frame"><pre> Source:         claudecode
+  <figure class="frame"><pre> Source:         claudecode                                &lt;j/k&gt;   down / up
  Index:          ~/.braids/index.db
- Lanes:          6
- Waiting on you: 4
- Hooks:          reporting
+ Lanes:          6                                         &lt;/&gt;     search
+ Waiting on you: 4                                         &lt;f&gt;     filter list
+ Hooks:          reporting                                 &lt;a&gt;     toggle archive
+                                                           &lt;r&gt;     rename
+                                                           &lt;q&gt;     quit
 ╭─ Conversations(all)[6] ──────────────────────────────────────────────────────────────╮
 │  CONVERSATION                   FORK    TURNS      SIZE       WORK    AGE      STATUS│
 │ ● checkout-flow                            24      6 kB    1004 kB     8m  unanswered│
@@ -256,7 +268,7 @@ footer .spacer { flex:1; }
   <figure class="frame"><pre> Query:    lock                                                 &lt;↵&gt;     open the result
  Scope:    every conversation                                   &lt;tab&gt;   change scope
  Hits:     9                                                    &lt;↑ / ↓&gt; down / up
- Took:     285µs                                                &lt;esc&gt;   back
+ Took:     325µs                                                &lt;esc&gt;   back
 ╭─ Search(everywhere)[9] ──────────────────────────────────────────────────────────────╮
 │ TYPE   WHERE                     TURN KIND        MATCH                              │
 │ convo  index-contention            t2 Bash        {&quot;command&quot;: &quot;counting [lock] waits…│
@@ -379,6 +391,19 @@ footer .spacer { flex:1; }
   </p>
 </div></section>
 
+<section id="star"><div class="wrap">
+  <h2><span class="kicker">If it is useful</span>Star the repo</h2>
+  <p class="sub">
+    braids is one person's tool, made public because the problem is not one
+    person's. If it saves you a terminal, a star is how the next person finds
+    it — and an issue is how it gets better.
+  </p>
+  <div class="cta">
+    <a class="btn primary" href="https://github.com/Ashes47/braids">⭐ Star braids on GitHub</a>
+    <a class="btn" href="https://github.com/Ashes47/braids/issues/new/choose">Open an issue</a>
+  </div>
+</div></section>
+
 <section><div class="wrap">
   <h2><span class="kicker">Install</span>One binary</h2>
 <pre class="sh"><span class="c"># homebrew</span>
@@ -404,14 +429,43 @@ braids         <span class="c"># open the map</span>
   </p>
 </div></section>
 
-<footer><div class="wrap"><div class="row">
-  <span>braids — MIT licensed</span>
-  <span class="spacer"></span>
-  <a href="docs/">Docs</a>
-  <a href="https://github.com/Ashes47/braids">GitHub</a>
-  <a href="https://github.com/Ashes47/braids/blob/main/SPEC.md">Design notes</a>
-  <a href="https://github.com/Ashes47/braids/issues">Issues</a>
-</div></div></footer>
+<footer><div class="wrap">
+  <div class="cols footcols">
+    <div>
+      <h5>braids</h5>
+      <a href="#what">What it does</a>
+      <a href="#local">Local</a>
+      <a href="#commands">Commands</a>
+      <a href="#star">Star it</a>
+    </div>
+    <div>
+      <h5>Read</h5>
+      <a href="docs/">Documentation</a>
+      <a href="https://github.com/Ashes47/braids/blob/main/SPEC.md">Design notes</a>
+      <a href="https://github.com/Ashes47/braids/blob/main/CONTRIBUTING.md">Contributing</a>
+      <a href="https://github.com/Ashes47/braids/blob/main/SECURITY.md">Security</a>
+    </div>
+    <div>
+      <h5>Code</h5>
+      <a href="https://github.com/Ashes47/braids">Repository</a>
+      <a href="https://github.com/Ashes47/braids/issues">Issues</a>
+      <a href="https://github.com/Ashes47/braids/releases">Releases</a>
+      <a href="https://braids.chat/install.sh">install.sh</a>
+    </div>
+    <div>
+      <h5>Anuj Verma</h5>
+      <a href="https://github.com/Ashes47">github.com/Ashes47</a>
+      <a href="https://x.com/devanujhere">x.com/devanujhere</a>
+      <a href="mailto:ashes4799@gmail.com">ashes4799@gmail.com</a>
+    </div>
+  </div>
+  <div class="row bottom">
+    <span>MIT licensed. Built by
+      <a href="https://x.com/devanujhere">@devanujhere</a>.</span>
+    <span class="spacer"></span>
+    <span>braids never talks to a model. It arranges the conversations you have with one.</span>
+  </div>
+</div></footer>
 
 <script>
 function copyCmd(button) {

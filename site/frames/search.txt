@@ -1,7 +1,7 @@
  Query:    lock                                                 <↵>     open the result
  Scope:    every conversation                                   <tab>   change scope
  Hits:     9                                                    <↑ / ↓> down / up
- Took:     285µs                                                <esc>   back
+ Took:     325µs                                                <esc>   back
 ╭─ Search(everywhere)[9] ──────────────────────────────────────────────────────────────╮
 │ TYPE   WHERE                     TURN KIND        MATCH                              │
 │ convo  index-contention            t2 Bash        {"command": "counting [lock] waits…│

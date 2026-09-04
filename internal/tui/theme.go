@@ -97,7 +97,10 @@ func NewTheme(isDark, ascii bool) Theme {
 		Alive:  lipgloss.NewStyle().Foreground(alive),
 		Accent: lipgloss.NewStyle().Foreground(accent),
 		Column: lipgloss.NewStyle().Foreground(accent).Bold(true),
-		Urgent: lipgloss.NewStyle().Foreground(selFg).Background(accent).Bold(true),
+		// Colour and weight, not a filled block: a background reads as a box
+		// drawn around the row, which is heavier than the rest of the screen
+		// and fights the panel it sits inside.
+		Urgent: lipgloss.NewStyle().Foreground(accent).Bold(true),
 		Border: lipgloss.NewStyle().Foreground(faint),
 		Label:  lipgloss.NewStyle().Foreground(muted),
 		Value:  lipgloss.NewStyle().Foreground(fg),

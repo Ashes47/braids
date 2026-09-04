@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -517,5 +518,57 @@ func TestAnArchivedRowReadsAsSetAside(t *testing.T) {
 	}
 	if active := rowFor(t, out, "still active"); strings.Contains(active, "archived") {
 		t.Errorf("a live row must not: %q", active)
+	}
+}
+
+// styleOf pulls the escape sequence a row draws its name with.
+func styleOf(t *testing.T, m Model, laneID string) string {
+	t.Helper()
+	for _, r := range m.visible {
+		if r.node.Lane.ID != laneID {
+			continue
+		}
+		_, styled := m.rowParts(r)
+		codes := regexp.MustCompile(`\x1b\[[0-9;]*m`).FindAllString(styled, -1)
+		if len(codes) < 3 {
+			t.Fatalf("row %s has too few styled parts", laneID)
+		}
+		return codes[2] // gutter, glyph, then the name
+	}
+	t.Fatalf("no row for %s", laneID)
+	return ""
+}
+
+func TestRowEmphasis(t *testing.T) {
+	blocked := laneInfo("a", "blocked", "app", 5, 5*time.Second)
+	blocked.Activity = model.Activity{LastRole: model.RoleAssistant, LastWasToolCall: true}
+	away := laneInfo("b", "put away", "app", 5, time.Hour)
+	away.Activity = model.Activity{LastRole: model.RoleAssistant}
+	plain := laneInfo("c", "ordinary", "app", 5, time.Hour)
+	plain.Activity = model.Activity{LastRole: model.RoleAssistant}
+
+	m, _ := keepingModel(t, []index.LaneInfo{blocked, away, plain})
+	m.archived = map[string]bool{"b": true}
+	m.liveFn = func() (map[string]hooks.Event, error) {
+		return map[string]hooks.Event{"a": {Name: hooks.PermissionRequest, At: blocked.Updated}}, nil
+	}
+	m.refreshLive()
+	m.showArchived = true
+	m.apply()
+
+	urgent, dull, ordinary := styleOf(t, m, "a"), styleOf(t, m, "b"), styleOf(t, m, "c")
+	if urgent == ordinary {
+		t.Error("a blocked conversation should not be drawn like an ordinary one")
+	}
+	if dull == ordinary {
+		t.Error("an archived conversation should be duller than an ordinary one")
+	}
+	// Colour and weight, not a filled block: a background reads as a box drawn
+	// round the row and is heavier than anything else on the screen.
+	if strings.Contains(urgent, "48;2;") {
+		t.Errorf("the urgent style paints a background: %q", urgent)
+	}
+	if !strings.Contains(urgent, "1;") {
+		t.Errorf("the urgent style is not bold: %q", urgent)
 	}
 }

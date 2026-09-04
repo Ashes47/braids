@@ -996,6 +996,15 @@ func (m Model) rowParts(r row) (plain, styled string) {
 		titleWidth = 4
 	}
 	name := padRight(truncate(title, titleWidth), titleWidth)
+	nameStyle := m.theme.Title
+	switch {
+	case archived:
+		// Dull, not invisible: an archived conversation is still readable, it
+		// is just no longer part of what is being worked on.
+		nameStyle = m.theme.Dim
+	case state == stateNeedsYou:
+		nameStyle = m.theme.Urgent
+	}
 
 	rail := ""
 	if r.prefix != "" {
@@ -1003,7 +1012,7 @@ func (m Model) rowParts(r row) (plain, styled string) {
 	}
 	plain = " " + r.prefix + mark + " " + name + suffix + " " + rightPlain
 	styled = " " + rail + glyphStyle.Render(mark) + " " +
-		m.theme.Title.Render(name) + m.theme.Faint.Render(suffix) + " " + rightStyled
+		nameStyle.Render(name) + m.theme.Faint.Render(suffix) + " " + rightStyled
 	return plain, styled
 }
 

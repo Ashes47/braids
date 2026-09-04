@@ -707,8 +707,8 @@ column in the sweep screen.
 
 - Colour carries **status only** — never identity. Identity is position and name.
 - **The scale is steep, and the top of it is rare.** A session stopped and
-  waiting on a person is the only thing drawn loudly — reversed accent, its own
-  mark `◆`, a bold name — because it is the only thing that cannot proceed
+  waiting on a person is the only thing drawn loudly — the accent, its own mark
+  `◆`, a bold name — because it is the only thing that cannot proceed
   without them. Anything alive is green. An open loop is accent. Something
   merely owed a reply is plain text, because there are usually a great many of
   those and a screen where everything is urgent says nothing. This was wrong at
@@ -717,7 +717,11 @@ column in the sweep screen.
 - **Shape, not only colour, at the top of the scale.** In a long list a
   different glyph carries further than a different hue, and it survives a
   terminal whose palette is not what braids assumed.
-- **An archived row reads as set aside** while shown: `○`, dimmed throughout,
+- **No filled backgrounds outside the cursor.** A background reads as a box
+  drawn around a row, which is heavier than anything else on screen and fights
+  the panel it sits in. Emphasis is colour and weight.
+- **An archived row reads as set aside** while shown: `○`, its name dulled but
+  still readable,
   and its status column says `archived` rather than whatever it was doing when
   it was put away, which is no longer the useful thing about it.
 - Idle age is always right-aligned; it is the field people scan.

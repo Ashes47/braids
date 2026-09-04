@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,7 +77,9 @@ environment:
   BRAIDS_SPAWN     command template for 'o' (open a terminal), understanding
                    {cmd} {name} {dir}. tmux and iTerm2 are driven directly
                    without one; elsewhere 'o' copies the command instead.
-                   e.g. tmux new-window -c {dir} -n {name} '{cmd}'
+                   e.g. tmux new-window -c {dir} -n {name} {cmd}
+                   Each value is shell-quoted when substituted, so do not put
+                   quotes around a placeholder yourself.
 `
 
 func main() {
@@ -264,6 +267,27 @@ func openIndex(dbFlag string) (*index.Index, error) {
 	if err != nil {
 		return nil, err
 	}
+	return openExisting(path)
+}
+
+// createIndex opens the index, making it if this is the first run. Only
+// `braids index` may do this.
+func createIndex(dbFlag string) (*index.Index, error) {
+	path, err := resolveDB(dbFlag)
+	if err != nil {
+		return nil, err
+	}
+	return index.Open(path)
+}
+
+// openExisting opens an index that has to be there already. Only `braids index`
+// creates one: everything else reads, and a read that quietly creates an empty
+// database answers a typo in --db with "nothing found" — a wrong answer wearing
+// the shape of a right one — while leaving a stray file where the typo pointed.
+func openExisting(path string) (*index.Index, error) {
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("no index at %s (run: braids index)", path)
+	}
 	return index.Open(path)
 }
 
@@ -283,7 +307,7 @@ func cmdMap(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
-	ix, err := index.Open(dbPath)
+	ix, err := openExisting(dbPath)
 	if err != nil {
 		return err
 	}
@@ -464,7 +488,7 @@ func cmdIndex(args []string, out *printer) error {
 			return err
 		}
 	}
-	ix, err := openIndex(*db)
+	ix, err := createIndex(*db)
 	if err != nil {
 		return err
 	}
@@ -575,7 +599,7 @@ func cmdBranch(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
-	ix, err := index.Open(dbPath)
+	ix, err := openExisting(dbPath)
 	if err != nil {
 		return err
 	}
@@ -708,7 +732,7 @@ func cmdPromote(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
-	ix, err := index.Open(dbPath)
+	ix, err := openExisting(dbPath)
 	if err != nil {
 		return err
 	}
@@ -853,7 +877,7 @@ func cmdMerge(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
-	ix, err := index.Open(dbPath)
+	ix, err := openExisting(dbPath)
 	if err != nil {
 		return err
 	}

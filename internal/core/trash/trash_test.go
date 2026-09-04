@@ -184,3 +184,27 @@ func TestPurgeIsFinal(t *testing.T) {
 		t.Error("a purged entry must not be recoverable")
 	}
 }
+
+// Purge deletes a whole tree, and filepath.Join resolves ".." straight out of
+// the bin. The guard is at the destructive call, so a caller cannot reach past
+// it however the ID was obtained.
+func TestBinRefusesAnIDThatIsNotOneOfItsOwn(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(root, "keep")
+	if err := os.MkdirAll(filepath.Join(outside, "work"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	bin := New(filepath.Join(root, "bin"))
+
+	for _, id := range []string{"..", "../keep", "../..", "", ".", "a/b", "/etc"} {
+		if err := bin.Purge(id); err == nil {
+			t.Errorf("Purge(%q) was allowed", id)
+		}
+		if _, err := bin.RestoreByID(id); err == nil {
+			t.Errorf("RestoreByID(%q) was allowed", id)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(outside, "work")); err != nil {
+		t.Errorf("a directory outside the bin was removed: %v", err)
+	}
+}

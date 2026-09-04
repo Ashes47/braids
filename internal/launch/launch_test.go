@@ -2,7 +2,9 @@ package launch
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -103,5 +105,35 @@ func TestQuotingCannotBreakTheScript(t *testing.T) {
 func TestAppleScriptQuote(t *testing.T) {
 	if got := appleScriptQuote(`a "b" c\d`); got != `a \"b\" c\\d` {
 		t.Errorf("appleScriptQuote = %q", got)
+	}
+}
+
+// A conversation's title and directory are data read out of a transcript. They
+// reach a template through `sh -c`, so they are quoted before they get there:
+// a title of `x; touch pwned #` is a name, never a command.
+func TestTemplateValuesCannotBecomeCommands(t *testing.T) {
+	for _, tc := range []struct{ name, template string }{
+		{"name", "true {name}"},
+		{"dir", "true {dir}"},
+		{"cmd", "true {cmd}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mark := filepath.Join(t.TempDir(), "pwned")
+			hostile := "x; touch " + mark + " #"
+			launcher, _ := Detect(func(k string) string {
+				if k == "BRAIDS_SPAWN" {
+					return tc.template
+				}
+				return ""
+			})
+			if launcher == nil {
+				t.Fatal("no launcher for BRAIDS_SPAWN")
+			}
+			// Whichever placeholder is under test carries the hostile string.
+			_ = launcher(context.Background(), hostile, hostile, hostile)
+			if _, err := os.Stat(mark); err == nil {
+				t.Errorf("%s reached the shell unquoted: it ran a command", tc.name)
+			}
+		})
 	}
 }

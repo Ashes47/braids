@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -115,6 +116,9 @@ func (b *Bin) List() ([]Entry, error) {
 
 // Purge removes an entry for good.
 func (b *Bin) Purge(id string) error {
+	if err := validID(id); err != nil {
+		return err
+	}
 	if err := os.RemoveAll(filepath.Join(b.dir, id)); err != nil {
 		return fmt.Errorf("purge %s: %w", id, err)
 	}
@@ -186,6 +190,9 @@ func (b *Bin) Restore(entry Entry) error {
 
 // RestoreByID brings back an entry the bin already holds.
 func (b *Bin) RestoreByID(id string) (Entry, error) {
+	if err := validID(id); err != nil {
+		return Entry{}, err
+	}
 	entry, err := readManifest(filepath.Join(b.dir, id))
 	if err != nil {
 		return Entry{}, err
@@ -209,4 +216,16 @@ func sizeOf(path string, info fs.FileInfo) int64 {
 		return nil
 	})
 	return total
+}
+
+// validID refuses anything that is not one plain directory name inside the bin.
+// Purge deletes a whole tree, and filepath.Join happily resolves ".." out of the
+// bin altogether — so the guard belongs here, at the destructive call, rather
+// than in whichever caller happens to pass an ID today.
+func validID(id string) error {
+	if id == "" || id != filepath.Base(id) || id == "." || id == ".." ||
+		strings.ContainsRune(id, filepath.Separator) {
+		return fmt.Errorf("not a bin entry: %q", id)
+	}
+	return nil
 }

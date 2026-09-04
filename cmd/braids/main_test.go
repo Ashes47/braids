@@ -418,3 +418,35 @@ func TestVersionCarriesTheSmallMark(t *testing.T) {
 		t.Error("version is showing the full mark, which is wider than it needs")
 	}
 }
+
+// Only `braids index` may create an index. A read that quietly creates an empty
+// one answers a mistyped --db with "nothing found" — a wrong answer shaped like
+// a right one — and leaves a database behind where the typo pointed.
+func TestOnlyIndexCreatesTheIndex(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "absent.db")
+
+	for _, args := range [][]string{
+		{"search", "--db", missing, "anything"},
+		{"lanes", "--db", missing},
+		{"agents", "--lane", "x", "--db", missing},
+		{"map", "--print", "--db", missing},
+	} {
+		err := run(args, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "no index at") {
+			t.Errorf("run(%v) = %v, want it to refuse a missing index", args, err)
+		}
+		if _, statErr := os.Stat(missing); statErr == nil {
+			t.Fatalf("run(%v) created %s", args, missing)
+		}
+	}
+
+	// And the one command that is allowed to make it, does.
+	runCmd(t, "index", "--root", fixtureRoot(t), "--db", missing)
+	if _, err := os.Stat(missing); err != nil {
+		t.Fatalf("index did not create the database: %v", err)
+	}
+	if out := runCmd(t, "lanes", "--db", missing); !strings.Contains(out, "mount density") {
+		t.Errorf("lanes after index = %q", out)
+	}
+}

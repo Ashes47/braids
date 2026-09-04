@@ -83,12 +83,19 @@ end tell`
 
 // fromTemplate runs a user-supplied command through a shell, because a template
 // is only useful if it can use shell syntax.
+//
+// Every value braids substitutes is shell-quoted first. A conversation's title
+// and working directory are data read out of a transcript, not something braids
+// chose, and a title of `x; rm -rf ~ #` dropped unquoted into `sh -c` is a
+// command, not a name. The template supplies the shell syntax; the values never
+// do. So a template must not put its own quotes around a placeholder — they are
+// already quoted.
 func fromTemplate(template string) Launcher {
 	return func(ctx context.Context, dir, name, command string) error {
 		expanded := strings.NewReplacer(
-			"{cmd}", command,
-			"{name}", name,
-			"{dir}", dir,
+			"{cmd}", shellQuote(command),
+			"{name}", shellQuote(name),
+			"{dir}", shellQuote(dir),
 		).Replace(template)
 		return run(ctx, "sh", "-c", expanded)
 	}

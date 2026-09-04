@@ -723,6 +723,14 @@ helper binary. `o` opens a terminal when `BRAIDS_SPAWN` names one — a template
 understanding `{cmd} {id} {name} {dir}` — and otherwise copies the command and
 says how to configure a launcher.
 
+A title and a working directory are data braids read out of a transcript, so
+every value substituted into that template is shell-quoted first: the template
+supplies the shell syntax and the values never do. Unquoted, a conversation
+called `x; rm -rf ~ #` is a command rather than a name, and pressing `o` runs
+it. For the same reason the bin refuses an entry ID that is not one plain
+directory name inside it — `Purge` removes a tree, and `filepath.Join` resolves
+`..` straight out of the bin.
+
 braids does not guess at a terminal. Terminals differ in whether they can be
 told to run a command at all, and the working directory matters: resuming from
 elsewhere files the transcript under a different project, so a lane carries the

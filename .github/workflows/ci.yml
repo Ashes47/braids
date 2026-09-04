@@ -44,6 +44,21 @@ jobs:
       # `make lint` runs are the same string in one place.
       - run: make lint
 
+  # A release config that is only exercised when a tag is pushed is a config
+  # that breaks when a tag is pushed.
+  release-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: check
+
   tidy:
     runs-on: ubuntu-latest
     steps:

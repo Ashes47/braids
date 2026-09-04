@@ -789,6 +789,19 @@ claude --resume <the id branch printed>
   without disturbing the conversation it is having now.
 </p>
 
+<h2 id="explain">Where did this file come from</h2>
+{sh("""
+braids explain internal/core/index/index.go --json
+""")}
+<p>
+  This joins two things braids and git each half know: git knows when a file
+  changed, braids knows what was being said in that directory at the time. For
+  each commit it names the conversations that were live in the window before
+  it, how many turns they had, and the last thing actually said, with the whole
+  lane id so the next command can use it.
+</p>
+{say("It does not claim the conversation caused the commit, and neither should anything reading it. What it offers is where to look, which is the honest thing braids can compute without reading a word of meaning.")}
+
 <h2 id="checks">Check before you rely on it</h2>
 {sh('''
 braids hooks --json    # .reporting says whether waiting states are trustworthy
@@ -886,6 +899,7 @@ REFERENCE = f"""
     ("braids agents", "list the subagents a conversation spawned"),
     ("braids work", "browse what a session wrote to disk"),
     ("braids memories", "what a project remembers, and what it has lost"),
+    ("braids explain FILE", "which conversations were live when this file last changed"),
     ("braids hooks", "install, remove or inspect the hook"),
     ("braids version", "the version, the commit, and how old this build is"),
     ("braids help", "everything, briefly"),
@@ -936,6 +950,12 @@ REFERENCE = f"""
     ("--name NAME", "name for the merged conversation"),
     ("--plan", "report what would come over, and stop"),
 ])}
+<h3>braids explain</h3>
+{table(["Flag", "What it does"], [
+    ("--limit N", "how many commits to look back over, default 5"),
+    ("--window D", "how long before a commit a turn still counts, default 3h"),
+])}
+
 <h3>braids promote, agents, work, memories, hooks</h3>
 {table(["Flag", "What it does"], [
     ("--lane ID", "promote, agents, work: the conversation"),

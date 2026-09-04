@@ -62,6 +62,8 @@ usage:
               [--orphans] [--reclaim]    ...or find and reclaim ownerless ones
   braids memories [--project NAME]       what a project remembers, and whether
                   [--root DIR]           the index still agrees with the files
+  braids explain FILE                    which conversations were live when
+                                         this file last changed
   braids promote --lane ID --agent ID    turn a subagent into its own conversation
   braids merge --lane ID --from ID       join a branch back, as a new conversation
   braids hooks [--install|--remove]      let sessions report when they block
@@ -147,6 +149,8 @@ func run(args []string, w io.Writer) error {
 		return cmdWork(args[1:], out)
 	case "memories":
 		return cmdMemories(args[1:], out)
+	case "explain":
+		return cmdExplain(args[1:], out)
 	case "version", "-v", "--version":
 		out.mark(brand.Small())
 		out.printf("braids %s (%s)\n", version, commit)
@@ -183,7 +187,7 @@ func run(args []string, w io.Writer) error {
 // dispatch above, so a command cannot be added without being offered here.
 var known = []string{
 	"map", "index", "search", "lanes", "branch", "agents", "work", "memories",
-	"promote", "merge", "hooks", "hook", "version", "help",
+	"explain", "promote", "merge", "hooks", "hook", "version", "help",
 }
 
 // nearest returns the command a mistyped name most likely meant, or an empty

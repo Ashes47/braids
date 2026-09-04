@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -777,16 +778,56 @@ type MessageRow struct {
 	Failed bool
 }
 
-// LaneMessages returns one lane's turns in file order.
-func (ix *Index) LaneMessages(ctx context.Context, laneID string) ([]MessageRow, error) {
+// LanesIn names the conversations that ran inside any of these directories.
+//
+// A lane records the working directory its session ran in, which is how braids
+// can ask what was being talked about while a repository was being changed. The
+// match is on the path prefix, so a session run in a subdirectory counts.
+//
+// It takes several directories because one repository can have several names.
+// git reports its root with symlinks resolved, and a transcript records the
+// path the shell was actually in: on macOS a repository under /tmp is
+// /private/tmp to one and /tmp to the other, and matching only one finds
+// nothing.
+func (ix *Index) LanesIn(ctx context.Context, dirs ...string) ([]LaneInfo, error) {
+	var (
+		where []string
+		args  []any
+		seen  = map[string]bool{}
+	)
+	for _, dir := range dirs {
+		dir = strings.TrimSuffix(dir, string(filepath.Separator))
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		where = append(where, "cwd = ?", "cwd LIKE ?")
+		args = append(args, dir, dir+string(filepath.Separator)+"%")
+	}
+	if len(where) == 0 {
+		return nil, nil
+	}
 	rows, err := ix.db.QueryContext(ctx,
-		`SELECT seq, msg_id, parent_id, role, at, preview, tools, failed
-		 FROM messages WHERE lane_id = ? ORDER BY seq`, laneID)
+		`SELECT id, COALESCE(title,''), COALESCE(project,''), COALESCE(cwd,''), path
+		 FROM lanes WHERE `+strings.Join(where, " OR ")+` ORDER BY updated DESC`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("read lane messages: %w", err)
+		return nil, fmt.Errorf("find lanes in %s: %w", strings.Join(dirs, ", "), err)
 	}
 	defer rows.Close() //nolint:errcheck // read-only
 
+	var out []LaneInfo
+	for rows.Next() {
+		var l LaneInfo
+		if err := rows.Scan(&l.ID, &l.Title, &l.Project, &l.Cwd, &l.Path); err != nil {
+			return nil, fmt.Errorf("scan lane: %w", err)
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// scanMessages reads the turn columns every message query selects.
+func scanMessages(rows *sql.Rows) ([]MessageRow, error) {
 	var out []MessageRow
 	for rows.Next() {
 		var r MessageRow
@@ -805,6 +846,63 @@ func (ix *Index) LaneMessages(ctx context.Context, laneID string) ([]MessageRow,
 		return nil, fmt.Errorf("iterate messages: %w", err)
 	}
 	return out, nil
+}
+
+// Around is what a conversation was doing in a window of time.
+type Around struct {
+	// Turns is everything that happened, tool calls and results included.
+	Turns int
+	// Spoke is the last turn in the window that said something, and Spoken
+	// says whether there was one. Two thirds of turns in a real history are
+	// tool calls and their results, which carry no text; quoting one of those
+	// back tells the reader nothing about what was being discussed.
+	Spoke  MessageRow
+	Spoken bool
+}
+
+// Around reports one lane's activity in a window, oldest bound first.
+//
+// Explaining a file asks what was being discussed around the time it changed,
+// which is a question about a slice of a conversation rather than all of it.
+// Reading a whole lane to answer it would mean 25,000 rows to look at forty.
+func (ix *Index) Around(ctx context.Context, laneID string, from, to time.Time) (Around, error) {
+	var a Around
+	if err := ix.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM messages WHERE lane_id = ? AND at >= ? AND at <= ?`,
+		laneID, from.Unix(), to.Unix()).Scan(&a.Turns); err != nil {
+		return Around{}, fmt.Errorf("count turns in window: %w", err)
+	}
+	if a.Turns == 0 {
+		return a, nil
+	}
+	rows, err := ix.db.QueryContext(ctx,
+		`SELECT seq, msg_id, parent_id, role, at, preview, tools, failed
+		 FROM messages WHERE lane_id = ? AND at >= ? AND at <= ? AND preview != ''
+		 ORDER BY at DESC LIMIT 1`, laneID, from.Unix(), to.Unix())
+	if err != nil {
+		return Around{}, fmt.Errorf("read last spoken turn: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only
+	spoken, err := scanMessages(rows)
+	if err != nil {
+		return Around{}, err
+	}
+	if len(spoken) == 1 {
+		a.Spoke, a.Spoken = spoken[0], true
+	}
+	return a, nil
+}
+
+// LaneMessages returns one lane's turns in file order.
+func (ix *Index) LaneMessages(ctx context.Context, laneID string) ([]MessageRow, error) {
+	rows, err := ix.db.QueryContext(ctx,
+		`SELECT seq, msg_id, parent_id, role, at, preview, tools, failed
+		 FROM messages WHERE lane_id = ? ORDER BY seq`, laneID)
+	if err != nil {
+		return nil, fmt.Errorf("read lane messages: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only
+	return scanMessages(rows)
 }
 
 // previewMax bounds the stored one-line summary of a turn.

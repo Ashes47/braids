@@ -154,6 +154,13 @@ file, and is refused while a session in that project is running.
 
 <img src="assets/frames/bin.png" alt="braids: the bin, holding a deleted file for 14 days" width="100%">
 
+**Explain.** `braids explain <file>` joins two things git and braids each half
+know: git knows when a file changed, braids knows what was being said in that
+directory at the time. For each commit it names the conversations that were live
+in the window before it and quotes the last thing actually said. It does not
+claim the conversation caused the commit, because it cannot know that: it offers
+where to look, which is the honest thing to compute without reading meaning.
+
 **Bin.** Deleting moves files aside with a manifest and a 14-day retention, so
 nothing you delete is gone the moment you regret it.
 
@@ -188,6 +195,8 @@ braids work    --lane ID [--path SUB]   browse a session's work products
 braids work    --orphans [--reclaim]    find, and reclaim, ownerless ones
 braids memories [--project NAME]        what a project remembers, and whether
                                         the index still agrees with the files
+braids explain FILE                     which conversations were live when
+                                        this file last changed
 braids branch  --lane ID --at TURN [--workspace]
 braids promote --lane ID --agent ID     turn a subagent into its own conversation
 braids merge   --lane ID --from ID [--plan]

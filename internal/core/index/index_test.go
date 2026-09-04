@@ -1093,3 +1093,105 @@ func TestUnreadableStaysQuietWhenNothingIsWrong(t *testing.T) {
 		t.Errorf("cried wolf over %d lanes", len(unreadable))
 	}
 }
+
+// LanesIn is a prefix match on a path, which is the kind of thing that
+// silently matches a sibling: /src/app must not answer for /src/apples.
+func TestLanesInMatchesADirectoryAndNotItsNeighbour(t *testing.T) {
+	ctx := context.Background()
+	ix := openIndex(t)
+	src := newFixture()
+	now := time.Unix(1_700_000_000, 0)
+	src.lanes = []model.Lane{
+		{ID: "here", Source: "fake", Path: "/t/here.jsonl", Cwd: "/src/app", Updated: now},
+		{ID: "below", Source: "fake", Path: "/t/below.jsonl", Cwd: "/src/app/internal", Updated: now},
+		{ID: "sibling", Source: "fake", Path: "/t/sib.jsonl", Cwd: "/src/apples", Updated: now},
+		{ID: "elsewhere", Source: "fake", Path: "/t/else.jsonl", Cwd: "/other", Updated: now},
+		{ID: "nowhere", Source: "fake", Path: "/t/no.jsonl", Cwd: "", Updated: now},
+	}
+	src.messages = map[string][]model.Message{}
+	if _, err := ix.Rebuild(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ix.LanesIn(ctx, "/src/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, l := range got {
+		found[l.ID] = true
+	}
+	if !found["here"] || !found["below"] {
+		t.Errorf("LanesIn missed the directory or one below it: %v", found)
+	}
+	if found["sibling"] {
+		t.Error("/src/app matched /src/apples")
+	}
+	if found["elsewhere"] || found["nowhere"] {
+		t.Errorf("LanesIn reached outside the directory: %v", found)
+	}
+
+	// A trailing separator is the same directory.
+	if slashed, err := ix.LanesIn(ctx, "/src/app/"); err != nil || len(slashed) != len(got) {
+		t.Errorf("a trailing slash changed the answer: %d vs %d (%v)", len(slashed), len(got), err)
+	}
+
+	// Several names for one repository, deduped, and no query at all for none.
+	both, err := ix.LanesIn(ctx, "/src/app", "/src/app", "/other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(both) != 3 {
+		t.Errorf("matching two directories found %d lanes, want 3", len(both))
+	}
+	if none, err := ix.LanesIn(ctx); err != nil || none != nil {
+		t.Errorf("LanesIn with no directories = %v, %v", none, err)
+	}
+}
+
+// Around counts everything that happened but quotes only what was said, since
+// two thirds of a real history is tool calls carrying no text.
+func TestAroundCountsEverythingAndQuotesWhatWasSaid(t *testing.T) {
+	ctx := context.Background()
+	ix := openIndex(t)
+	base := time.Unix(1_700_000_000, 0)
+	src := &fakeSource{
+		lanes: []model.Lane{{ID: "l", Source: "fake", Path: "/t/l.jsonl", Updated: base}},
+		messages: map[string][]model.Message{"l": {
+			{ID: "m1", LaneID: "l", Role: model.RoleUser, At: base,
+				Parts: []model.Part{{Kind: model.PartText, Text: "the first thing said"}}},
+			{ID: "m2", LaneID: "l", ParentID: "m1", Role: model.RoleUser, At: base.Add(time.Minute),
+				Parts: []model.Part{{Kind: model.PartText, Text: "the last thing said"}}},
+			{ID: "m3", LaneID: "l", ParentID: "m2", Role: model.RoleAssistant, At: base.Add(2 * time.Minute),
+				Parts: []model.Part{{Kind: model.PartToolUse, Tool: "Bash", Text: "go build ./..."}}},
+			{ID: "m4", LaneID: "l", ParentID: "m3", Role: model.RoleUser, At: base.Add(time.Hour),
+				Parts: []model.Part{{Kind: model.PartText, Text: "much later, outside the window"}}},
+		}},
+	}
+	if _, err := ix.Rebuild(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ix.Around(ctx, "l", base.Add(-time.Minute), base.Add(3*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Turns != 3 {
+		t.Errorf("counted %d turns in the window, want all 3 including the tool call", got.Turns)
+	}
+	if !got.Spoken {
+		t.Fatal("nothing was quoted, though two turns had text")
+	}
+	if !strings.Contains(got.Spoke.Preview, "the last thing said") {
+		t.Errorf("quoted %q, want the last turn that said something", got.Spoke.Preview)
+	}
+
+	// A window with nothing in it says so rather than reaching outside itself.
+	empty, err := ix.Around(ctx, "l", base.Add(10*time.Minute), base.Add(20*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.Turns != 0 || empty.Spoken {
+		t.Errorf("an empty window reported %+v", empty)
+	}
+}

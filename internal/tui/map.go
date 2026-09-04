@@ -918,8 +918,17 @@ func (m Model) rowParts(r row) (plain, styled string) {
 	state := stateOf(lane, m.liveFor(lane.ID), m.now())
 	glyphStyle := m.styleFor(lane, state)
 	mark := g.Lane
-	if m.archived[lane.ID] {
-		// Archived rows read as set aside rather than active, even while shown.
+	if state == stateNeedsYou {
+		// A different shape as well as a different colour: the one row that
+		// cannot proceed without you should be findable at a glance, and in a
+		// long list shape carries further than hue.
+		mark = g.Needs
+	}
+	// An archived row reads as set aside even while shown: dimmed throughout
+	// and named as archived rather than by whatever it was doing when it was
+	// put away, which is no longer the useful thing about it.
+	archived := m.archived[lane.ID]
+	if archived {
 		mark, glyphStyle = g.Archived, m.theme.Faint
 	}
 
@@ -971,9 +980,13 @@ func (m Model) rowParts(r row) (plain, styled string) {
 	rightPlain += age
 	rightStyled += m.theme.Dim.Render(age)
 	if layout.status {
-		cell := padLeft(string(state), statusWidth)
+		shown, style := string(state), m.styleFor(lane, state)
+		if archived {
+			shown, style = "archived", m.theme.Faint
+		}
+		cell := padLeft(shown, statusWidth)
 		rightPlain += "  " + cell
-		rightStyled += "  " + m.styleFor(lane, state).Render(cell)
+		rightStyled += "  " + style.Render(cell)
 	}
 
 	// row = " " + prefix + glyph + " " + title + suffix + " " + right,

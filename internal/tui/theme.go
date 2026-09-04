@@ -35,13 +35,14 @@ type Glyphs struct {
 	Agent    string
 	Seam     string
 	Failed   string
+	Needs    string
 }
 
 func glyphsFor(ascii bool) Glyphs {
 	if ascii {
-		return Glyphs{Lane: "*", Archived: "o", Branch: "|-", Last: "`-", Pipe: "|  ", Blank: "   ", Fork: "<", Run: "~", Agent: "@", Seam: "=", Failed: "!"}
+		return Glyphs{Lane: "*", Archived: "o", Branch: "|-", Last: "`-", Pipe: "|  ", Blank: "   ", Fork: "<", Run: "~", Agent: "@", Seam: "=", Failed: "!", Needs: "#"}
 	}
-	return Glyphs{Lane: "●", Archived: "○", Branch: "├─", Last: "└─", Pipe: "│  ", Blank: "   ", Fork: "←", Run: "⋯", Agent: "⊕", Seam: "═", Failed: "⚠"}
+	return Glyphs{Lane: "●", Archived: "○", Branch: "├─", Last: "└─", Pipe: "│  ", Blank: "   ", Fork: "←", Run: "⋯", Agent: "⊕", Seam: "═", Failed: "⚠", Needs: "◆"}
 }
 
 // Theme holds every style the map draws with.
@@ -58,13 +59,17 @@ type Theme struct {
 	Accent   lipgloss.Style
 	Column   lipgloss.Style
 	Selected lipgloss.Style
-	Border   lipgloss.Style
-	Label    lipgloss.Style
-	Value    lipgloss.Style
-	Panel    lipgloss.Style
-	Footer   lipgloss.Style
-	Key      lipgloss.Style
-	Empty    lipgloss.Style
+	// Urgent is reserved for the one state that means an agent is stopped and
+	// waiting on a person right now. Spending it on anything commoner is what
+	// makes colour stop carrying meaning.
+	Urgent lipgloss.Style
+	Border lipgloss.Style
+	Label  lipgloss.Style
+	Value  lipgloss.Style
+	Panel  lipgloss.Style
+	Footer lipgloss.Style
+	Key    lipgloss.Style
+	Empty  lipgloss.Style
 }
 
 // NewTheme builds the theme for the terminal's actual background, so the same
@@ -92,6 +97,7 @@ func NewTheme(isDark, ascii bool) Theme {
 		Alive:  lipgloss.NewStyle().Foreground(alive),
 		Accent: lipgloss.NewStyle().Foreground(accent),
 		Column: lipgloss.NewStyle().Foreground(accent).Bold(true),
+		Urgent: lipgloss.NewStyle().Foreground(selFg).Background(accent).Bold(true),
 		Border: lipgloss.NewStyle().Foreground(faint),
 		Label:  lipgloss.NewStyle().Foreground(muted),
 		Value:  lipgloss.NewStyle().Foreground(fg),

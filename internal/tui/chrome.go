@@ -73,8 +73,9 @@ func (m Model) info() string { return m.factsBlock(m.facts(), hints(), m.mapGlyp
 func (m Model) mapGlyphs() []glyph {
 	g := m.theme.Glyphs
 	return []glyph{
-		{g.Lane, m.theme.Alive, "live conversation"},
-		{g.Lane, m.theme.Accent, "waiting on you"},
+		{g.Needs, m.theme.Urgent, "stopped, needs you"},
+		{g.Lane, m.theme.Alive, "working"},
+		{g.Lane, m.theme.Accent, "an open loop"},
 		{g.Lane, m.theme.Faint, "idle"},
 		{g.Archived, m.theme.Faint, "archived"},
 		{g.Branch, m.theme.Rail, "branched from above"},

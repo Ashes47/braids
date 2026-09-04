@@ -706,7 +706,20 @@ column in the sweep screen.
 ```
 
 - Colour carries **status only** — never identity. Identity is position and name.
-- One accent for "needs you". Everything else is greyscale weight.
+- **The scale is steep, and the top of it is rare.** A session stopped and
+  waiting on a person is the only thing drawn loudly — reversed accent, its own
+  mark `◆`, a bold name — because it is the only thing that cannot proceed
+  without them. Anything alive is green. An open loop is accent. Something
+  merely owed a reply is plain text, because there are usually a great many of
+  those and a screen where everything is urgent says nothing. This was wrong at
+  first: `your turn` was drawn in the accent too, so seventeen rows shouted and
+  the one that mattered did not stand out.
+- **Shape, not only colour, at the top of the scale.** In a long list a
+  different glyph carries further than a different hue, and it survives a
+  terminal whose palette is not what braids assumed.
+- **An archived row reads as set aside** while shown: `○`, dimmed throughout,
+  and its status column says `archived` rather than whatever it was doing when
+  it was put away, which is no longer the useful thing about it.
 - Idle age is always right-aligned; it is the field people scan.
 - **The cursor follows the conversation, and when it is gone, the row above
   it.** Archiving or deleting the selected row would otherwise throw the reader

@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/Ashes47/braids/internal/core/hooks"
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/model"
 	"github.com/Ashes47/braids/internal/core/trash"
@@ -450,5 +451,71 @@ func TestArchivingTheOnlyRowLeavesAnEmptyMap(t *testing.T) {
 	}
 	if !strings.Contains(plain(m.render()), "1 archived hidden") {
 		t.Error("the title should still explain where everything went")
+	}
+}
+
+func TestNeedsYouIsTheLoudestThingOnScreen(t *testing.T) {
+	blocked := laneInfo("a", "stuck on a permission", "app", 5, 10*time.Second)
+	blocked.Activity = model.Activity{LastRole: model.RoleAssistant, LastWasToolCall: true}
+	owed := laneInfo("b", "answered a while ago", "app", 5, time.Hour)
+	owed.Activity = model.Activity{LastRole: model.RoleAssistant}
+
+	m, _ := keepingModel(t, []index.LaneInfo{blocked, owed})
+	m.liveFn = func() (map[string]hooks.Event, error) {
+		return map[string]hooks.Event{
+			"a": {Name: hooks.PermissionRequest, At: blocked.Updated},
+		}, nil
+	}
+	m.refreshLive()
+	m.width = 128
+
+	out := plain(m.render())
+	if !strings.Contains(out, "needs you") {
+		t.Fatalf("a reported block should be named:\n%s", out)
+	}
+	// A different shape, not only a different colour: in a long list shape
+	// carries further than hue.
+	stuck := rowFor(t, out, "stuck on a permission")
+	if !strings.Contains(stuck, m.theme.Glyphs.Needs) {
+		t.Errorf("the blocked row should carry its own mark: %q", stuck)
+	}
+	if quiet := rowFor(t, out, "answered a while ago"); strings.Contains(quiet, m.theme.Glyphs.Needs) {
+		t.Errorf("a conversation merely owed a reply is not urgent: %q", quiet)
+	}
+
+	// And the loud style is spent on nothing else.
+	urgent := m.theme.Urgent.Render("x")
+	for _, g := range m.mapGlyphs() {
+		if g.meaning != "stopped, needs you" && g.style.Render("x") == urgent {
+			t.Errorf("%q shares the urgent style", g.meaning)
+		}
+	}
+}
+
+func TestAnArchivedRowReadsAsSetAside(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("a", "put away", "app", 5, time.Hour),
+		laneInfo("b", "still active", "app", 5, time.Hour),
+	}
+	lanes[0].Activity = model.Activity{LastRole: model.RoleAssistant}
+	lanes[1].Activity = model.Activity{LastRole: model.RoleAssistant}
+	m, _ := keepingModel(t, lanes)
+	m.width = 128
+
+	m = press(m, "a") // archive the first
+	m = press(m, "A") // and reveal it
+
+	out := plain(m.render())
+	away := rowFor(t, out, "put away")
+	// Named as archived rather than by what it was doing when it was put away,
+	// which is no longer the useful thing about it.
+	if !strings.Contains(away, "archived") {
+		t.Errorf("an archived row should say so: %q", away)
+	}
+	if !strings.Contains(away, m.theme.Glyphs.Archived) {
+		t.Errorf("and carry its own mark: %q", away)
+	}
+	if active := rowFor(t, out, "still active"); strings.Contains(active, "archived") {
+		t.Errorf("a live row must not: %q", active)
 	}
 }

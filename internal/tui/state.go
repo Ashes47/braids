@@ -91,19 +91,24 @@ func waiting(lane index.LaneInfo, live *hooks.Event, now time.Time) bool {
 	}
 }
 
-// styleFor colours a state. Only what is alive or owed gets colour; a finished
-// conversation from last month is greyscale like everything else.
+// styleFor colours a state.
+//
+// The scale is deliberately steep. A session stopped and waiting on a person is
+// the only thing that gets the loud treatment, because it is the only thing
+// that cannot proceed without them. Anything alive is green. Something owed a
+// reply is plain text — there are usually a great many of those, and a screen
+// where everything is urgent says nothing.
 func (m Model) styleFor(lane index.LaneInfo, state laneState) lipgloss.Style {
 	switch state {
+	case stateNeedsYou:
+		return m.theme.Urgent
 	case stateWorking, stateThinking:
 		return m.theme.Alive
-	case stateNeedsYou:
-		return m.theme.Accent
 	case stateStopped, stateUnanswered:
-		return m.theme.Column
+		return m.theme.Accent
 	case stateYourTurn:
 		if m.now().Sub(lane.Updated) < freshWindow {
-			return m.theme.Accent
+			return m.theme.Value
 		}
 		return m.theme.Faint
 	default:

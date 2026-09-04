@@ -681,7 +681,7 @@ func TestGlyphKeyAppearsOnlyWhenThereIsRoom(t *testing.T) {
 
 	m.width = 132
 	wide := plain(m.render())
-	for _, want := range []string{"live conversation", "waiting on you", "branched from above"} {
+	for _, want := range []string{"stopped, needs you", "working", "branched from above"} {
 		if !strings.Contains(wide, want) {
 			t.Errorf("wide layout missing the glyph key %q:\n%s", want, wide)
 		}
@@ -689,7 +689,7 @@ func TestGlyphKeyAppearsOnlyWhenThereIsRoom(t *testing.T) {
 
 	m.width = 90
 	narrow := plain(m.render())
-	if strings.Contains(narrow, "live conversation") {
+	if strings.Contains(narrow, "stopped, needs you") {
 		t.Error("the glyph key should be dropped rather than squeezed")
 	}
 	if !strings.Contains(narrow, "search") {
@@ -728,18 +728,19 @@ func TestGlyphKeyUsesTheStylesItExplains(t *testing.T) {
 	for _, g := range m.mapGlyphs() {
 		styles[g.meaning] = g.style.Render("x")
 	}
-	if styles["live conversation"] == styles["idle"] {
-		t.Error("live and idle conversations must not share a style in the key")
-	}
-	if styles["waiting on you"] == styles["idle"] {
-		t.Error("waiting and idle must not share a style in the key")
+	for _, pair := range [][2]string{
+		{"working", "idle"}, {"an open loop", "idle"}, {"stopped, needs you", "an open loop"},
+	} {
+		if styles[pair[0]] == styles[pair[1]] {
+			t.Errorf("%q and %q must not share a style in the key", pair[0], pair[1])
+		}
 	}
 
 	// And those styles must be the ones the rows use.
 	live := laneInfo("b", "busy", "app", 5, time.Second)
 	live.Activity = model.Activity{LastRole: model.RoleAssistant, LastWasToolCall: true}
-	if got := m.styleFor(live, stateOf(live, nil, now)).Render("x"); got != styles["live conversation"] {
-		t.Error("the key's live style is not the one a working lane is drawn with")
+	if got := m.styleFor(live, stateOf(live, nil, now)).Render("x"); got != styles["working"] {
+		t.Error("the key's working style is not the one a working lane is drawn with")
 	}
 }
 

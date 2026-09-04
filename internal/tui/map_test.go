@@ -8,7 +8,9 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
+	"github.com/Ashes47/braids/internal/brand"
 	"github.com/Ashes47/braids/internal/core/graph"
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/model"
@@ -800,5 +802,103 @@ func TestHooksFactSaysWhichModeItIsIn(t *testing.T) {
 		if !strings.Contains(line, tc.want) {
 			t.Errorf("reporting=%v shows %q, want it to mention %q", tc.reporting, line, tc.want)
 		}
+	}
+}
+
+// The panel is a box, so its three horizontal edges have to be the same width.
+// A top border one column short reads as a broken corner.
+func TestPanelBordersAreFlush(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("root", "main work", "app", 100, time.Hour)}
+	f := forestOf(lanes, nil)
+	for _, width := range []int{60, 84, 92, 120, 200} {
+		m := NewModel(f, Options{ASCII: true, Source: "claudecode"})
+		m.now = func() time.Time { return now }
+		m.width, m.height = width, 24
+		top := lipgloss.Width(plain(m.panelTop()))
+		bottom := lipgloss.Width(plain(m.panelBottom()))
+		row := lipgloss.Width(plain(m.framed(strings.Repeat(" ", width-2))))
+		if top != width || bottom != width || row != width {
+			t.Errorf("width %d: top=%d bottom=%d row=%d, want all %d", width, top, bottom, row, width)
+		}
+	}
+}
+
+// The header must never be wider than the terminal: it is drawn before the
+// table, so an overrun pushes every row out of true.
+func TestHeaderNeverExceedsTheTerminal(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("root", "main work", "app", 100, time.Hour)}
+	f := forestOf(lanes, nil)
+	for width := 50; width <= 240; width += 7 {
+		m := NewModel(f, Options{ASCII: true, Source: "claudecode", IndexPath: "~/.braids/index.db"})
+		m.now = func() time.Time { return now }
+		m.width, m.height = width, 30
+		for i, line := range strings.Split(plain(m.info()), "\n") {
+			if got := lipgloss.Width(line); got > width {
+				t.Fatalf("width %d: header line %d is %d columns:\n%q", width, i, got, line)
+			}
+		}
+	}
+}
+
+// The mark takes room before the legend spreads out, but never before every
+// binding has a place. A key that works and is not listed may as well not exist.
+func TestMarkNeverCostsABinding(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("root", "main work", "app", 100, time.Hour)}
+	f := forestOf(lanes, nil)
+	for width := 50; width <= 240; width += 3 {
+		m := NewModel(f, Options{ASCII: true, Source: "claudecode"})
+		m.now = func() time.Time { return now }
+		m.width, m.height = width, 30
+		p := m.headerPlan()
+		if p.logo == nil {
+			continue
+		}
+		if p.columns*p.rows < len(hints()) {
+			t.Errorf("width %d: mark shown but only %d of %d bindings fit",
+				width, p.columns*p.rows, len(hints()))
+		}
+	}
+}
+
+// Wider terminals get the larger mark; narrow ones get none rather than a
+// cropped one.
+func TestMarkSizeFollowsWidth(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("root", "main work", "app", 100, time.Hour)}
+	f := forestOf(lanes, nil)
+	seen := map[int]bool{}
+	for width := 60; width <= 260; width += 2 {
+		m := NewModel(f, Options{ASCII: true, Source: "claudecode"})
+		m.now = func() time.Time { return now }
+		m.width, m.height = width, 30
+		seen[brand.Width(m.headerPlan().logo)] = true
+	}
+	for _, want := range []int{0, brand.Width(brand.Small()), brand.Width(brand.Full())} {
+		if !seen[want] {
+			t.Errorf("no width produced a mark of %d columns; saw %v", want, seen)
+		}
+	}
+}
+
+// The mark is decoration and priced below both legends: it may never cost the
+// glyph key, which names marks that are on the screen right now.
+func TestMarkNeverCostsTheGlyphKey(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("root", "main work", "app", 100, time.Hour)}
+	f := forestOf(lanes, nil)
+	shown := 0
+	for width := 60; width <= 260; width++ {
+		m := NewModel(f, Options{ASCII: true, Source: "claudecode"})
+		m.now = func() time.Time { return now }
+		m.width, m.height = width, 30
+		p := m.headerPlan()
+		if p.logo == nil {
+			continue
+		}
+		shown++
+		if len(m.mapGlyphs()) > 0 && !p.showGlyphs {
+			t.Errorf("width %d: mark shown but the glyph key was dropped for it", width)
+		}
+	}
+	if shown == 0 {
+		t.Fatal("the mark never appeared at any width")
 	}
 }

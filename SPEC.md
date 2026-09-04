@@ -492,6 +492,22 @@ The same ellipsis is accepted on the way back in. Copying a shortened ID off the
 screen and pasting it is the obvious thing to do with one, and refusing an ID
 braids itself printed teaches nobody anything.
 
+**The mark is decoration, and priced accordingly.** braids sets its name in the
+angular ASCII face k9s uses, flush right in the header, in the same accent as
+everything else that is braids' own voice rather than the harness's data. It is
+the last thing to get room and the first to lose it: the facts, every key
+binding, and the glyph key all come first — a key that works and is not listed
+may as well not exist, and the glyph key names marks that are on the screen
+right now, while the mark names a tool you are plainly already running. Two
+sizes exist so a normal terminal gets one at all, and below that it simply goes.
+The gap between the two legends then absorbs whatever room nothing else wanted,
+so a wide terminal reads as separated columns rather than one long list, and a
+narrow one loses nothing to spacing.
+
+`braids help` and `braids version` carry it too — the full face and the small
+one respectively — coloured only when stdout is a terminal, because escape codes
+in a pipe are noise in somebody's grep.
+
 ### 6.5 Branch — inline at the junction, never a modal
 
 ```

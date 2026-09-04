@@ -63,6 +63,7 @@ type Theme struct {
 	// waiting on a person right now. Spending it on anything commoner is what
 	// makes colour stop carrying meaning.
 	Urgent lipgloss.Style
+	Logo   lipgloss.Style
 	Border lipgloss.Style
 	Label  lipgloss.Style
 	Value  lipgloss.Style
@@ -101,6 +102,9 @@ func NewTheme(isDark, ascii bool) Theme {
 		// drawn around the row, which is heavier than the rest of the screen
 		// and fights the panel it sits inside.
 		Urgent: lipgloss.NewStyle().Foreground(accent).Bold(true),
+		// The mark wears the accent, like everything else that is braids' own
+		// voice on the screen rather than the harness's data.
+		Logo:   lipgloss.NewStyle().Foreground(accent),
 		Border: lipgloss.NewStyle().Foreground(faint),
 		Label:  lipgloss.NewStyle().Foreground(muted),
 		Value:  lipgloss.NewStyle().Foreground(fg),

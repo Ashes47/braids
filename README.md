@@ -1,109 +1,117 @@
+<div align="center">
+
+<img src="assets/braids-logo.png" alt="braids" width="140">
+
 # braids
+
+**Branch your Claude Code conversations. Resume any of them from any turn.**
+
+[![ci](https://github.com/Ashes47/braids/actions/workflows/ci.yml/badge.svg)](https://github.com/Ashes47/braids/actions/workflows/ci.yml)
+[![go](https://img.shields.io/badge/go-1.25-00ADD8)](https://go.dev)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+</div>
+
+---
 
 Claude Code works best on one linear thread doing one thing. Humans don't work
 that way — a task forks, doubles back, and spawns three side quests. Today the
 only way to cope is to run N terminals and hold the map in your head.
 
-**braids is that map.** One TUI window alongside your N terminals. It shows every
-conversation and every branch as a graph, searches all of them in microseconds,
-and turns any message into the start of a new branch.
+**braids is that map.** One terminal window alongside your N others. It shows
+every conversation and every branch as a graph, searches all of them in about a
+millisecond, and turns any message into the start of a new branch.
 
 It never talks to Claude. It arranges the conversations you have with Claude.
 
-## Status
-
-Working: the index and search, the Map, the Spine, branching (with an optional
-git worktree), merging a branch back, promoting a subagent into a conversation
-of its own, archive and a recoverable bin, and optional hooks that let sessions
-report when they are blocked on you. See [SPEC.md](SPEC.md) for the full design.
-
 ```
- Source:   claudecode                                          <j/k>   move
- Index:    ~/.braids/index.db                                  </>     filter
- Lanes:    21                                                  <g/G>   first/last
- Active:   9                                                   <q>     quit
-
-╭─ Conversations(all)[21] ─────────────────────────────────────────────────────────╮
-│  CONVERSATION                     FORK  PROJECT     TURNS      SIZE    AGE  STATUS│
-│ ● git worktrees                         demo            6     57 kB     6m  active│
-│ ├─● worktree cleanup              ← t6  demo            8     61 kB     6m  active│
-│ └─● worktree vs clone             ← t4  demo            6     53 kB     6m  active│
-│    └─● shallow clone              ← t6  demo            8     57 kB     6m  active│
-│ ● Debug annotation pipeline …           microagi     1841      7 MB     5d    idle│
+ Source:         claudecode                            <j/k>   down / up
+ Index:          ~/.braids/index.db                    <↵>     open spine
+ Lanes:          6                                     </>     search
+ Waiting on you: 5                                     <f>     filter list
+ Hooks:          reporting                             <a>     toggle archive
+                                                       <r>     rename
+                                                       <q>     quit
+╭─ Conversations(all)[6] ──────────────────────────────────────────────────────────╮
+│  CONVERSATION                                  TURNS      SIZE    AGE      STATUS│
+│ ● try-option-c                                    75     16 kB    39m  unanswered│
+│ ● nvidia-delivery                                824    178 kB    41m   your turn│
+│ ● cache-gate-probe                                14      3 kB     3h   your turn│
+│ ● gcsfuse-density                                125     27 kB     2d  unanswered│
+│ ● annotation-pipeline                            368     79 kB     5d   your turn│
+│ ● mdt-contention                                  41      9 kB    14d  unanswered│
+│                                                                                  │
+│                                                                                  │
+│                                                                                  │
+│                                                                                  │
+│                                                                                  │
+│                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────╯
+ b2c3d4e5-0000-4000-8000-000000000002
 ```
 
-```
-$ braids index
-indexed 17 lanes · 59811 messages · 59839 searchable parts in 5.8s
+## Why
 
-$ braids search "gcsfuse density" --limit 3
-Review annotation pipeline …  08-21 19:16  TaskCreate  {"subject":"Solve post [gcsfuse] [density] stall…
-...
-3 hits in 1.2ms
-```
+A conversation with an agent is a single line of context. That is a good fit for
+the model and a bad fit for the work: you want to try an idea without poisoning
+the thread, come back to a decision made an hour ago and go the other way, or
+run four attempts at once and keep the one that worked.
 
-## Design in one screen
+braids keeps the graph for you, and gives the model a clean linear path. Every
+root-to-leaf route through the graph is one ordinary Claude Code session — no
+wrapper, no proxy, no protocol of its own.
 
-```
-┌ braids ─────────────────────────────────────────────────────────── microagi ──┐
-│  ◆ 1 needs you    ● 3 running    ○ 11 idle                    392 MB on disk  │
-│                                                                               │
-│  ● nvidia-delivery                            412 turns    running     2m ago │
-│  ├─◆ try-option-c                    ← t412   38 turns    needs you    0m ago │
-│  │ └─● cache-gate-probe              ← t31     7 turns    idle          3h ago│
-│  ├─● gcsfuse-density                 ← t288   63 turns    done          2d ago│
-│  └─● mdt-contention                  ← t104   21 turns    idle         14d ago│
-├───────────────────────────────────────────────────────────────────────────────┤
-│ / search   n needs-you   ↵ open   b branch   o terminal   a archive   ? help   │
-└───────────────────────────────────────────────────────────────────────────────┘
-```
-
-## Running it
+## Install
 
 ```sh
-make build          # ./braids in the repo
-./braids index      # scan ~/.claude/projects (a few seconds)
-./braids            # open the map
-
-make run            # build + open the map
-make reindex        # rebuild the index
+go install github.com/Ashes47/braids/cmd/braids@latest
 ```
 
-To put it on your PATH:
+Or from source:
 
 ```sh
-make install                            # -> $(go env GOPATH)/bin/braids
-export PATH="$(go env GOPATH)/bin:$PATH"  # add to ~/.zshrc if not already there
-braids
+git clone https://github.com/Ashes47/braids && cd braids
+make install          # -> $(go env GOPATH)/bin/braids
 ```
 
-Re-run `make install` after every change — `make build` only updates `./braids`
-in the repo. `braids version` prints the commit it was built from, so a stale
-binary is visible rather than mysterious.
-
-## Commands
+Then:
 
 ```sh
-braids                                  open the map
-braids index [--full]                   index new and changed transcripts
-braids search QUERY [--kind K] [--limit N]
-braids lanes                            list indexed conversations
-braids agents  --lane ID                list the subagents a conversation spawned
-braids branch  --lane ID --at TURN [--workspace]
-braids promote --lane ID --agent ID     turn a subagent into its own conversation
-braids merge   --lane ID --from ID [--plan]
-braids hooks [--install|--remove]       let sessions report when they block
-braids version
+braids index          # read ~/.claude/projects (once; a few seconds)
+braids                # open the map
 ```
 
-Every command takes `--help` for its own flags. A mistyped one names what you
-meant.
+## What it does
+
+**Map** — every conversation as a tree, with branches shown under the
+conversation they were cut from, and how far behind each one is.
+
+**Spine** — one conversation collapsed to its landmarks: what you asked, what
+came back, where it failed, where it was compacted. A 25,000-turn conversation
+becomes a few hundred lines you can actually read.
+
+**Search** — full text over every message and tool call, in about a millisecond.
+Search is the front door; the graph is the confirmation.
+
+**Branch** — put the cursor on any turn and press `b`. braids writes a new
+session file containing that turn's ancestry, and hands you the `claude --resume`
+command. Add `--workspace` and the branch gets a git worktree of its own, so two
+branches can edit the same file without touching each other.
+
+**Merge** — join a branch back as a new conversation, splicing the real turns
+from both. braids refuses when one side already contains the other, rather than
+producing a duplicate wearing a new name.
+
+**Promote** — a subagent's transcript is a conversation too. Turn one into a lane
+of its own and carry on from where it left off.
+
+**Bin** — deleting moves files aside with a manifest and a 14-day retention, so
+nothing you delete is gone the moment you regret it.
 
 ## Driving it from an agent
 
 Every command that reports something takes `--json`, so braids is usable by the
-thing it is watching. Claude Code can search its own past conversations, find
+thing it is watching — Claude Code can search its own past conversations, find
 where a decision was made, and branch from that exact turn.
 
 ```sh
@@ -116,21 +124,98 @@ Two properties make this work, and both are deliberate:
 - **IDs are whole in JSON.** The tables shorten them with an ellipsis to fit a
   terminal; `--json` never does. (Pasting a shortened one back works too — braids
   accepts the ellipsis rather than refusing an ID it printed itself.)
-- **Empty is `[]`, not a sentence.** A caller should never have to tell "nothing
-  matched" apart from a parse failure.
+- **Empty is `[]`, not a sentence.** Nothing should have to tell "no matches"
+  apart from a parse failure.
 
-Errors go to stderr with a non-zero exit; `--json` output is the only thing on
-stdout. `braids hooks --json` reports whether reporting is on, so an agent can
-check before relying on it.
+## Commands
+
+```
+braids                                  open the map
+braids index [--full]                   index new and changed transcripts
+braids search QUERY [--kind K] [--limit N]
+braids lanes                            list indexed conversations
+braids agents  --lane ID                list the subagents a conversation spawned
+braids branch  --lane ID --at TURN [--workspace]
+braids promote --lane ID --agent ID     turn a subagent into its own conversation
+braids merge   --lane ID --from ID [--plan]
+braids hooks [--install|--remove]       let sessions report when they block
+braids version
+```
+
+Every command takes `--help` for its own flags and `--json` if it reports
+something. A mistyped command names the one you meant.
+
+## Hooks are optional
+
+Files can tell you a session is mid-tool-call. They cannot tell you whether it is
+*running* or *waiting for your approval* — both look identical on disk. One hook
+can. `braids hooks --install` asks Claude Code to report it.
+
+It is opt-in and separate from installing the binary: a tool that edits your
+settings file as a side effect of being installed is not one to trust with it.
+Installing merges rather than writes — every hook already there is kept, a
+timestamped copy of the previous file is left beside it, `--remove` takes back
+only what braids added, and a settings file that cannot be parsed is refused
+rather than replaced by a guess.
+
+Everything else works without them. `braids hooks` says which mode you are in,
+and so does the map.
+
+## Privacy
+
+braids reads your transcripts, so this matters more than usual:
+
+- **It makes no network calls.** There is no HTTP client and no listener in it.
+  `go list -deps ./cmd/braids | grep net/http` comes back empty — check it
+  yourself.
+- **Nothing leaves your machine.** The index is a local SQLite file at
+  `~/.braids/index.db`.
+- **It never writes to a transcript Claude Code owns.** Branching writes a new
+  session file; the source is opened read-only. One writer per file, always.
+- **Delete braids and you lose a view, never a conversation.** Everything is
+  derived from `~/.claude/`.
+
+## Numbers
+
+Measured on one real machine, 28 conversations, 62,169 messages, 359 MB of
+transcripts:
+
+| | |
+|---|---|
+| Full index | ~6 s |
+| Incremental index (a few lanes changed) | ~280 ms |
+| Incremental index (nothing changed) | ~0 ms |
+| Search across 62k units | 0.7–1.7 ms |
+| Index on disk | 192 MB |
 
 ## Principles
 
-1. **Files are the truth.** Everything is derived from `~/.claude/`. Delete
-   braids and you lose a view, never a conversation.
+1. **Files are the truth.** Everything is derived from `~/.claude/`.
 2. **One writer per file, always.** Every branch is its own session file.
 3. **The graph is for humans; each path is linear for the model.**
 4. **Search is the front door; the graph is the confirmation.**
 5. **A window you glance at, not a place you live.**
+
+## Non-goals
+
+braids does not talk to any model, proxy your session, or replace your terminal.
+It does not sync anything anywhere. It is one window next to the ones you already
+have open.
+
+## Other harnesses
+
+Claude Code is the only source today. The seam is deliberate: a `Source` port
+with optional capability interfaces, so a harness that cannot branch still gets
+the map and search. See [SPEC.md](SPEC.md).
+
+## Contributing
+
+```sh
+make ci     # fmt, vet, lint, test, race, cover — the same gate CI runs
+```
+
+Issues and pull requests welcome. [SPEC.md](SPEC.md) is the design doc; every
+decision in it traces to something measured rather than assumed.
 
 ## License
 

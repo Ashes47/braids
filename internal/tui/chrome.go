@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/Ashes47/braids/internal/brand"
 )
 
 // The chrome is modelled on k9s: a compact facts block top-left, key hints
@@ -24,6 +26,19 @@ const (
 	labelCol     = 10
 	hintCol      = 8
 	glyphCol     = 5
+	// The glyph key and the keys are two legends doing different jobs — one
+	// names what is on screen, the other what you can press — and they read as
+	// a single list when set too close. So they are pushed apart, but only
+	// using room nothing else wants: on a narrow terminal the gap closes back
+	// to its minimum rather than costing a legend entry.
+	minGlyphGap = 2
+	maxGlyphGap = 6
+	// factsGap separates the facts column from the legend beside it.
+	factsGap = 4
+	// logoGap is the least slack left before the mark when deciding whether it
+	// fits. The mark is flush right, so the space actually shown is whatever
+	// the legend does not use; widening glyphGap is what closes it up.
+	logoGap = 2
 )
 
 type fact struct{ label, value string }
@@ -116,7 +131,11 @@ func (m Model) archivedNote() string {
 type plan struct {
 	rows, columns                     int
 	labelWidth, hintWidth, glyphWidth int
+	factWidth, glyphGap               int
 	showGlyphs                        bool
+	// logo is the mark the header has room for, largest first, or nil when
+	// even the small one would crowd the legend.
+	logo []string
 }
 
 // headerPlan sizes the header for whichever screen is showing. It is computed
@@ -140,7 +159,32 @@ func (m Model) headerPlan() plan {
 		p.glyphWidth = max(p.glyphWidth, glyphCol+lipgloss.Width(g.meaning))
 	}
 
-	p.columns, p.showGlyphs = m.fitColumns(factWidth, p.hintWidth, p.glyphWidth, len(keys), len(glyphs) > 0)
+	p.factWidth = factWidth
+	// The mark is decoration and is priced accordingly. It is taken before the
+	// legend spreads into extra columns, and only ever after both legends are
+	// guaranteed a place: a key that works and is not listed may as well not
+	// exist, and the glyph key names marks that are on the screen right now,
+	// while the mark names a tool you are plainly already running.
+	reserved := 0
+	minimum := factWidth + columnsWidth(p.hintWidth, legendColumns(len(keys)))
+	if len(glyphs) > 0 {
+		minimum += p.glyphWidth + minGlyphGap
+	}
+	for _, art := range logoSizes() {
+		if minimum+logoGap+brand.Width(art) <= m.width-3 {
+			p.logo, reserved = art, logoGap+brand.Width(art)
+			break
+		}
+	}
+	p.columns, p.showGlyphs = m.fitColumns(factWidth+reserved, p.hintWidth, p.glyphWidth, len(keys), len(glyphs) > 0)
+
+	// Whatever is still unspent goes into separating the two legends, up to
+	// the point where more space stops helping.
+	p.glyphGap = minGlyphGap
+	if p.showGlyphs {
+		used := factWidth + reserved + columnsWidth(p.hintWidth, p.columns) + p.glyphWidth + minGlyphGap
+		p.glyphGap += max(0, min(m.width-3-used, maxGlyphGap-minGlyphGap))
+	}
 	p.rows = len(keys)
 	if p.columns > 1 {
 		p.rows = (len(keys) + p.columns - 1) / p.columns
@@ -149,6 +193,9 @@ func (m Model) headerPlan() plan {
 	// as well not exist. Beyond maxInfoLines the header would cost more of the
 	// screen than the legend is worth.
 	p.rows = min(max(p.rows, len(facts), len(glyphs), infoLines), maxInfoLines)
+	if p.logo != nil {
+		p.rows = max(p.rows, len(p.logo))
+	}
 	return p
 }
 
@@ -176,9 +223,21 @@ func (m Model) factsBlock(facts []fact, keys []hint, glyphs []glyph) string {
 			}
 		}
 		if showGlyphs {
-			right = m.glyphCell(glyphs, i, glyphWidth) + "  " + right
+			right = m.glyphCell(glyphs, i, glyphWidth) + strings.Repeat(" ", p.glyphGap) + right
 		}
-		lines = append(lines, " "+spread(left, right, m.width-2))
+		if p.logo == nil {
+			lines = append(lines, " "+spread(left, right, m.width-2))
+			continue
+		}
+		// With the mark present the facts can no longer float: they are padded
+		// to their own column so the legend keeps a straight left edge between
+		// them and the mark.
+		mark := ""
+		if i < len(p.logo) {
+			mark = m.theme.Logo.Render(p.logo[i])
+		}
+		body := padRight(left, p.factWidth) + strings.Repeat(" ", factsGap) + right
+		lines = append(lines, " "+spread(body, mark, m.width-2))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -206,16 +265,16 @@ func (m Model) headerContent() ([]fact, []hint, []glyph) {
 func (m Model) fitColumns(factWidth, hintWidth, glyphWidth, keys int, haveGlyphs bool) (columns int, glyphs bool) {
 	room := m.width - 3 // a space either side of the gap, and the margin
 	fits := func(width int) bool { return factWidth+width <= room }
-	colsWidth := func(n int) int { return hintWidth*n + (n - 1) }
+	colsWidth := func(n int) int { return columnsWidth(hintWidth, n) }
 
 	most := min((keys+infoLines-1)/infoLines, 3)
 	// Columns needed to list every binding within the header's maximum height.
 	// Listing them all comes first: a key that works but is not shown may as
 	// well not exist, while the glyph key only names what is already on screen.
-	need := max((keys+maxInfoLines-1)/maxInfoLines, 1)
+	need := legendColumns(keys)
 
 	for n := most; n >= need && haveGlyphs; n-- {
-		if fits(colsWidth(n) + 2 + glyphWidth) {
+		if fits(colsWidth(n) + minGlyphGap + glyphWidth) {
 			return n, true
 		}
 	}
@@ -232,6 +291,20 @@ func (m Model) fitColumns(factWidth, hintWidth, glyphWidth, keys int, haveGlyphs
 		}
 	}
 	return 0, haveGlyphs && fits(glyphWidth)
+}
+
+// legendColumns is the fewest columns that can list every binding inside the
+// header's maximum height.
+func legendColumns(keys int) int {
+	return max((keys+maxInfoLines-1)/maxInfoLines, 1)
+}
+
+// columnsWidth is what n columns of the legend occupy, gaps included.
+func columnsWidth(hintWidth, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return hintWidth*n + (n - 1)
 }
 
 // glyphCell renders one line of the glyph key: the mark in its own style, then
@@ -268,7 +341,9 @@ func (m Model) panelTop() string { return m.panelTopTitled(m.panelTitle()) }
 
 func (m Model) panelTopTitled(name string) string {
 	title := " " + name + " "
-	rule := m.width - 4 - lipgloss.Width(title)
+	// "╭─" and the closing "╮" are three columns, not four: the rule fills
+	// what is left of the width after them and the title.
+	rule := m.width - 3 - lipgloss.Width(title)
 	if rule < 0 {
 		rule = 0
 	}

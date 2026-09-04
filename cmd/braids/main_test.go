@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Ashes47/braids/internal/brand"
 	"github.com/Ashes47/braids/internal/core/model"
 )
 
@@ -377,5 +378,43 @@ func decode(t *testing.T, body string, into any) {
 	t.Helper()
 	if err := json.Unmarshal([]byte(body), into); err != nil {
 		t.Fatalf("not valid JSON: %v\n%s", err, body)
+	}
+}
+
+// The mark is coloured on a terminal and plain in a pipe: escape codes in a
+// pipe are noise in somebody's grep.
+func TestMarkIsPlainWhenPiped(t *testing.T) {
+	restore := stdoutIsTerminal
+	t.Cleanup(func() { stdoutIsTerminal = restore })
+
+	stdoutIsTerminal = func() bool { return false }
+	plain := runCmd(t, "help")
+	if strings.Contains(plain, "\x1b[") {
+		t.Errorf("piped help carries escape codes:\n%q", plain[:120])
+	}
+	for _, want := range []string{"|___  /", brand.Tagline, "manage Claude Code conversations"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("help is missing %q", want)
+		}
+	}
+
+	stdoutIsTerminal = func() bool { return true }
+	if coloured := runCmd(t, "help"); !strings.Contains(coloured, "\x1b[38;2;240;136;62m") {
+		t.Error("help on a terminal is not wearing the accent")
+	}
+}
+
+// version carries the smaller mark, so it stays readable in a narrow window.
+func TestVersionCarriesTheSmallMark(t *testing.T) {
+	restore := stdoutIsTerminal
+	t.Cleanup(func() { stdoutIsTerminal = restore })
+	stdoutIsTerminal = func() bool { return false }
+
+	out := runCmd(t, "version")
+	if !strings.Contains(out, strings.TrimRight(brand.Small()[len(brand.Small())-1], " ")) {
+		t.Errorf("version is not showing the small mark:\n%s", out)
+	}
+	if strings.Contains(out, brand.Full()[1]) {
+		t.Error("version is showing the full mark, which is wider than it needs")
 	}
 }

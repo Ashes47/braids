@@ -19,6 +19,7 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
+	"github.com/Ashes47/braids/internal/brand"
 	"github.com/Ashes47/braids/internal/core/graph"
 	"github.com/Ashes47/braids/internal/core/hooks"
 	"github.com/Ashes47/braids/internal/core/index"
@@ -112,9 +113,11 @@ func run(args []string, w io.Writer) error {
 	case "agents":
 		return cmdAgents(args[1:], out)
 	case "version", "-v", "--version":
+		out.mark(brand.Small())
 		out.printf("braids %s (%s)\n", version, commit)
 		return out.Err()
 	case "help", "-h", "--help":
+		out.mark(brand.Full())
 		out.printf("%s", usage)
 		return out.Err()
 	default:
@@ -1049,6 +1052,28 @@ func cmdHooks(args []string, out *printer) error {
 		out.printf("          points them here\n")
 	}
 	return out.Err()
+}
+
+// accent is the orange braids uses everywhere else on screen. Written straight
+// rather than through a styling library: the command line has one coloured
+// thing in it, and that is not worth a dependency.
+const accent, reset = "\x1b[38;2;240;136;62m", "\x1b[0m"
+
+// stdoutIsTerminal is a variable so the colour decision can be tested.
+var stdoutIsTerminal = func() bool { return term.IsTerminal(os.Stdout.Fd()) }
+
+// mark prints braids' mark above whatever follows it. Colour only on a
+// terminal: escape codes in a pipe are noise in somebody's grep.
+func (p *printer) mark(art []string) {
+	colour := stdoutIsTerminal()
+	for _, line := range art {
+		if colour {
+			p.printf("%s%s%s\n", accent, line, reset)
+		} else {
+			p.printf("%s\n", strings.TrimRight(line, " "))
+		}
+	}
+	p.printf("%s\n\n", strings.Repeat(" ", 4)+brand.Tagline)
 }
 
 // hooksReporting reports whether the harness has been asked to report. Hooks

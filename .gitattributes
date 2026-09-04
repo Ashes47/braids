@@ -1,0 +1,11 @@
+# Keep text files as LF in the working tree on every platform.
+#
+# Without this git converts them to CRLF when checking out on Windows, which
+# breaks anything that matches on a newline: it broke a test that reads the
+# skill and checks its commands against the program. It would also break the
+# installer if it were ever run through a shell there.
+* text=auto eol=lf
+
+# These are bytes, not text, and must never be touched.
+*.png binary
+*.ans binary

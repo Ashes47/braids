@@ -19,7 +19,10 @@ func TestSkillOnlyTeachesCommandsThatExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the skill: %v", err)
 	}
-	text := string(body)
+	// Checked out on Windows a text file arrives with CRLF line endings, so
+	// anything matching on \n finds nothing. .gitattributes asks git not to do
+	// that; this does not depend on it.
+	text := strings.ReplaceAll(string(body), "\r\n", "\n")
 
 	commands := map[string]bool{}
 	for _, name := range known {
@@ -78,7 +81,7 @@ func TestSkillMentionsTheCommandsWorthTeaching(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(body)
+	text := strings.ReplaceAll(string(body), "\r\n", "\n")
 	for _, command := range []string{"search", "branch", "explain", "lanes", "memories", "work"} {
 		if !strings.Contains(text, "braids "+command) {
 			t.Errorf("the skill never mentions `braids %s`", command)

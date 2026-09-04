@@ -75,9 +75,12 @@ def convert(ans: str) -> Image.Image:
     regular = ImageFont.truetype(FACE, SIZE, index=0)
     bold = ImageFont.truetype(FACE, SIZE, index=1)
     advance = regular.getlength("M")
-    # No leading between rows: a terminal has none, and braids draws boxes.
-    # Any gap turns every vertical rule into a dashed line.
-    step = round(SIZE * 1.18)
+    # A terminal has no leading between rows, and braids draws boxes, so any
+    # gap turns every vertical rule into a dashed line. The box glyphs are
+    # 1.269em tall: measured by walking down the rule and counting breaks, a
+    # 33px step at size 26 is joined and 34px is not. Sit just under it, so
+    # the ASCII mark gets what air it can.
+    step = round(SIZE * 1.26)
 
     cols = max((len(SGR.sub("", line)) for line in lines), default=0)
     width = round(cols * advance + 2 * PAD)

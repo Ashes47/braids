@@ -354,8 +354,11 @@ figure.frame pre {
   -webkit-overflow-scrolling:touch;
   /* A terminal has no gap between its rows, and braids draws boxes. At 1.5
      the vertical rules stop touching and every panel border reads as a dashed
-     line, which is what "the screens look misaligned" turned out to mean. */
-  line-height:1.15;
+     line, which is what "the screens look misaligned" turned out to mean.
+     The box glyphs are 1.269em tall, measured, so 1.26 is the ceiling and
+     anything above it dashes the rules. Sitting just under it gives the ASCII
+     mark as much air as it can have while the borders still join. */
+  line-height:1.25;
   /* A frame is 195 columns and has to fit its box, or the panel border
      scrolls off the right. One column is 0.6em in every face in --mono, so
      the size comes from the width the figure actually gets. The first value

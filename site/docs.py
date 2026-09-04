@@ -42,9 +42,13 @@ DOCS_CSS = CSS + """
 .side a { display:block; color:var(--dim); font-size:14.5px; padding:4px 0 4px 11px;
           border-left:1px solid var(--line); }
 .side a:hover { color:var(--ink); text-decoration:none; border-left-color:var(--faint); }
-.side a.on { color:var(--accent); border-left-color:var(--accent); }
+/* The page you are on is a place, so it reads as a label: brighter and
+   heavier, with the accent on its rule. The accent text itself is saved for
+   the heading you are actually at, nested underneath. */
+.side a.page.on { color:var(--ink); font-weight:600; border-left-color:var(--accent); }
 .side .group { margin-bottom:24px; }
-.side .onthis a { font-size:13.5px; color:var(--faint); }
+.side .onthis { margin:2px 0 6px; }
+.side .onthis a { font-size:13px; color:var(--faint); padding:3px 0 3px 22px; }
 .side .onthis a:hover { color:var(--ink); }
 .side .onthis a.here { color:var(--accent); border-left-color:var(--accent); }
 
@@ -962,19 +966,24 @@ def index_cards() -> str:
 
 
 def sidebar(active: str, body: str) -> str:
-    """Every page, plus the headings of the one you are on."""
-    pages = ""
+    """Every page, with the current one's headings nested under it.
+
+    Two lists, each with its own accent marker, read as two competing answers
+    to "where am I". Nested, the page is the place and the heading is the spot
+    within it, so one highlight can sit under the other without arguing.
+    """
+    out = ""
     for slug, label, _, _, _ in PAGES:
         on = " on" if slug == active else ""
         href = f"/docs/{slug}/" if slug else "/docs/"
-        pages += f'<a class="page{on}" href="{href}">{label}</a>'
-    here = ""
-    found = [(i, re.sub(r"<[^>]+>", "", t).strip()) for i, t in HEADING.findall(body)]
-    if found:
-        here = '<div class="group onthis"><h6>On this page</h6>' + "".join(
-            f'<a href="#{i}">{t}</a>' for i, t in found) + "</div>"
-    return (f'<aside class="side"><div class="group"><h6>Docs</h6>{pages}</div>'
-            f'{here}</aside>')
+        out += f'<a class="page{on}" href="{href}">{label}</a>'
+        if slug != active:
+            continue
+        found = [(i, re.sub(r"<[^>]+>", "", t).strip()) for i, t in HEADING.findall(body)]
+        if found:
+            out += '<div class="onthis">' + "".join(
+                f'<a href="#{i}">{t}</a>' for i, t in found) + "</div>"
+    return f'<aside class="side"><div class="group"><h6>Docs</h6>{out}</div></aside>'
 
 
 def pager(index: int) -> str:

@@ -450,3 +450,27 @@ func TestOnlyIndexCreatesTheIndex(t *testing.T) {
 		t.Errorf("lanes after index = %q", out)
 	}
 }
+
+// Everything under ~/.braids is conversation data. MkdirAll leaves an existing
+// directory's mode alone, so one made by an older build has to be tightened on
+// the way past rather than only at creation.
+func TestBraidsDirectoryIsPrivate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BRAIDS_DB", "")
+
+	dir := filepath.Join(home, ".braids")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if _, err := defaultDB(); err != nil {
+		t.Fatalf("defaultDB: %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		t.Errorf("~/.braids is mode %o, reachable beyond its owner", perm)
+	}
+}

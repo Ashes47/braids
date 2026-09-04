@@ -26,6 +26,14 @@ const (
 	labelCol     = 10
 	hintCol      = 8
 	glyphCol     = 5
+	// minFrameWidth and minFrameHeight are the smallest frame the layout is
+	// defined for. A terminal can report less — a one-column pane, or a resize
+	// caught mid-flight — and the arithmetic here subtracts borders and
+	// margins, so below the floor those subtractions go negative and the frame
+	// panics rather than merely looking bad. Clamping draws something too wide
+	// for a window that could not have held it anyway.
+	minFrameWidth  = 24
+	minFrameHeight = 8
 	// The glyph key and the keys are two legends doing different jobs — one
 	// names what is on screen, the other what you can press — and they read as
 	// a single list when set too close. So they are pushed apart, but only
@@ -219,11 +227,11 @@ func (m Model) factsBlock(facts []fact, keys []hint, glyphs []glyph) string {
 			if i < rows {
 				right += m.hintCell(keys, i+c*rows, hintWidth)
 			} else {
-				right += strings.Repeat(" ", hintWidth)
+				right += repeat(" ", hintWidth)
 			}
 		}
 		if showGlyphs {
-			right = m.glyphCell(glyphs, i, glyphWidth) + strings.Repeat(" ", p.glyphGap) + right
+			right = m.glyphCell(glyphs, i, glyphWidth) + repeat(" ", p.glyphGap) + right
 		}
 		if p.logo == nil {
 			lines = append(lines, " "+spread(left, right, m.width-2))
@@ -236,7 +244,7 @@ func (m Model) factsBlock(facts []fact, keys []hint, glyphs []glyph) string {
 		if i < len(p.logo) {
 			mark = m.theme.Logo.Render(p.logo[i])
 		}
-		body := padRight(left, p.factWidth) + strings.Repeat(" ", factsGap) + right
+		body := padRight(left, p.factWidth) + repeat(" ", factsGap) + right
 		lines = append(lines, " "+spread(body, mark, m.width-2))
 	}
 	return strings.Join(lines, "\n")
@@ -311,7 +319,7 @@ func columnsWidth(hintWidth, n int) int {
 // what it means.
 func (m Model) glyphCell(glyphs []glyph, i, width int) string {
 	if i >= len(glyphs) {
-		return strings.Repeat(" ", width)
+		return repeat(" ", width)
 	}
 	g := glyphs[i]
 	return g.style.Render(padRight(g.mark, glyphCol)) +
@@ -320,7 +328,7 @@ func (m Model) glyphCell(glyphs []glyph, i, width int) string {
 
 func (m Model) hintCell(keys []hint, i, width int) string {
 	if i >= len(keys) {
-		return strings.Repeat(" ", width)
+		return repeat(" ", width)
 	}
 	return m.theme.Column.Render(padRight("<"+keys[i].key+">", hintCol)) +
 		m.theme.Label.Render(padRight(keys[i].action, width-hintCol))
@@ -348,11 +356,11 @@ func (m Model) panelTopTitled(name string) string {
 		rule = 0
 	}
 	return m.theme.Border.Render("╭─") + m.theme.Panel.Render(title) +
-		m.theme.Border.Render(strings.Repeat("─", rule)+"╮")
+		m.theme.Border.Render(repeat("─", rule)+"╮")
 }
 
 func (m Model) panelBottom() string {
-	return m.theme.Border.Render("╰" + strings.Repeat("─", m.width-2) + "╯")
+	return m.theme.Border.Render("╰" + repeat("─", m.width-2) + "╯")
 }
 
 // framed puts one already-styled line of the given content width inside the
@@ -399,4 +407,15 @@ func shorten(path string) string {
 		return "~" + path[len(home):]
 	}
 	return path
+}
+
+// repeat pads by n columns, treating a negative count as none. Width
+// arithmetic subtracts borders, gaps and margins; one of those going negative
+// on an unusually small frame should draw a short line, never bring the
+// program down.
+func repeat(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.Repeat(s, n)
 }

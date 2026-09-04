@@ -36,7 +36,7 @@ func Run(ctx context.Context, ix *index.Index, opts Options) error {
 // for golden tests that would otherwise need a pty.
 func Render(forest *graph.Forest, opts Options, laneID, query string, width, height int) string {
 	m := NewModel(forest, opts)
-	m.width, m.height = width, height
+	m.width, m.height = max(width, minFrameWidth), max(height, minFrameHeight)
 	m.clamp()
 	if query != "" {
 		m = m.openSearch()

@@ -1,6 +1,9 @@
-// Command braids manages Claude Code conversations as a graph.
+// Command braids manages Claude Code conversations as a graph. It indexes every
+// transcript under ~/.claude, draws them as a forest of branches, searches all
+// of them, and cuts a new conversation from any turn of any of them.
 //
-// This build ships the index and search; the TUI is the next slice.
+// It never talks to a model. Everything it shows is derived from files the
+// harness already wrote, and the only files it writes are its own.
 package main
 
 import (
@@ -247,8 +250,16 @@ func defaultDB() (string, error) {
 		return "", fmt.Errorf("locate home directory: %w", err)
 	}
 	dir := filepath.Join(home, ".braids")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create %s: %w", dir, err)
+	}
+	// MkdirAll leaves an existing directory's mode alone, so a braids
+	// directory made by an older build stays as wide as it was. Everything
+	// under it is conversation data; tighten it on the way past.
+	if info, err := os.Stat(dir); err == nil && info.Mode().Perm()&0o077 != 0 {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return "", fmt.Errorf("restrict %s: %w", dir, err)
+		}
 	}
 	return filepath.Join(dir, "index.db"), nil
 }

@@ -341,7 +341,7 @@ func (m Model) renderSpine() string {
 	b.WriteString(m.framed(m.spineColumns()))
 	b.WriteString("\n")
 
-	blank := strings.Repeat(" ", m.contentWidth())
+	blank := repeat(" ", m.contentWidth())
 	switch {
 	case s.err != nil:
 		b.WriteString(m.framed(padRight(" "+m.theme.Empty.Render(s.err.Error()), m.contentWidth())))
@@ -566,10 +566,10 @@ func (m Model) seamParts(c *index.CompactionRow) (plain, styled string) {
 	if rule < 0 {
 		rule = 0
 	}
-	plain = " " + strings.Repeat(g.Seam, 2) + label + strings.Repeat(g.Seam, rule) + " "
-	styled = " " + m.theme.Faint.Render(strings.Repeat(g.Seam, 2)) +
+	plain = " " + repeat(g.Seam, 2) + label + repeat(g.Seam, rule) + " "
+	styled = " " + m.theme.Faint.Render(repeat(g.Seam, 2)) +
 		m.theme.Accent.Render(label) +
-		m.theme.Faint.Render(strings.Repeat(g.Seam, rule)) + " "
+		m.theme.Faint.Render(repeat(g.Seam, rule)) + " "
 	return plain, styled
 }
 

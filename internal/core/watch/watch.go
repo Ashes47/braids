@@ -66,7 +66,7 @@ func (w *Watcher) Close() error {
 // watchTree adds the root and its immediate project directories. fsnotify is
 // not recursive, and transcripts live exactly one level down.
 func (w *Watcher) watchTree(root string) error {
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := os.MkdirAll(root, 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", root, err)
 	}
 	if err := w.fs.Add(root); err != nil {

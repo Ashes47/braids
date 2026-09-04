@@ -902,3 +902,29 @@ func TestMarkNeverCostsTheGlyphKey(t *testing.T) {
 		t.Fatal("the mark never appeared at any width")
 	}
 }
+
+// A terminal can report a size the layout is not defined for — a one-column
+// pane, or a resize caught mid-flight. The width arithmetic subtracts borders
+// and margins, so an unclamped small frame took the program down. No size may
+// panic, in any view.
+func TestNoFrameSizePanics(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("root", "main work", "app", 100, time.Hour),
+		laneInfo("kid", "a branch", "app", 10, time.Minute),
+	}
+	f := forestOf(lanes, map[string]string{"kid": "root"})
+	for width := 1; width <= 120; width++ {
+		for _, height := range []int{1, 2, 5, 12, 40} {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("panic at %dx%d: %v", width, height, r)
+					}
+				}()
+				_ = Render(f, Options{ASCII: true, Source: "claudecode"}, "", "", width, height)
+				_ = Render(f, Options{ASCII: true, Source: "claudecode"}, "root", "", width, height)
+				_ = Render(f, Options{ASCII: true, Source: "claudecode"}, "", "work", width, height)
+			}()
+		}
+	}
+}

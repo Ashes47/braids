@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"strings"
 	"time"
 
@@ -167,7 +169,36 @@ func Open(path string) (*Index, error) {
 	if err := migrate(db); err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
+	if err := restrict(path); err != nil {
+		return nil, errors.Join(err, db.Close())
+	}
 	return &Index{db: db}, nil
+}
+
+// restrict keeps the index to its owner. It holds the full text of every
+// message braids has read, and Claude Code keeps the transcripts it came from
+// at 0700 — a tool that copies private data into a world-readable file has
+// widened the user's exposure without being asked to. SQLite creates its
+// database and sidecar files at whatever the umask allows, so the modes are set
+// after the fact, and on every open rather than only at creation: an index made
+// by an older build should be tightened too.
+func restrict(path string) error {
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		info, err := os.Stat(name)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // WAL and shared-memory files appear only once used
+		}
+		if err != nil {
+			return fmt.Errorf("check %s: %w", name, err)
+		}
+		if info.Mode().Perm()&0o077 == 0 {
+			continue
+		}
+		if err := os.Chmod(name, 0o600); err != nil {
+			return fmt.Errorf("restrict %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // migrate brings the database to the current schema, discarding an older one.

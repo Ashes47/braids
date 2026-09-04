@@ -170,7 +170,7 @@ func (m Model) renderSearch() string {
 	b.WriteString(m.framed(m.searchColumns()))
 	b.WriteString("\n")
 
-	blank := strings.Repeat(" ", m.contentWidth())
+	blank := repeat(" ", m.contentWidth())
 	switch {
 	case s.err != nil:
 		b.WriteString(m.framed(padRight(" "+m.theme.Empty.Render(s.err.Error()), m.contentWidth())))

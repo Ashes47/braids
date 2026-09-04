@@ -74,7 +74,7 @@ func (s *Store[T]) flush() error {
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", filepath.Base(s.path), err)
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(s.path), err)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".sidecar-*")

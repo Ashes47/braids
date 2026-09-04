@@ -170,6 +170,10 @@ braids reads your transcripts, so this matters more than usual:
   yourself.
 - **Nothing leaves your machine.** The index is a local SQLite file at
   `~/.braids/index.db`.
+- **What it writes stays private to you.** `~/.braids` is `0700` and the index
+  is `0600`, because it holds the full text of every message it has read and
+  Claude Code keeps the transcripts that came from at `0700`. An index left
+  loose by an older build is tightened the next time braids opens it.
 - **It never writes to a transcript Claude Code owns.** Branching writes a new
   session file; the source is opened read-only. One writer per file, always.
 - **Delete braids and you lose a view, never a conversation.** Everything is
@@ -201,6 +205,17 @@ transcripts:
 braids does not talk to any model, proxy your session, or replace your terminal.
 It does not sync anything anywhere. It is one window next to the ones you already
 have open.
+
+## Security
+
+`BRAIDS_SPAWN` is run through a shell, so every value braids substitutes into it
+is shell-quoted first: a conversation's title and directory are data read out of
+a transcript, and a conversation called `x; rm -rf ~ #` must be a name rather
+than a command. Your template supplies the shell syntax; the values never do —
+so do not put quotes around a placeholder yourself.
+
+Found something? Open an issue for anything that is not exploitable, and email
+the address in `git log` for anything that is.
 
 ## Other harnesses
 

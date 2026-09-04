@@ -60,7 +60,7 @@ func (b *Bin) Discard(label string, paths []string) (Entry, error) {
 		At:    time.Now(),
 	}
 	dest := filepath.Join(b.dir, entry.ID)
-	if err := os.MkdirAll(dest, 0o755); err != nil {
+	if err := os.MkdirAll(dest, 0o700); err != nil {
 		return Entry{}, fmt.Errorf("create bin: %w", err)
 	}
 
@@ -174,7 +174,7 @@ func readManifest(dir string) (Entry, error) {
 func (b *Bin) Restore(entry Entry) error {
 	var failures []error
 	for _, item := range entry.Items {
-		if err := os.MkdirAll(filepath.Dir(item.From), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(item.From), 0o700); err != nil {
 			failures = append(failures, err)
 			continue
 		}

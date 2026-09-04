@@ -347,7 +347,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BackgroundColorMsg:
 		m.theme = NewTheme(msg.IsDark(), m.ascii)
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
+		m.width, m.height = max(msg.Width, minFrameWidth), max(msg.Height, minFrameHeight)
 		m.clamp()
 		m.clampSpine()
 		m.clampBin()
@@ -787,7 +787,7 @@ func (m Model) render() string {
 	b.WriteString(m.framed(m.columns()))
 	b.WriteString("\n")
 
-	blank := strings.Repeat(" ", m.contentWidth())
+	blank := repeat(" ", m.contentWidth())
 	if len(m.visible) == 0 {
 		empty := m.theme.Empty.Render(m.emptyMessage())
 		b.WriteString(m.framed(padRight(" "+empty, m.contentWidth()+lipgloss.Width(empty)-lipgloss.Width(m.emptyMessage()))))
@@ -1175,7 +1175,7 @@ func humanAge(d time.Duration) string {
 func spread(left, right string, width int) string {
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap >= 1 {
-		return left + strings.Repeat(" ", gap) + right
+		return left + repeat(" ", gap) + right
 	}
 	// Nothing fits: keep the left side, which carries the facts, and truncate
 	// rather than run past the edge of the terminal.
@@ -1206,14 +1206,14 @@ func truncate(s string, width int) string {
 
 func padRight(s string, width int) string {
 	if gap := width - lipgloss.Width(s); gap > 0 {
-		return s + strings.Repeat(" ", gap)
+		return s + repeat(" ", gap)
 	}
 	return s
 }
 
 func padLeft(s string, width int) string {
 	if gap := width - lipgloss.Width(s); gap > 0 {
-		return strings.Repeat(" ", gap) + s
+		return repeat(" ", gap) + s
 	}
 	return s
 }

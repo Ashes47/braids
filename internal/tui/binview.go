@@ -135,7 +135,7 @@ func (m Model) renderBin() string {
 	out.WriteString(m.framed(m.binColumns()))
 	out.WriteString("\n")
 
-	blank := strings.Repeat(" ", m.contentWidth())
+	blank := repeat(" ", m.contentWidth())
 	switch {
 	case b.err != nil:
 		out.WriteString(m.framed(padRight(" "+m.theme.Empty.Render(b.err.Error()), m.contentWidth())) + "\n")

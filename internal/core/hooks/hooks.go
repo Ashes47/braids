@@ -84,7 +84,7 @@ func Record(path string, in io.Reader) error {
 // braids is running: events that arrive while it is closed are still there when
 // it opens.
 func Append(path string, e Event) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 	}
 	line, err := json.Marshal(e)

@@ -3,6 +3,9 @@ package index
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -474,5 +477,51 @@ func TestSyncReplacesSubagentsRatherThanDuplicating(t *testing.T) {
 	}
 	if len(agents) != 1 {
 		t.Errorf("re-reading a lane duplicated its subagents: %d", len(agents))
+	}
+}
+
+// The index holds the full text of every message braids has read, and Claude
+// Code keeps the transcripts it came from at 0700. Copying that into a
+// world-readable file widens the user's exposure without being asked to.
+func TestIndexIsPrivateToItsOwner(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "index.db")
+
+	ix, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := ix.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		info, err := os.Stat(name)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("stat %s: %v", name, err)
+		}
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			t.Errorf("%s is mode %o, readable beyond its owner", filepath.Base(name), perm)
+		}
+	}
+
+	// An index left loose by an older build is tightened on the next open,
+	// not only when it is created.
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	again, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer again.Close() //nolint:errcheck // test cleanup
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		t.Errorf("reopening a loose index left it at mode %o", perm)
 	}
 }

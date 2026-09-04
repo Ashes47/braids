@@ -264,12 +264,14 @@ type rawMessage struct {
 }
 
 type block struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text"`
-	Thinking string          `json:"thinking"`
-	Name     string          `json:"name"`
-	Input    json.RawMessage `json:"input"`
-	Content  json.RawMessage `json:"content"`
+	Type      string          `json:"type"`
+	ID        string          `json:"id"`
+	ToolUseID string          `json:"tool_use_id"`
+	Text      string          `json:"text"`
+	Thinking  string          `json:"thinking"`
+	Name      string          `json:"name"`
+	Input     json.RawMessage `json:"input"`
+	Content   json.RawMessage `json:"content"`
 }
 
 // toMessage converts a raw record, reporting false for the bookkeeping records
@@ -354,13 +356,13 @@ func (b block) toPart() (model.Part, bool) {
 		}
 		return model.Part{Kind: model.PartThinking, Text: b.Thinking}, true
 	case "tool_use":
-		return model.Part{Kind: model.PartToolUse, Tool: b.Name, Text: string(b.Input)}, true
+		return model.Part{Kind: model.PartToolUse, Tool: b.Name, ID: b.ID, Text: string(b.Input)}, true
 	case "tool_result":
 		text := flatten(b.Content)
 		if text == "" {
 			return model.Part{}, false
 		}
-		return model.Part{Kind: model.PartToolResult, Text: text}, true
+		return model.Part{Kind: model.PartToolResult, ID: b.ToolUseID, Text: text}, true
 	default:
 		return model.Part{}, false
 	}
@@ -394,6 +396,7 @@ func flatten(raw json.RawMessage) string {
 
 // compile-time check that Source satisfies the port.
 var (
-	_ store.Source   = (*Source)(nil)
-	_ store.Enricher = (*Source)(nil)
+	_ store.Source     = (*Source)(nil)
+	_ store.Enricher   = (*Source)(nil)
+	_ store.Sidechains = (*Source)(nil)
 )

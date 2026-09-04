@@ -40,6 +40,8 @@ usage:
   braids search [flags] QUERY            search every indexed message
   braids lanes                           list indexed conversations
   braids branch --lane ID --at TURN      cut a new conversation at that turn
+  braids agents --lane ID                list the subagents a conversation spawned
+  braids promote --lane ID --agent ID    turn a subagent into its own conversation
   braids version
 
 map flags:
@@ -87,6 +89,10 @@ func run(args []string, w io.Writer) error {
 		return cmdLanes(args[1:], out)
 	case "branch":
 		return cmdBranch(args[1:], out)
+	case "promote":
+		return cmdPromote(args[1:], out)
+	case "agents":
+		return cmdAgents(args[1:], out)
 	case "version":
 		out.printf("braids %s (%s)\n", version, commit)
 		return out.Err()
@@ -196,8 +202,14 @@ func cmdMap(args []string, out *printer) error {
 		Source:    "claudecode",
 		IndexPath: dbPath,
 		LoadSpine: tui.SpineLoader(ctx, ix),
-		Origins:   provenance.All(),
-		Changes:   changes,
+		LoadSubagents: func(laneID string) ([]index.SubagentRow, error) {
+			return ix.LaneSubagents(ctx, laneID)
+		},
+		Promote: func(laneID, agentID string) (string, error) {
+			return promoteAgent(ctx, ix, provenance, laneID, agentID)
+		},
+		Origins: provenance.All(),
+		Changes: changes,
 		ResumeCommand: func(laneID string) (string, error) {
 			return resumeCommand(ctx, ix, laneID)
 		},
@@ -402,6 +414,156 @@ func nameFlag(name string) string {
 		return ""
 	}
 	return fmt.Sprintf(" --name %q", name)
+}
+
+func cmdPromote(args []string, out *printer) error {
+	fs := flag.NewFlagSet("promote", flag.ContinueOnError)
+	laneRef := fs.String("lane", "", "conversation the subagent belongs to")
+	agentRef := fs.String("agent", "", "subagent to promote (ID prefix)")
+	db := fs.String("db", "", "index location")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *laneRef == "" {
+		return errors.New("promote needs --lane (try: braids agents --lane abc123)")
+	}
+	dbPath, err := resolveDB(*db)
+	if err != nil {
+		return err
+	}
+	ix, err := index.Open(dbPath)
+	if err != nil {
+		return err
+	}
+	defer ix.Close() //nolint:errcheck // read-only
+
+	ctx := context.Background()
+	lane, err := findLane(ctx, ix, *laneRef)
+	if err != nil {
+		return err
+	}
+	agents, err := ix.LaneSubagents(ctx, lane.ID)
+	if err != nil {
+		return err
+	}
+	agent, err := pickAgent(agents, *agentRef)
+	if err != nil {
+		return err
+	}
+	provenance, err := origins.Load(originsPath(dbPath))
+	if err != nil {
+		return err
+	}
+	newID, err := promoteAgent(ctx, ix, provenance, lane.ID, agent.ID)
+	if err != nil {
+		return err
+	}
+	out.printf("promoted %s (%s) from turn %d\n  new conversation %s\n  resume with: claude --resume %s\n",
+		agent.Type, agent.Task, agent.ParentSeq, newID, newID)
+	return out.Err()
+}
+
+// pickAgent resolves a subagent by ID prefix, or the only one there is.
+func pickAgent(agents []index.SubagentRow, ref string) (index.SubagentRow, error) {
+	if len(agents) == 0 {
+		return index.SubagentRow{}, errors.New("that conversation spawned no subagents")
+	}
+	if ref == "" {
+		if len(agents) == 1 {
+			return agents[0], nil
+		}
+		return index.SubagentRow{}, fmt.Errorf("it spawned %d subagents; name one with --agent", len(agents))
+	}
+	var found []index.SubagentRow
+	for _, a := range agents {
+		if strings.HasPrefix(a.ID, ref) {
+			found = append(found, a)
+		}
+	}
+	switch len(found) {
+	case 0:
+		return index.SubagentRow{}, fmt.Errorf("no subagent starts with %q", ref)
+	case 1:
+		return found[0], nil
+	default:
+		return index.SubagentRow{}, fmt.Errorf("%q matches %d subagents", ref, len(found))
+	}
+}
+
+func cmdAgents(args []string, out *printer) error {
+	fs := flag.NewFlagSet("agents", flag.ContinueOnError)
+	laneRef := fs.String("lane", "", "conversation to list subagents of")
+	db := fs.String("db", "", "index location")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *laneRef == "" {
+		return errors.New("agents needs --lane")
+	}
+	ix, err := openIndex(*db)
+	if err != nil {
+		return err
+	}
+	defer ix.Close() //nolint:errcheck // read-only
+
+	ctx := context.Background()
+	lane, err := findLane(ctx, ix, *laneRef)
+	if err != nil {
+		return err
+	}
+	agents, err := ix.LaneSubagents(ctx, lane.ID)
+	if err != nil {
+		return err
+	}
+	if len(agents) == 0 {
+		out.printf("%s spawned no subagents\n", shortID(lane.ID))
+		return out.Err()
+	}
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	rows := []string{"AGENT\tTYPE\tTURN\tTURNS\tTASK"}
+	for _, a := range agents {
+		rows = append(rows, fmt.Sprintf("%s\t%s\t%d\t%d\t%s",
+			truncate(a.ID, 18), truncate(a.Type, 24), a.ParentSeq, a.Messages, a.Task))
+	}
+	for _, r := range rows {
+		if _, err := fmt.Fprintln(tw, r); err != nil {
+			return fmt.Errorf("write agents: %w", err)
+		}
+	}
+	if err := tw.Flush(); err != nil {
+		return fmt.Errorf("write agents: %w", err)
+	}
+	return out.Err()
+}
+
+// promoteAgent turns a subagent into a conversation of its own and records
+// where it came from, so the map hangs it under the lane that spawned it.
+func promoteAgent(ctx context.Context, ix *index.Index, provenance *origins.Store, laneID, agentID string) (string, error) {
+	agents, err := ix.LaneSubagents(ctx, laneID)
+	if err != nil {
+		return "", err
+	}
+	for _, a := range agents {
+		if a.ID != agentID {
+			continue
+		}
+		root, err := claudecode.DefaultRoot()
+		if err != nil {
+			return "", err
+		}
+		lane, err := claudecode.New(root).Promote(ctx, a.Subagent)
+		if err != nil {
+			return "", err
+		}
+		// A promoted agent shares no message IDs with its parent, so nothing
+		// could infer where it came from; recording it is the only way it hangs
+		// under the conversation that spawned it.
+		if err := provenance.Record(lane.ID, model.Origin{Parent: laneID, ForkSeq: a.ParentSeq}); err != nil {
+			return "", err
+		}
+		return lane.ID, nil
+	}
+	return "", fmt.Errorf("no subagent %s in %s", shortID(agentID), shortID(laneID))
 }
 
 // resumeCommand is what the user would type to continue a conversation.

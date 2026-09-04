@@ -15,6 +15,7 @@ import (
 type fakeSource struct {
 	lanes    []model.Lane
 	messages map[string][]model.Message
+	agents   map[string][]model.Subagent
 	// reads counts how many lanes were actually streamed, so a test can assert
 	// that an incremental sync skipped the rest.
 	reads int
@@ -405,5 +406,73 @@ func TestSearchHitsCarryTheirTurnNumber(t *testing.T) {
 	// Without the turn number a result cannot be jumped to.
 	if hits[0].Seq != 2 {
 		t.Errorf("Seq = %d, want 2 (the second turn of the lane)", hits[0].Seq)
+	}
+}
+
+func (f *fakeSource) Subagents(_ context.Context, lane model.Lane) ([]model.Subagent, error) {
+	return f.agents[lane.ID], nil
+}
+
+func TestSubagentsAreAttachedToTheTurnThatSpawnedThem(t *testing.T) {
+	ctx := context.Background()
+	ix := openIndex(t)
+	src := newFixture()
+	src.agents = map[string][]model.Subagent{
+		"main": {{
+			ID: "agent-1", LaneID: "main", Type: "Explore", Task: "look around",
+			ToolUseID: "toolu_1", Depth: 1, Path: "/tmp/agent-1.jsonl", Messages: 42,
+		}},
+	}
+	// The tool call the agent answers lives on the lane's second turn.
+	src.messages["main"][1].Parts[0].ID = "toolu_1"
+
+	if _, err := ix.Rebuild(ctx, src); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	agents, err := ix.LaneSubagents(ctx, "main")
+	if err != nil {
+		t.Fatalf("LaneSubagents: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("want 1 subagent, got %d", len(agents))
+	}
+	got := agents[0]
+	if got.ParentSeq != 2 {
+		t.Errorf("ParentSeq = %d, want 2 — without it the agent cannot be placed", got.ParentSeq)
+	}
+	if got.Type != "Explore" || got.Task != "look around" || got.Messages != 42 {
+		t.Errorf("subagent = %+v", got)
+	}
+
+	// A lane that spawned none reports none.
+	none, err := ix.LaneSubagents(ctx, "branch")
+	if err != nil || none != nil {
+		t.Errorf("branch subagents = %v, %v", none, err)
+	}
+}
+
+func TestSyncReplacesSubagentsRatherThanDuplicating(t *testing.T) {
+	ctx := context.Background()
+	ix := openIndex(t)
+	src := newFixture()
+	src.agents = map[string][]model.Subagent{
+		"main": {{ID: "agent-1", LaneID: "main", Type: "Explore", ToolUseID: "toolu_1"}},
+	}
+	src.messages["main"][1].Parts[0].ID = "toolu_1"
+
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatalf("first Sync: %v", err)
+	}
+	src.lanes[0].Size = 1234 // force a re-read
+	src.lanes[0].Updated = src.lanes[0].Updated.Add(time.Minute)
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatalf("second Sync: %v", err)
+	}
+	agents, err := ix.LaneSubagents(ctx, "main")
+	if err != nil {
+		t.Fatalf("LaneSubagents: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Errorf("re-reading a lane duplicated its subagents: %d", len(agents))
 	}
 }

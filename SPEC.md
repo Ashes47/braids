@@ -392,19 +392,28 @@ On create the new lane animates out of the junction and the terminal opens
 already resumed. **thought** = shared cwd, exploratory. **workspace** = its own
 worktree, safe to write, runs concurrently with siblings.
 
-### 6.6 Subagent — expanded in place
+### 6.6 Subagent — in the conversation that spawned it
 
 ```
-│  ⊕ t401  Explore · "find the ORDER BY key in the dispatcher"   6 turns    ▾   │
-│  ╎   ● you      Count the ORDER BY keys in the dispatcher and report          │
-│  ╎   ● claude   Reading src/dispatch/queue.ts …                               │
-│  ╎   ⚙ Grep     "ORDER BY" src/**/*.ts                        14 matches      │
-│  ╎   ● claude   Three ORDER BY keys; only one is honored (queue.ts:212)       │
-│  ╎                                             [p] promote to branch          │
+│ ●  t633 claude  Read                                                           │
+│   ├─⊕ Explore · Verify console edit points                            42 turns │
+│   ├─⊕ Explore · Verify job-watcher extension points                   49 turns │
+│   ├─⊕ microagi:code-reviewer · Harsh pre-PR review of pipeline fix    31 turns │
 ```
 
-Today this entire conversation is invisible — one `tool_use`/`tool_result` pair
-in the parent. `p` promotes it to a first-class lane you can continue in.
+A subagent is a whole conversation the harness collapses into one `tool_use` and
+one `tool_result`. One real lane here hides **ten of them, 409 turns in total**,
+none of which Claude Code offers any way to read.
+
+They are drawn against the turn that spawned them, joined by the `toolUseId` in
+each agent's meta file, and `p` promotes one into a conversation of its own:
+clearing the sidechain mark and giving it a session ID is enough for the harness
+to resume it. Verified end to end — a promoted agent answered a question about
+its own earlier work.
+
+A promoted agent shares no message IDs with its parent, so nothing could infer
+where it came from. Its provenance is recorded (§4), which is what hangs it
+under the conversation that spawned it.
 
 ### 6.7 Sweep — the Friday clean-up
 
@@ -619,7 +628,8 @@ needs-you — are declared as optional `Capabilities`, never assumed.
 7. ~~**Lane state.**~~ **Done** from files: working, thinking, your turn,
    stopped, unanswered, with `n`/`N` stepping between what is owed. Hooks
    would add the running-versus-blocked distinction.
-8. **Subagents.** Nested lanes, promote.
+8. ~~**Subagents.**~~ **Done**: discovered, indexed against the turn that
+   spawned them, drawn in the spine, and promotable with `p`.
 9. **Housekeeping.** Archive, sweep, trash, undo.
 10. **Merge.** Splice with preview.
 

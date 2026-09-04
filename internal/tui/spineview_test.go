@@ -46,7 +46,7 @@ func TestEnterOpensTheSpineAndEscapeReturns(t *testing.T) {
 	}
 	out := plain(m.View().Content)
 	for _, want := range []string{
-		"Lane:", "lane1234", "Junctions:", "Spine(queue stall)[4]",
+		"Lane:", "lane1234", "Branches:", "Agents:", "Spine(queue stall)[4]",
 		"why is the queue stalling", "12 turns · 9 Bash · 2 Read", "try option c",
 	} {
 		if !strings.Contains(out, want) {

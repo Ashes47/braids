@@ -18,12 +18,13 @@ import (
 // schemaVersion is bumped whenever the tables change. The index holds no unique
 // state — it rebuilds from the transcripts in seconds — so an old schema is
 // dropped and recreated rather than migrated.
-const schemaVersion = 5
+const schemaVersion = 6
 
 const dropAll = `
 DROP TABLE IF EXISTS parts;
 DROP TABLE IF EXISTS messages;
-DROP TABLE IF EXISTS lanes;`
+DROP TABLE IF EXISTS lanes;
+DROP TABLE IF EXISTS subagents;`
 
 const schema = `
 CREATE TABLE IF NOT EXISTS lanes (
@@ -53,6 +54,18 @@ CREATE TABLE IF NOT EXISTS messages (
 	PRIMARY KEY (lane_id, seq)
 );
 CREATE INDEX IF NOT EXISTS messages_by_msg_id ON messages(msg_id);
+CREATE TABLE IF NOT EXISTS subagents (
+	lane_id     TEXT    NOT NULL,
+	agent_id    TEXT    NOT NULL,
+	type        TEXT    NOT NULL DEFAULT '',
+	task        TEXT    NOT NULL DEFAULT '',
+	tool_use_id TEXT    NOT NULL DEFAULT '',
+	depth       INTEGER NOT NULL DEFAULT 0,
+	path        TEXT    NOT NULL DEFAULT '',
+	msgs        INTEGER NOT NULL DEFAULT 0,
+	parent_seq  INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (lane_id, agent_id)
+);
 CREATE VIRTUAL TABLE IF NOT EXISTS parts USING fts5(
 	body,
 	lane_id UNINDEXED,
@@ -128,6 +141,10 @@ func Open(path string) (*Index, error) {
 	for _, pragma := range []string{
 		`PRAGMA journal_mode=WAL`,
 		`PRAGMA synchronous=NORMAL`,
+		// Another braids may be open: the map holds the index while it
+		// watches. WAL lets readers and one writer coexist, and a busy timeout
+		// makes a writer wait its turn instead of failing on contact.
+		`PRAGMA busy_timeout=5000`,
 	} {
 		if _, err := db.Exec(pragma); err != nil {
 			return nil, errors.Join(fmt.Errorf("apply %s: %w", pragma, err), db.Close())
@@ -180,67 +197,23 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
 
-	for _, stmt := range []string{`DELETE FROM parts`, `DELETE FROM messages`, `DELETE FROM lanes`} {
+	for _, stmt := range []string{
+		`DELETE FROM parts`, `DELETE FROM messages`,
+		`DELETE FROM subagents`, `DELETE FROM lanes`,
+	} {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return Stats{}, fmt.Errorf("clear index: %w", err)
 		}
 	}
-	insertLane, err := tx.PrepareContext(ctx,
-		`INSERT INTO lanes (id,source,project,path,title,cwd,created,updated,size,msg_count,part_count,last_role,last_tool) `+
-			`VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-	if err != nil {
-		return Stats{}, fmt.Errorf("prepare lane insert: %w", err)
-	}
-	defer insertLane.Close() //nolint:errcheck // tx-scoped
-	insertPart, err := tx.PrepareContext(ctx,
-		`INSERT INTO parts (body,lane_id,msg_id,kind,role,tool,at) VALUES (?,?,?,?,?,?,?)`)
-	if err != nil {
-		return Stats{}, fmt.Errorf("prepare part insert: %w", err)
-	}
-	defer insertPart.Close() //nolint:errcheck // tx-scoped
-	insertMsg, err := tx.PrepareContext(ctx,
-		`INSERT INTO messages (lane_id,seq,msg_id,parent_id,role,at,preview,tools) `+
-			`VALUES (?,?,?,?,?,?,?,?)`)
-	if err != nil {
-		return Stats{}, fmt.Errorf("prepare message insert: %w", err)
-	}
-	defer insertMsg.Close() //nolint:errcheck // tx-scoped
 
 	stats := Stats{Lanes: len(lanes)}
 	for _, lane := range lanes {
-		lane = enrich(ctx, src, lane)
-		var laneMsgs, laneParts int
-		var activity model.Activity
-		err := src.Messages(ctx, lane, func(m model.Message) error {
-			stats.Messages++
-			laneMsgs++
-			activity = activityOf(m)
-			if _, err := insertMsg.ExecContext(ctx, m.LaneID, laneMsgs, m.ID,
-				m.ParentID, string(m.Role), m.At.Unix(), previewOf(m), toolsOf(m)); err != nil {
-				return fmt.Errorf("insert message: %w", err)
-			}
-			for _, p := range m.Parts {
-				if strings.TrimSpace(p.Text) == "" {
-					continue
-				}
-				if _, err := insertPart.ExecContext(ctx, p.Text, m.LaneID, m.ID,
-					string(p.Kind), string(m.Role), p.Tool, m.At.Unix()); err != nil {
-					return fmt.Errorf("insert part: %w", err)
-				}
-				stats.Parts++
-				laneParts++
-			}
-			return nil
-		})
+		msgs, parts, err := replaceLane(ctx, tx, src, lane)
 		if err != nil {
-			return Stats{}, fmt.Errorf("index lane %s: %w", lane.ID, err)
+			return Stats{}, err
 		}
-		if _, err := insertLane.ExecContext(ctx, lane.ID, lane.Source, lane.Project,
-			lane.Path, lane.Title, lane.Cwd, unixOrZero(lane.Created), lane.Updated.Unix(),
-			lane.Size, laneMsgs, laneParts,
-			string(activity.LastRole), boolToInt(activity.LastWasToolCall)); err != nil {
-			return Stats{}, fmt.Errorf("insert lane %s: %w", lane.ID, err)
-		}
+		stats.Messages += msgs
+		stats.Parts += parts
 	}
 	if err := tx.Commit(); err != nil {
 		return Stats{}, fmt.Errorf("commit: %w", err)
@@ -326,6 +299,7 @@ func deleteLane(ctx context.Context, tx *sql.Tx, laneID string) error {
 	for _, stmt := range []string{
 		`DELETE FROM parts WHERE lane_id = ?`,
 		`DELETE FROM messages WHERE lane_id = ?`,
+		`DELETE FROM subagents WHERE lane_id = ?`,
 		`DELETE FROM lanes WHERE id = ?`,
 	} {
 		if _, err := tx.ExecContext(ctx, stmt, laneID); err != nil {
@@ -356,9 +330,17 @@ func replaceLane(ctx context.Context, tx *sql.Tx, src store.Source, lane model.L
 	}
 	defer insertMsg.Close() //nolint:errcheck // tx-scoped
 
+	// Subagents name the tool call they answer, so the turn each one attaches
+	// to is learned while streaming rather than by a second pass.
+	spawnedAt := map[string]int{}
 	err = src.Messages(ctx, lane, func(m model.Message) error {
 		msgs++
 		activity = activityOf(m)
+		for _, p := range m.Parts {
+			if p.Kind == model.PartToolUse && p.ID != "" {
+				spawnedAt[p.ID] = msgs
+			}
+		}
 		if _, err := insertMsg.ExecContext(ctx, m.LaneID, msgs, m.ID,
 			m.ParentID, string(m.Role), m.At.Unix(), previewOf(m), toolsOf(m)); err != nil {
 			return fmt.Errorf("insert message: %w", err)
@@ -386,7 +368,74 @@ func replaceLane(ctx context.Context, tx *sql.Tx, src store.Source, lane model.L
 		string(activity.LastRole), boolToInt(activity.LastWasToolCall)); err != nil {
 		return 0, 0, fmt.Errorf("insert lane %s: %w", lane.ID, err)
 	}
+	if err := indexSubagents(ctx, tx, src, lane, spawnedAt); err != nil {
+		return 0, 0, err
+	}
 	return msgs, parts, nil
+}
+
+// indexSubagents records the conversations a lane spawned, each against the
+// turn that spawned it.
+func indexSubagents(ctx context.Context, tx *sql.Tx, src store.Source, lane model.Lane, spawnedAt map[string]int) error {
+	sides, ok := src.(store.Sidechains)
+	if !ok {
+		return nil
+	}
+	agents, ok := readSubagents(ctx, sides, lane)
+	if !ok {
+		return nil // a lane is still worth indexing without its subagents
+	}
+	for _, a := range agents {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO subagents (lane_id,agent_id,type,task,tool_use_id,depth,path,msgs,parent_seq) `+
+				`VALUES (?,?,?,?,?,?,?,?,?)`,
+			lane.ID, a.ID, a.Type, a.Task, a.ToolUseID, a.Depth, a.Path, a.Messages,
+			spawnedAt[a.ToolUseID]); err != nil {
+			return fmt.Errorf("insert subagent %s: %w", a.ID, err)
+		}
+	}
+	return nil
+}
+
+// readSubagents fetches a lane's subagents, reporting false rather than an
+// error: their absence is cosmetic next to the lane itself.
+func readSubagents(ctx context.Context, sides store.Sidechains, lane model.Lane) ([]model.Subagent, bool) {
+	agents, err := sides.Subagents(ctx, lane)
+	if err != nil {
+		return nil, false
+	}
+	return agents, true
+}
+
+// SubagentRow is a subagent together with the turn it hangs from.
+type SubagentRow struct {
+	model.Subagent
+	ParentSeq int
+}
+
+// LaneSubagents returns the conversations a lane spawned, in turn order.
+func (ix *Index) LaneSubagents(ctx context.Context, laneID string) ([]SubagentRow, error) {
+	rows, err := ix.db.QueryContext(ctx,
+		`SELECT agent_id,type,task,tool_use_id,depth,path,msgs,parent_seq
+		 FROM subagents WHERE lane_id = ? ORDER BY parent_seq, agent_id`, laneID)
+	if err != nil {
+		return nil, fmt.Errorf("read subagents: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only
+
+	var out []SubagentRow
+	for rows.Next() {
+		r := SubagentRow{Subagent: model.Subagent{LaneID: laneID}}
+		if err := rows.Scan(&r.ID, &r.Type, &r.Task, &r.ToolUseID, &r.Depth,
+			&r.Path, &r.Messages, &r.ParentSeq); err != nil {
+			return nil, fmt.Errorf("scan subagent: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate subagents: %w", err)
+	}
+	return out, nil
 }
 
 // Search returns hits ranked by FTS5 relevance.

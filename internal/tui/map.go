@@ -39,6 +39,12 @@ type Options struct {
 	// LoadSpine reduces one lane to its spine. Passing it as a function keeps
 	// the views free of any dependency on the index.
 	LoadSpine func(laneID string) ([]graph.Segment, error)
+	// LoadSubagents lists the conversations a lane spawned and collapsed into
+	// single tool calls.
+	LoadSubagents func(laneID string) ([]index.SubagentRow, error)
+	// Promote turns a subagent into a conversation of its own, returning the
+	// new lane's ID.
+	Promote func(laneID, agentID string) (string, error)
 	// Branch cuts a new conversation from a lane at a turn, returning the new
 	// lane's ID. Nil disables branching, which is what a read-only Source gets.
 	Branch func(laneID string, turn int, name string) (string, error)
@@ -79,19 +85,21 @@ const (
 
 // Model is the Map: every conversation and every branch as a single forest.
 type Model struct {
-	theme     Theme
-	ascii     bool
-	source    string
-	indexPath string
-	now       func() time.Time
-	loadSpine func(string) ([]graph.Segment, error)
-	branch    func(string, int, string) (string, error)
-	refresh   func() (*graph.Forest, error)
-	changes   <-chan struct{}
-	resumeCmd func(string) (string, error)
-	spawn     func(string) error
-	terminal  string
-	searchFn  func(string, string) ([]index.Hit, error)
+	theme      Theme
+	ascii      bool
+	source     string
+	indexPath  string
+	now        func() time.Time
+	loadSpine  func(string) ([]graph.Segment, error)
+	loadAgents func(string) ([]index.SubagentRow, error)
+	promote    func(string, string) (string, error)
+	branch     func(string, int, string) (string, error)
+	refresh    func() (*graph.Forest, error)
+	changes    <-chan struct{}
+	resumeCmd  func(string) (string, error)
+	spawn      func(string) error
+	terminal   string
+	searchFn   func(string, string) ([]index.Hit, error)
 
 	notice string
 	failed bool
@@ -123,21 +131,23 @@ type Model struct {
 // as soon as the terminal reports its real background.
 func NewModel(f *graph.Forest, opts Options) Model {
 	m := Model{
-		theme:     NewTheme(true, opts.ASCII),
-		ascii:     opts.ASCII,
-		source:    opts.Source,
-		indexPath: opts.IndexPath,
-		loadSpine: opts.LoadSpine,
-		branch:    opts.Branch,
-		refresh:   opts.Refresh,
-		changes:   opts.Changes,
-		resumeCmd: opts.ResumeCommand,
-		spawn:     opts.Spawn,
-		terminal:  opts.Terminal,
-		searchFn:  opts.Search,
-		now:       time.Now,
-		width:     80,
-		height:    24,
+		theme:      NewTheme(true, opts.ASCII),
+		ascii:      opts.ASCII,
+		source:     opts.Source,
+		indexPath:  opts.IndexPath,
+		loadSpine:  opts.LoadSpine,
+		loadAgents: opts.LoadSubagents,
+		promote:    opts.Promote,
+		branch:     opts.Branch,
+		refresh:    opts.Refresh,
+		changes:    opts.Changes,
+		resumeCmd:  opts.ResumeCommand,
+		spawn:      opts.Spawn,
+		terminal:   opts.Terminal,
+		searchFn:   opts.Search,
+		now:        time.Now,
+		width:      80,
+		height:     24,
 	}
 	m.all = layout(f, m.theme.Glyphs)
 	m.visible = m.all

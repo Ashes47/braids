@@ -45,6 +45,17 @@ type Enricher interface {
 	Enrich(ctx context.Context, lane model.Lane) (model.Lane, error)
 }
 
+// Sidechains reports the conversations a lane spawned and collapsed into a
+// single tool call. Sources without subagents simply do not implement it.
+type Sidechains interface {
+	Subagents(ctx context.Context, lane model.Lane) ([]model.Subagent, error)
+}
+
+// Promoter turns a subagent's transcript into a conversation of its own.
+type Promoter interface {
+	Promote(ctx context.Context, agent model.Subagent) (model.Lane, error)
+}
+
 // Brancher creates a new lane from a prefix of an existing one.
 //
 // Implementations must never modify the source lane: a branch is a new file, so

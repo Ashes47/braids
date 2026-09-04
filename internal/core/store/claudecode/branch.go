@@ -230,4 +230,148 @@ func short(id string) string {
 	return id[:8]
 }
 
-var _ store.Brancher = (*Source)(nil)
+var (
+	_ store.Brancher = (*Source)(nil)
+	_ store.Promoter = (*Source)(nil)
+)
+
+// Promote turns a subagent's transcript into a conversation of its own.
+//
+// A subagent already holds a complete, linear exchange; it is only marked as a
+// sidechain and filed under its parent. Clearing that mark and giving it a
+// session ID of its own is enough for the harness to resume it — so an
+// exchange that was visible as a single tool call becomes a conversation that
+// can be read, searched and branched like any other.
+//
+// The subagent's own transcript is not touched.
+func (s *Source) Promote(ctx context.Context, agent model.Subagent) (model.Lane, error) {
+	if agent.Path == "" {
+		return model.Lane{}, errors.New("promote: subagent has no transcript")
+	}
+	lines, err := readLines(agent.Path)
+	if err != nil {
+		return model.Lane{}, err
+	}
+	newID, err := newSessionID()
+	if err != nil {
+		return model.Lane{}, err
+	}
+
+	// Land beside the parent conversation: a promoted agent belongs to the same
+	// project, not to the directory its sidechain was filed in.
+	dir := filepath.Dir(filepath.Dir(filepath.Dir(agent.Path)))
+	path := filepath.Join(dir, newID+".jsonl")
+	title := promotedTitle(agent)
+
+	if err := writePromoted(ctx, path, newID, title, lines); err != nil {
+		return model.Lane{}, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return model.Lane{}, fmt.Errorf("stat promoted lane: %w", err)
+	}
+	return model.Lane{
+		ID:      newID,
+		Source:  s.Name(),
+		Path:    path,
+		Title:   title,
+		Created: birthTime(info),
+		Updated: info.ModTime(),
+		Size:    info.Size(),
+	}, nil
+}
+
+func promotedTitle(agent model.Subagent) string {
+	switch {
+	case agent.Task != "" && agent.Type != "":
+		return agent.Type + ": " + agent.Task
+	case agent.Task != "":
+		return agent.Task
+	case agent.Type != "":
+		return agent.Type
+	default:
+		return "promoted agent"
+	}
+}
+
+func writePromoted(ctx context.Context, path, newID, title string, lines []line) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".braids-promote-*")
+	if err != nil {
+		return fmt.Errorf("create temp lane: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) //nolint:errcheck // best effort once renamed
+
+	err = func() error {
+		header, err := json.Marshal(map[string]string{
+			"type": "custom-title", "customTitle": title, "sessionId": newID,
+		})
+		if err != nil {
+			return fmt.Errorf("encode title: %w", err)
+		}
+		if _, err := tmp.Write(append(header, '\n')); err != nil {
+			return err
+		}
+		var leaf string
+		for _, l := range lines {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			rewritten, err := unsidechain(l.raw, newID)
+			if err != nil {
+				return err
+			}
+			if _, err := tmp.Write(append(rewritten, '\n')); err != nil {
+				return err
+			}
+			if l.uuid != "" {
+				leaf = l.uuid
+			}
+		}
+		if leaf == "" {
+			return errors.New("promote: transcript has no records")
+		}
+		pin, err := json.Marshal(map[string]string{
+			"type": "last-prompt", "leafUuid": leaf, "sessionId": newID,
+		})
+		if err != nil {
+			return fmt.Errorf("encode leaf: %w", err)
+		}
+		_, err = tmp.Write(append(pin, '\n'))
+		return err
+	}()
+	if err != nil {
+		return errors.Join(fmt.Errorf("write promoted lane: %w", err), tmp.Close())
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close promoted lane: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("place promoted lane: %w", err)
+	}
+	return nil
+}
+
+// unsidechain clears the marks that file a record under a parent conversation.
+func unsidechain(raw []byte, newID string) ([]byte, error) {
+	fields, ok := decodeObject(raw)
+	if !ok {
+		return raw, nil
+	}
+	delete(fields, "agentId")
+	fields["isSidechain"] = json.RawMessage("false")
+	encoded, err := json.Marshal(newID)
+	if err != nil {
+		return nil, fmt.Errorf("encode session id: %w", err)
+	}
+	for _, key := range []string{"sessionId", "session_id"} {
+		if _, present := fields[key]; present {
+			fields[key] = encoded
+		}
+	}
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return nil, fmt.Errorf("re-encode record: %w", err)
+	}
+	return out, nil
+}

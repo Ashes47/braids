@@ -18,8 +18,9 @@ import (
 // otherwise a branch is only visible from the map, and a conversation gives no
 // hint that it ever split.
 type spineRow struct {
-	seg  graph.Segment
-	fork *graph.Node
+	seg   graph.Segment
+	fork  *graph.Node
+	agent *index.SubagentRow
 }
 
 // spineState is one conversation opened for reading.
@@ -27,6 +28,7 @@ type spineState struct {
 	lane    index.LaneInfo
 	node    *graph.Node
 	segs    []graph.Segment
+	agents  []index.SubagentRow
 	rows    []spineRow
 	visible []spineRow
 	filter  filterInput
@@ -44,22 +46,27 @@ type spineState struct {
 func (s *spineState) build() {
 	children := append([]*graph.Node(nil), childrenOf(s.node)...)
 	sort.SliceStable(children, func(i, j int) bool { return children[i].ForkSeq < children[j].ForkSeq })
+	agents := append([]index.SubagentRow(nil), s.agents...)
+	sort.SliceStable(agents, func(i, j int) bool { return agents[i].ParentSeq < agents[j].ParentSeq })
 
 	s.rows = nil
-	next := 0
-	emitForksUpTo := func(seq int) {
-		for next < len(children) && children[next].ForkSeq <= seq {
-			s.rows = append(s.rows, spineRow{fork: children[next]})
-			next++
+	fork, agent := 0, 0
+	emitUpTo := func(seq int) {
+		for agent < len(agents) && agents[agent].ParentSeq <= seq {
+			a := agents[agent]
+			s.rows = append(s.rows, spineRow{agent: &a})
+			agent++
+		}
+		for fork < len(children) && children[fork].ForkSeq <= seq {
+			s.rows = append(s.rows, spineRow{fork: children[fork]})
+			fork++
 		}
 	}
 	for _, seg := range s.segs {
 		s.rows = append(s.rows, spineRow{seg: seg})
-		emitForksUpTo(seg.Seq)
+		emitUpTo(seg.Seq)
 	}
-	for ; next < len(children); next++ {
-		s.rows = append(s.rows, spineRow{fork: children[next]})
-	}
+	emitUpTo(int(^uint(0) >> 1))
 	s.apply()
 }
 
@@ -124,6 +131,9 @@ func (s *spineState) restore(key string) {
 }
 
 func rowKey(r spineRow) string {
+	if r.agent != nil {
+		return "agent:" + r.agent.ID
+	}
 	if r.fork != nil {
 		return "fork:" + r.fork.Lane.ID
 	}
@@ -131,6 +141,9 @@ func rowKey(r spineRow) string {
 }
 
 func (r spineRow) haystack() string {
+	if r.agent != nil {
+		return r.agent.Type + " " + r.agent.Task + " " + r.agent.ID
+	}
 	if r.fork != nil {
 		return r.fork.Lane.Title + " " + r.fork.Lane.ID
 	}
@@ -155,6 +168,11 @@ func (m Model) openNode(n *graph.Node, push bool) Model {
 	}
 	segs, err := m.loadSpine(n.Lane.ID)
 	next := &spineState{lane: n.Lane, node: n, segs: segs, err: err}
+	if m.loadAgents != nil {
+		if agents, agentErr := m.loadAgents(n.Lane.ID); agentErr == nil {
+			next.agents = agents
+		}
+	}
 	next.build()
 	if push && m.spine != nil {
 		m.stack = append(m.stack, m.spine)
@@ -189,8 +207,14 @@ func (m Model) spineKey(key string) (Model, tea.Cmd) {
 	switch key {
 	case "esc", "backspace", "h", "left":
 		return m.closeSpine(), nil
+	case "p":
+		return m.promoteAgent(), nil
 	case "enter", "l", "right":
 		row := s.current()
+		if row.agent != nil {
+			s.notice, s.failed = "press p to promote this agent into a conversation you can open", true
+			return m, nil
+		}
 		if row.fork == nil {
 			s.notice, s.failed = "no branch on this line — press b to make one, or n to find the next split", true
 			return m, nil
@@ -364,15 +388,16 @@ func (m Model) spineInfo() string {
 		}
 	}
 	forks := len(childrenOf(m.spine.node))
+	agents := len(m.spine.agents)
 	facts := []fact{
 		{"Lane", shortID(m.spine.lane.ID)},
 		{"Turns", fmt.Sprintf("%d", m.spine.lane.Messages)},
-		{"Junctions", fmt.Sprintf("%d", junctions)},
 		{"Branches", describeBranches(alternates, forks)},
+		{"Agents", fmt.Sprintf("%d", agents)},
 	}
 	keys := []hint{
 		{"j/k", "move"}, {"b", "branch here"},
-		{"/", "search"}, {"f", "filter turns"},
+		{"p", "promote agent"}, {"/", "search"},
 		{"↵", "open branch"}, {"n/N", "next split"},
 		{"y/o", "copy / open"}, {"esc", "back"},
 	}
@@ -415,15 +440,41 @@ const (
 
 func (m Model) renderRowLine(row spineRow, selected bool) string {
 	var plain, styled string
-	if row.fork != nil {
+	switch {
+	case row.agent != nil:
+		plain, styled = m.agentParts(row.agent)
+	case row.fork != nil:
 		plain, styled = m.forkParts(row.fork)
-	} else {
+	default:
 		plain, styled = m.segmentParts(row.seg)
 	}
 	if selected {
 		return m.theme.Selected.Width(m.contentWidth()).Render(plain)
 	}
 	return styled
+}
+
+// agentParts draws a conversation the lane spawned and then showed as a single
+// tool call. Claude Code gives no way to see these at all.
+func (m Model) agentParts(a *index.SubagentRow) (plain, styled string) {
+	g := m.theme.Glyphs
+	lead := "  " + g.Branch + g.Agent + " "
+	right := padLeft(fmt.Sprintf("%d turns", a.Messages), branchesWidth)
+
+	label := a.Type
+	if a.Task != "" {
+		label += " · " + a.Task
+	}
+	textWidth := m.contentWidth() - lipgloss.Width(lead) - 1 - branchesWidth - 1
+	if textWidth < 8 {
+		textWidth = 8
+	}
+	body := padRight(truncate(label, textWidth), textWidth)
+
+	plain = " " + lead + body + " " + right
+	styled = " " + m.theme.Rail.Render("  "+g.Branch) + m.theme.Accent.Render(g.Agent) + " " +
+		m.theme.Dim.Render(body) + " " + m.theme.Faint.Render(right)
+	return plain, styled
 }
 
 // forkParts draws a branch that left this conversation, indented under the turn
@@ -586,6 +637,36 @@ var stopWords = map[string]bool{
 	"why": true, "how": true, "what": true, "when": true, "who": true, "does": true,
 	"did": true, "will": true, "would": true, "should": true, "could": true,
 	"from": true, "into": true, "your": true, "than": true, "then": true,
+}
+
+// promoteAgent turns the selected subagent into a conversation of its own.
+func (m Model) promoteAgent() Model {
+	s := m.spine
+	row := s.current()
+	if row.agent == nil {
+		s.notice, s.failed = "p promotes a subagent — none is selected", true
+		return m
+	}
+	if m.promote == nil {
+		s.notice, s.failed = "promoting is unavailable for this source", true
+		return m
+	}
+	id, err := m.promote(s.lane.ID, row.agent.ID)
+	if err != nil {
+		s.notice, s.failed = err.Error(), true
+		return m
+	}
+	notice := fmt.Sprintf("promoted %s → %s", row.agent.Type, shortID(id))
+	if m.refresh != nil {
+		forest, refreshErr := m.refresh()
+		if refreshErr != nil {
+			s.notice, s.failed = notice+" · but the refresh failed: "+refreshErr.Error(), true
+			return m
+		}
+		m = m.adopt(forest)
+	}
+	m.spine.notice, m.spine.failed = notice, false
+	return m
 }
 
 // nextJunction finds the next place the thread splits, wrapping around. Both an

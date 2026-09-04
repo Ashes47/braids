@@ -32,6 +32,10 @@ type Part struct {
 	Kind PartKind
 	// Tool is the tool name, set only for PartToolUse.
 	Tool string
+	// ID identifies a tool call: the call's own id on a PartToolUse, and the
+	// id of the call being answered on a PartToolResult. It is what joins a
+	// subagent to the turn that spawned it.
+	ID string
 	// Text is the searchable rendering of the block. For PartToolUse it is the
 	// serialised tool input.
 	Text string
@@ -101,6 +105,25 @@ type Activity struct {
 	// call. Files cannot say whether it is running or waiting for permission:
 	// both look identical until a hook says otherwise.
 	LastWasToolCall bool
+}
+
+// Subagent is a conversation a lane spawned and then collapsed into a single
+// tool call. The harness stores it as a transcript of its own, so the parent
+// shows one call where a whole exchange happened.
+type Subagent struct {
+	ID     string
+	LaneID string
+	// Type is the kind of agent, such as "Explore".
+	Type string
+	// Task is the one-line description it was given.
+	Task string
+	// ToolUseID joins it to the turn in the parent that spawned it.
+	ToolUseID string
+	// Depth is 1 for an agent spawned by the conversation itself, higher for
+	// one spawned by another agent.
+	Depth    int
+	Path     string
+	Messages int
 }
 
 // Lane is one linear conversation as a harness stores it. A branch is simply

@@ -1,7 +1,7 @@
  Query:    lock                  <↵>     open the result                                                                                     ___.                          __        .___         
  Scope:    every conversation    <tab>   change scope                                                                                        \_ |__   ______     _____    |__|    __| _/    ______
  Hits:     9                     <↑ / ↓> down / up                                                                                            | __ \  \_  __ \   \__  \    |     / __ |    /  ___/
- Took:     271µs                 <esc>   back                                                                                                 | \_\ \  |  | \/    / __ \_  |    / /_/ |    \___  \
+ Took:     419µs                 <esc>   back                                                                                                 | \_\ \  |  | \/    / __ \_  |    / /_/ |    \___  \
                                                                                                                                               |___  /  |__|      (____  / |__|  \____ |   /____  /
                                                                                                                                                   \/                  \/             \/        \/ 
 

@@ -349,9 +349,20 @@ figure.frame .cmdbar b { color:var(--ink); font-weight:600; }
 figure.frame .cmdbar .then { color:var(--faint); }
 figure.frame .cmdbar kbd { font-size:11px; padding:0 5px; }
 figure.frame pre {
-  font-family:var(--mono); font-size:clamp(8.5px,.78vw,11.5px); line-height:1.5; margin:0;
+  font-family:var(--mono); line-height:1.5; margin:0;
   padding:15px 16px; overflow-x:auto; color:var(--ink);
   -webkit-overflow-scrolling:touch;
+  /* A frame is exactly FRAME_COLS columns wide and it has to fit the box, or
+     the panel border falls off the right-hand edge. One column is 0.6em in
+     every face in --mono, so the size is derived from the width the figure
+     actually gets rather than guessed at and then clamped. The divisor carries
+     a little slack for faces that run slightly wider. */
+  font-size:min(11.5px, calc((min(1400px, 100vw - 40px) - 34px) / 121));
+}
+@media (max-width:700px) {
+  /* On a phone 195 columns cannot both fit and be legible. Pick legible and
+     let it scroll sideways. */
+  figure.frame pre { font-size:8px; }
 }
 figure.frame figcaption { color:var(--faint); font-size:13px; margin-top:10px; text-align:center; }
 

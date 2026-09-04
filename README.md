@@ -10,13 +10,15 @@
 [![go](https://img.shields.io/badge/go-1.25-00ADD8)](https://go.dev)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
+[**braids.chat**](https://braids.chat) &nbsp;·&nbsp; [**Docs**](https://braids.chat/docs/) &nbsp;·&nbsp; [**Install**](#install)
+
 </div>
 
 ---
 
 Claude Code works best on one linear thread doing one thing. Humans don't work
-that way — a task forks, doubles back, and spawns three side quests. Today the
-only way to cope is to run N terminals and hold the map in your head.
+that way. A task forks, doubles back, and spawns three side quests, and the
+only way to cope today is to run N terminals and hold the map in your head.
 
 **braids is that map.** One terminal window alongside your N others. It shows
 every conversation and every branch as a graph, searches all of them in about a
@@ -24,28 +26,12 @@ millisecond, and turns any message into the start of a new branch.
 
 It never talks to Claude. It arranges the conversations you have with Claude.
 
-```
- Source:         claudecode
- Index:          ~/.braids/index.db
- Lanes:          6
- Waiting on you: 4
- Hooks:          reporting
-╭─ Conversations(all)[6] ──────────────────────────────────────────────────────────╮
-│  CONVERSATION                          FORK    TURNS      SIZE    AGE      STATUS│
-│ ● checkout-flow                                  824    174 kB     2m   your turn│
-│ ├─● try-option-c                     ← t412       75     16 kB    now    thinking│
-│ │  └─● cache-gate-probe               ← t31       14      3 kB     3h   your turn│
-│ ├─● blobstore-density                ← t288      125     26 kB     2d  unanswered│
-│ └─● index-contention                 ← t104       41      9 kB    14d  unanswered│
-│ ● import-pipeline                                368     78 kB     5d   your turn│
-│                                                                                  │
-│                                                                                  │
-│                                                                                  │
-│                                                                                  │
-│                                                                                  │
-│                                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────╯
-```
+<img src="assets/frames/map.svg" alt="braids: the map, with six conversations and their branches" width="100%">
+
+<sub>A real frame, colours and all. Every screenshot here is captured by
+<code>scripts/demo.py</code> against a fake <code>~/.claude</code>, never drawn
+by hand.</sub>
+
 
 ## Why
 
@@ -55,7 +41,7 @@ the thread, come back to a decision made an hour ago and go the other way, or
 run four attempts at once and keep the one that worked.
 
 braids keeps the graph for you, and gives the model a clean linear path. Every
-root-to-leaf route through the graph is one ordinary Claude Code session — no
+root-to-leaf route through the graph is one ordinary Claude Code session: no
 wrapper, no proxy, no protocol of its own.
 
 ## Install
@@ -65,7 +51,7 @@ curl -fsSL https://braids.chat/install.sh | sh
 ```
 
 That works out the release build for your machine, checks it against the
-published checksums, and puts one binary on your PATH. Nothing else — no
+published checksums, and puts one binary on your PATH. Nothing else: no
 daemon, no configuration file, and nothing to uninstall but the file.
 
 Or with Go:
@@ -93,7 +79,7 @@ Then, on the map:
 | | |
 |---|---|
 | `j` `k` | move |
-| `↵` | open a conversation's spine — its landmarks, not every line |
+| `↵` | open a conversation's spine: its landmarks, not every line |
 | `b` | branch from the turn under the cursor |
 | `y` | copy the `claude --resume` command for it |
 | `/` | search every conversation, memory and work product |
@@ -104,59 +90,63 @@ Nothing here is a command you have to remember: the header lists every binding
 the screen has, and a mistyped one names the key you meant.
 
 Optionally, `braids hooks --install` asks Claude Code to report when a session
-is blocked on you — the one thing the files cannot say. It is opt-in, merges
+is blocked on you, which is the one thing the files cannot say. It is opt-in, merges
 with whatever hooks you already have, and `--remove` takes back only what
 braids added.
 
 ## What it does
 
-**Map** — every conversation as a tree, with branches shown under the
+**Map.** Every conversation as a tree, with branches shown under the
 conversation they were cut from, and how far behind each one is.
 
-**Spine** — one conversation collapsed to its landmarks: what you asked, what
+<img src="assets/frames/spine.svg" alt="braids: one conversation reduced to its landmarks" width="100%">
+
+**Spine.** One conversation collapsed to its landmarks: what you asked, what
 came back, where it failed, where it was compacted. A 25,000-turn conversation
 becomes a few hundred lines you can actually read.
 
-**Search** — full text over every message and tool call, plus your memories and
+<img src="assets/frames/search.svg" alt="braids: one search across conversations, memories and work products" width="100%">
+
+**Search.** Full text over every message and tool call, plus your memories and
 the names of every work product, in a few milliseconds. Each result says whether
 it is a conversation, a memory or a work product, and `↵` opens the screen that
 can act on it. Search is the front door; the graph is the confirmation.
 
-**Branch** — put the cursor on any turn and press `b`. braids writes a new
+**Branch.** Put the cursor on any turn and press `b`. braids writes a new
 session file containing that turn's ancestry, and hands you the `claude --resume`
 command. Add `--workspace` and the branch gets a git worktree of its own, so two
 branches can edit the same file without touching each other.
 
-**Merge** — join a branch back as a new conversation, splicing the real turns
+**Merge.** Join a branch back as a new conversation, splicing the real turns
 from both. braids refuses when one side already contains the other, rather than
 producing a duplicate wearing a new name.
 
-**Promote** — a subagent's transcript is a conversation too. Turn one into a lane
+**Promote.** A subagent's transcript is a conversation too. Turn one into a lane
 of its own and carry on from where it left off.
 
-**Work products** — a session's scratch usually dwarfs its transcript: 3.3 GB
+**Work products.** A session's scratch usually dwarfs its transcript: 3.3 GB
 against 363 MB here, with nine files holding 1.3 GB of it. `w` opens it as a
-size browser — heaviest first, directories weighed by what is under them, `↵` to
-descend — so you can bin one 231 MB dump and keep the rest. `↵` on a file shows
+size browser: heaviest first, directories weighed by what is under them, `↵` to
+descend. So you can bin one 231 MB dump and keep the rest. `↵` on a file shows
 its head, `y` copies its path, and a binary is named rather than spewed. The harness's own
 record of a job is shown and refused. `braids work --orphans` finds the sets
 whose conversation is gone.
 
-**Memories** — what a project has told the harness to remember, with the two
+**Memories.** What a project has told the harness to remember, with the two
 things you cannot see from inside a session: a memory the index omits, which is
 therefore loaded by nothing, and a link pointing at a memory that is gone. `↵`
 reads it as markdown, `c` opens the conversation that wrote it. `d` deletes one
 to the bin, `r` renames it and follows the name through every link, and `i`
-repairs the index — each of them changing the index in the same breath as the
-file, and refused while a session in that project is running.
+repairs the index. Each of them changes the index in the same breath as the
+file, and is refused while a session in that project is running.
 
-**Bin** — deleting moves files aside with a manifest and a 14-day retention, so
+**Bin.** Deleting moves files aside with a manifest and a 14-day retention, so
 nothing you delete is gone the moment you regret it.
 
 ## Driving it from an agent
 
 Every command that reports something takes `--json`, so braids is usable by the
-thing it is watching — Claude Code can search its own past conversations, find
+thing it is watching. Claude Code can search its own past conversations, find
 where a decision was made, and branch from that exact turn.
 
 ```sh
@@ -167,7 +157,7 @@ braids branch --lane <id> --at <turn> --json | jq -r .resume
 Two properties make this work, and both are deliberate:
 
 - **IDs are whole in JSON.** The tables shorten them with an ellipsis to fit a
-  terminal; `--json` never does. (Pasting a shortened one back works too — braids
+  terminal; `--json` never does. (Pasting a shortened one back works too, since braids
   accepts the ellipsis rather than refusing an ID it printed itself.)
 - **Empty is `[]`, not a sentence.** Nothing should have to tell "no matches"
   apart from a parse failure.
@@ -197,12 +187,12 @@ something. A mistyped command names the one you meant.
 ## Hooks are optional
 
 Files can tell you a session is mid-tool-call. They cannot tell you whether it is
-*running* or *waiting for your approval* — both look identical on disk. One hook
+*running* or *waiting for your approval*. Both look identical on disk. One hook
 can. `braids hooks --install` asks Claude Code to report it.
 
 It is opt-in and separate from installing the binary: a tool that edits your
 settings file as a side effect of being installed is not one to trust with it.
-Installing merges rather than writes — every hook already there is kept, a
+Installing merges rather than writes: every hook already there is kept, a
 timestamped copy of the previous file is left beside it, `--remove` takes back
 only what braids added, and a settings file that cannot be parsed is refused
 rather than replaced by a guess.
@@ -215,7 +205,7 @@ and so does the map.
 braids reads your transcripts, so this matters more than usual:
 
 - **It makes no network calls.** There is no HTTP client and no listener in it.
-  `go list -deps ./cmd/braids | grep net/http` comes back empty — check it
+  `go list -deps ./cmd/braids | grep net/http` comes back empty. Check it
   yourself.
 - **Nothing leaves your machine.** The index is a local SQLite file at
   `~/.braids/index.db`.
@@ -230,7 +220,7 @@ braids reads your transcripts, so this matters more than usual:
 
 ## Numbers
 
-Measured on one laptop against a real corpus — 28 conversations, ~62,000
+Measured on one laptop against a real corpus of 28 conversations, ~62,000
 messages, ~360 MB of transcripts. Rounded, because a corpus you are still
 working in never sits still:
 
@@ -275,7 +265,7 @@ begin with.
 The threat model, the permissions braids sets and how to report something are
 in [SECURITY.md](SECURITY.md). The one worth repeating here: `BRAIDS_SPAWN`
 runs through a shell, so every value braids substitutes into it is shell-quoted
-first — a conversation called `x; rm -rf ~ #` has to be a name rather than a
+first, because a conversation called `x; rm -rf ~ #` has to be a name rather than a
 command. Your template supplies the shell syntax; the values never do, so do
 not put quotes around a placeholder yourself.
 
@@ -288,7 +278,7 @@ the map and search. See [SPEC.md](SPEC.md).
 ## Contributing
 
 ```sh
-make ci     # fmt, vet, lint, test, race, cover — the same gate CI runs
+make ci     # fmt, vet, lint, test, race, cover: the same gate CI runs
 ```
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the layout, the decisions that look like

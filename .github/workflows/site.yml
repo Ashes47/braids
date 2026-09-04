@@ -8,7 +8,10 @@ name: site
 on:
   push:
     branches: [main]
-    paths: ["site/**", ".github/workflows/site.yml"]
+    paths:
+      - "site/**"
+      - "assets/**"
+      - ".github/workflows/site.yml"
   workflow_dispatch:
 
 permissions:
@@ -30,6 +33,11 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
+      # The pages are generated: index.html, the docs and site/assets are all
+      # built from the generator, the captured frames and assets/, none of
+      # which are committed twice. A broken generator fails here rather than
+      # deploying a stale page.
+      - run: python3 site/build.py && python3 site/docs.py
       # enablement lets the workflow turn Pages on itself. Without it, a run
       # that happens before Pages is enabled in Settings fails with "Get Pages
       # site failed" — which is a confusing way to say "not switched on yet".

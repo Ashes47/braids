@@ -11,6 +11,7 @@ the first thing a reader notices.
 """
 
 import pathlib
+import shutil
 
 from chrome import CSS, footer, frame, nav, page
 
@@ -275,3 +276,14 @@ PAGE = page(
 
 (HERE / "index.html").write_text(PAGE)
 print("wrote site/index.html:", len(PAGE), "bytes")
+
+# The page needs the mark and the icons. They live in assets/ at the top of the
+# repo, and were once a second byte-identical copy in here, which is one logo
+# to update and two places to forget. Copied at build time instead, so the
+# repo holds one of each.
+NEEDED = ["braids-logo.png", "braids-icon-64.png", "braids-icon-256.png"]
+into = HERE / "assets"
+into.mkdir(exist_ok=True)
+for name in NEEDED:
+    shutil.copyfile(HERE.parent / "assets" / name, into / name)
+print(f"copied {len(NEEDED)} assets into site/assets")

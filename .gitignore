@@ -5,3 +5,13 @@
 .DS_Store
 dist/
 coverage.out
+
+# Python bytecode from the site generator
+__pycache__/
+*.pyc
+
+# Generated site output. The generator, the frames and assets/ are the sources;
+# these are rebuilt by `make site` and by the Pages workflow.
+/site/index.html
+/site/docs/
+/site/assets/

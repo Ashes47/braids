@@ -650,6 +650,10 @@ column in the sweep screen.
 - Colour carries **status only** — never identity. Identity is position and name.
 - One accent for "needs you". Everything else is greyscale weight.
 - Idle age is always right-aligned; it is the field people scan.
+- **The cursor follows the conversation, and when it is gone, the row above
+  it.** Archiving or deleting the selected row would otherwise throw the reader
+  to the top of the list on every act of tidying, which is exactly when losing
+  your place costs most.
 - Never render more than one junction per row.
 - **The header and the table are laid out by the same code.** Columns drop from
   the right as the terminal narrows — size, then status, then project, then

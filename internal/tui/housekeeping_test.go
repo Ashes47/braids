@@ -393,3 +393,62 @@ func TestClearingANameRestoresTheOriginal(t *testing.T) {
 		t.Error("expected the effect to be stated")
 	}
 }
+
+func TestArchivingKeepsTheCursorNearWhereItWas(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("a", "first", "app", 5, time.Hour),
+		laneInfo("b", "second", "app", 5, time.Hour),
+		laneInfo("c", "third", "app", 5, time.Hour),
+		laneInfo("d", "fourth", "app", 5, time.Hour),
+	}
+	m, _ := keepingModel(t, lanes)
+	m.cursor = 2 // on "third"
+
+	m = press(m, "a")
+	if len(m.visible) != 3 {
+		t.Fatalf("archiving should hide it, %d rows remain", len(m.visible))
+	}
+	// The row above, not the top of the list: tidying should not cost your place.
+	if got := m.visible[m.cursor].node.Lane.ID; got != "b" {
+		t.Errorf("cursor landed on %q, want the row above the archived one", got)
+	}
+}
+
+func TestArchivingTheFirstRowStaysAtTheTop(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("a", "first", "app", 5, time.Hour),
+		laneInfo("b", "second", "app", 5, time.Hour),
+	}
+	m, _ := keepingModel(t, lanes)
+	m.cursor = 0
+
+	m = press(m, "a")
+	if m.cursor != 0 || m.visible[0].node.Lane.ID != "b" {
+		t.Errorf("archiving the first row should leave the cursor at the top, got %d", m.cursor)
+	}
+}
+
+func TestArchivingTheLastRowStaysInRange(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("a", "first", "app", 5, time.Hour),
+		laneInfo("b", "second", "app", 5, time.Hour),
+	}
+	m, _ := keepingModel(t, lanes)
+	m.cursor = 1
+
+	m = press(m, "a")
+	if m.cursor != 0 || len(m.visible) != 1 {
+		t.Errorf("cursor = %d with %d rows, want 0 of 1", m.cursor, len(m.visible))
+	}
+}
+
+func TestArchivingTheOnlyRowLeavesAnEmptyMap(t *testing.T) {
+	m, _ := keepingModel(t, []index.LaneInfo{laneInfo("a", "only", "app", 5, time.Hour)})
+	m = press(m, "a")
+	if len(m.visible) != 0 || m.cursor != 0 {
+		t.Errorf("cursor = %d with %d rows", m.cursor, len(m.visible))
+	}
+	if !strings.Contains(plain(m.render()), "1 archived hidden") {
+		t.Error("the title should still explain where everything went")
+	}
+}

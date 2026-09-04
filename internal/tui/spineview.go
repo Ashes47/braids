@@ -121,7 +121,7 @@ func childrenOf(n *graph.Node) []*graph.Node {
 // — that is the whole reason to filter — and losing the place would mean
 // finding it twice.
 func (s *spineState) apply() {
-	held := s.selectedKey()
+	held, heldAt := s.selectedKey(), s.cursor
 	switch {
 	case !s.filter.on():
 		s.visible = s.rows
@@ -133,7 +133,7 @@ func (s *spineState) apply() {
 			}
 		}
 	}
-	s.restore(held)
+	s.restore(held, heldAt)
 }
 
 // selectedKey identifies the current row so it can be found again.
@@ -144,18 +144,18 @@ func (s *spineState) selectedKey() string {
 	return rowKey(s.visible[s.cursor])
 }
 
-// restore puts the cursor back on a row, or at the top if it is gone.
-func (s *spineState) restore(key string) {
-	s.cursor = 0
-	if key == "" {
-		return
-	}
-	for i, r := range s.visible {
-		if rowKey(r) == key {
-			s.cursor = i
-			return
+// restore puts the cursor back on a row, or on the one above it if that row is
+// no longer shown.
+func (s *spineState) restore(key string, was int) {
+	if key != "" {
+		for i, r := range s.visible {
+			if rowKey(r) == key {
+				s.cursor = i
+				return
+			}
 		}
 	}
+	s.cursor = min(max(was-1, 0), max(len(s.visible)-1, 0))
 }
 
 func rowKey(r spineRow) string {

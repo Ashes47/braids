@@ -226,20 +226,10 @@ func NewModel(f *graph.Forest, opts Options) Model {
 // adopt swaps in a rebuilt forest, holding the reader's place: the selected
 // lane stays selected, and an open spine keeps reading the same conversation.
 func (m Model) adopt(f *graph.Forest) Model {
-	selected := ""
-	if m.cursor < len(m.visible) {
-		selected = m.visible[m.cursor].node.Lane.ID
-	}
 	m.forest = f
 	m.all = layout(f, m.theme.Glyphs, nil)
 	m.measure()
-	m.apply()
-	for i, r := range m.visible {
-		if r.node.Lane.ID == selected {
-			m.cursor = i
-			break
-		}
-	}
+	m.apply() // holds the reader's place, or the row above it if it is gone
 	m.clamp()
 
 	if m.spine != nil {
@@ -645,7 +635,7 @@ func (m Model) editing() bool {
 // apply narrows the visible rows to those matching the filter. Filtering drops
 // the tree art: a partial forest with dangling connectors reads as corruption.
 func (m *Model) apply() {
-	held := ""
+	held, heldAt := "", m.cursor
 	if m.cursor >= 0 && m.cursor < len(m.visible) {
 		held = m.visible[m.cursor].node.Lane.ID
 	}
@@ -673,15 +663,24 @@ func (m *Model) apply() {
 	default:
 		m.visible = m.all
 	}
-	// Follow the selected lane across the change, so clearing a filter leaves
-	// you where you were rather than back at the top.
-	m.cursor = 0
+	m.restoreCursor(held, heldAt)
+}
+
+// restoreCursor follows the selected conversation across a change to the list.
+//
+// When it is still there the cursor goes with it, so clearing a filter leaves
+// you where you were. When it is gone — archived, deleted, filtered out — the
+// cursor lands on the row above it. Jumping to the top would lose the place
+// after every single act of tidying, which is when you are least able to
+// afford it.
+func (m *Model) restoreCursor(id string, was int) {
 	for i, r := range m.visible {
-		if r.node.Lane.ID == held {
+		if r.node.Lane.ID == id {
 			m.cursor = i
-			break
+			return
 		}
 	}
+	m.cursor = min(max(was-1, 0), max(len(m.visible)-1, 0))
 }
 
 func (m *Model) clamp() {

@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -85,6 +86,9 @@ map flags:
 
 search flags:
   --lane ID        restrict to one conversation
+  --project NAME   restrict to one project
+  --since WHEN     only turns since a date or an age: 2026-08-01, 30d, 6w, 12h
+  --until WHEN     only turns up to one. A bare date means all of that day
   --type LIST      conversation,memory,artifact (comma separated). Search
                    covers all three unless narrowed; each result says which
                    it is, and work products are matched by name, not contents
@@ -461,7 +465,14 @@ func cmdMap(args []string, out *printer) error {
 			exe, _ := os.Executable()
 			return release.Read(braidsHome(), exe)
 		},
-		Update:    updateCommand,
+		Update: updateCommand,
+		Unreadable: func() int {
+			lanes, err := ix.Unreadable(ctx)
+			if err != nil {
+				return 0
+			}
+			return len(lanes)
+		},
 		LoadSpine: tui.SpineLoader(ctx, ix),
 		PlanMerge: func(base, incoming string) (int, int, error) {
 			req, err := mergeRequest(ctx, ix, base, incoming, "")
@@ -707,23 +718,113 @@ func cmdIndex(args []string, out *printer) error {
 	// is part of indexing, and a duration that leaves it out is a duration
 	// that does not match the wait.
 	stats.Duration += time.Since(docsStart)
+	unreadable, err := ix.Unreadable(ctx)
+	if err != nil {
+		return err
+	}
 	if *asJSON {
+		paths := make([]string, 0, len(unreadable))
+		for _, l := range unreadable {
+			paths = append(paths, l.Path)
+		}
 		return out.emit(struct {
-			Lanes    int     `json:"lanes"`
-			Messages int     `json:"messages"`
-			Parts    int     `json:"parts"`
-			Took     float64 `json:"took_ms"`
-		}{stats.Lanes, stats.Messages, stats.Parts, float64(stats.Duration.Microseconds()) / 1000})
+			Lanes      int      `json:"lanes"`
+			Messages   int      `json:"messages"`
+			Parts      int      `json:"parts"`
+			Took       float64  `json:"took_ms"`
+			Unreadable []string `json:"unreadable"`
+		}{stats.Lanes, stats.Messages, stats.Parts,
+			float64(stats.Duration.Microseconds()) / 1000, paths})
 	}
 	out.printf("indexed %d lanes · %d messages · %d searchable parts in %s\n",
 		stats.Lanes, stats.Messages, stats.Parts, stats.Duration.Round(time.Millisecond))
+	reportUnreadable(unreadable, out)
 	return out.Err()
+}
+
+// parseWhen reads a point in time the way people type one at a terminal:
+// either a date, or how long ago. A bare date means the whole of that day, so
+// --since and --until with the same date is that day and not an empty range.
+func parseWhen(text string, now time.Time, endOfDay bool) (time.Time, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return time.Time{}, nil
+	}
+	if day, err := time.ParseInLocation("2006-01-02", text, time.Local); err == nil {
+		if endOfDay {
+			return day.AddDate(0, 0, 1).Add(-time.Second), nil
+		}
+		return day, nil
+	}
+	if stamp, err := time.Parse(time.RFC3339, text); err == nil {
+		return stamp, nil
+	}
+	if ago, err := parseAge(text); err == nil {
+		return now.Add(-ago), nil
+	}
+	return time.Time{}, fmt.Errorf("cannot read %q as a date or an age "+
+		"(try 2026-08-01, or 30d, 6w, 12h)", text)
+}
+
+// parseAge reads "30d", "6w", "12h", "45m" as a duration. Go's own parser
+// stops at hours, and days are what anyone searching their own history counts
+// in.
+func parseAge(text string) (time.Duration, error) {
+	if len(text) < 2 {
+		return 0, fmt.Errorf("too short")
+	}
+	unit := text[len(text)-1]
+	n, err := strconv.Atoi(text[:len(text)-1])
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("not a number of units")
+	}
+	switch unit {
+	case 'm':
+		return time.Duration(n) * time.Minute, nil
+	case 'h':
+		return time.Duration(n) * time.Hour, nil
+	case 'd':
+		return time.Duration(n) * 24 * time.Hour, nil
+	case 'w':
+		return time.Duration(n) * 7 * 24 * time.Hour, nil
+	}
+	return 0, fmt.Errorf("unknown unit %q", string(unit))
+}
+
+// reportUnreadable says when a transcript has bytes in it that produced no
+// messages at all.
+//
+// It is the one thing braids cannot otherwise notice about itself. Sixteen of
+// the eighteen record types in a real history are bookkeeping that braids
+// skips on purpose, so an unfamiliar type is not news; a transcript that
+// yielded nothing is. Whether the harness renamed a record type, moved the
+// message body or changed how content nests, this is the symptom, and without
+// it braids would go on drawing a confident map of a history it had stopped
+// being able to read.
+func reportUnreadable(lanes []index.LaneInfo, out *printer) {
+	if len(lanes) == 0 {
+		return
+	}
+	out.printf("\n%d conversation(s) hold bytes braids could not read anything from.\n",
+		len(lanes))
+	out.printf("That usually means the transcript format changed. Please report it:\n")
+	out.printf("  https://github.com/Ashes47/braids/issues\n")
+	for i, l := range lanes {
+		if i == 3 {
+			out.printf("  ... and %d more\n", len(lanes)-3)
+			break
+		}
+		out.printf("  %s  %s\n", format.Bytes(l.Size), l.Path)
+	}
 }
 
 func cmdSearch(args []string, out *printer) error {
 	fs := newFlagSet("search")
 	fs.SetOutput(out)
 	lane := fs.String("lane", "", "restrict to one conversation")
+	project := fs.String("project", "", "restrict to one project")
+	since := fs.String("since", "", "only turns since this date or age, e.g. 2026-08-01 or 30d")
+	until := fs.String("until", "", "only turns up to this date or age")
 	kinds := fs.String("kind", "", "comma-separated part kinds")
 	types := fs.String("type", "", "conversation,memory,artifact (default all three)")
 	limit := fs.Int("limit", 20, "maximum hits")
@@ -745,6 +846,18 @@ func cmdSearch(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
+	now := time.Now()
+	from, err := parseWhen(*since, now, false)
+	if err != nil {
+		return err
+	}
+	to, err := parseWhen(*until, now, true)
+	if err != nil {
+		return err
+	}
+	if !from.IsZero() && !to.IsZero() && to.Before(from) {
+		return fmt.Errorf("--until %s is before --since %s", *until, *since)
+	}
 
 	ix, err := openIndex(*db)
 	if err != nil {
@@ -754,7 +867,8 @@ func cmdSearch(args []string, out *printer) error {
 
 	start := time.Now()
 	hits, err := ix.Search(context.Background(),
-		index.Query{Text: query, Lane: *lane, Kinds: parsed, Types: wanted, Limit: *limit})
+		index.Query{Text: query, Lane: *lane, Project: *project, Since: from, Until: to,
+			Kinds: parsed, Types: wanted, Limit: *limit})
 	if err != nil {
 		return err
 	}

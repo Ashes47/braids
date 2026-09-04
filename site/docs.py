@@ -430,11 +430,16 @@ SEARCH = f"""
 braids search "lock across a network call"
 braids search worktree --limit 5
 braids search "index" --type memory,artifact
+braids search deploy --project braids --since 30d
+braids search "rate limit" --since 2026-08-01 --until 2026-08-31
 braids search "timed out" --kind tool_result --lane 46360382
 braids search "fork" --json
 ''')}
 {table(["Flag", "What it does"], [
     ("--lane ID", "only this conversation, by ID prefix"),
+    ("--project NAME", "only this project, matched without regard to case"),
+    ("--since WHEN", "a date or an age: <code>2026-08-01</code>, <code>30d</code>, <code>6w</code>, <code>12h</code>"),
+    ("--until WHEN", "the same, as an upper bound. A bare date means all of that day"),
     ("--type LIST", "conversation, memory, artifact. All three unless you narrow it"),
     ("--kind LIST", "text, thinking, tool_use, tool_result"),
     ("--limit N", "how many hits, default 20"),
@@ -910,6 +915,9 @@ REFERENCE = f"""
 <h3>braids search</h3>
 {table(["Flag", "What it does"], [
     ("--lane ID", "restrict to one conversation"),
+    ("--project NAME", "restrict to one project"),
+    ("--since WHEN", "a date or an age: 2026-08-01, 30d, 6w, 12h"),
+    ("--until WHEN", "the same, as an upper bound"),
     ("--type LIST", "conversation, memory, artifact"),
     ("--kind LIST", "text, thinking, tool_use, tool_result"),
     ("--limit N", "maximum hits, default 20"),
@@ -963,6 +971,9 @@ REFERENCE = f"""
      "waiting states fall back to what the transcript can prove. <code>braids hooks --install</code>"),
     ("hook reads an event on stdin",
      "you typed <code>braids hook</code>. You wanted <code>braids hooks</code>"),
+    ("N conversations hold bytes braids could not read",
+     "a transcript yielded no messages at all, which usually means the format "
+     "changed. <code>braids index</code> names the files. Please report it"),
     ("a work product is refused",
      "it is the harness's own record of the job, and deleting it would confuse the writer"),
 ])}

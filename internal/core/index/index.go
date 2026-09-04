@@ -148,8 +148,27 @@ type Query struct {
 	Types []Found
 	Text  string
 	Lane  string
+	// Project narrows to one project, matched without regard to case because
+	// it is a name people read off the screen and type back.
+	Project string
+	// Since and Until bound when a turn happened. Zero means unbounded.
+	Since time.Time
+	Until time.Time
 	Kinds []model.PartKind
 	Limit int
+}
+
+// when adds the date bounds to a query being built. Both tables store seconds.
+func (q Query) when(column string, where []string, args []any) ([]string, []any) {
+	if !q.Since.IsZero() {
+		where = append(where, column+" >= ?")
+		args = append(args, q.Since.Unix())
+	}
+	if !q.Until.IsZero() {
+		where = append(where, column+" <= ?")
+		args = append(args, q.Until.Unix())
+	}
+	return where, args
 }
 
 // LaneInfo is a lane plus the counts only the index knows. Keeping the counts
@@ -278,6 +297,39 @@ func migrate(db *sql.DB) (bool, error) {
 // Recreated reports that opening this index threw away an older schema, so it
 // holds nothing until something reads the transcripts again.
 func (ix *Index) Recreated() bool { return ix.recreated }
+
+// Unreadable names the conversations braids has bytes for and no messages
+// from.
+//
+// This is the alarm for the one failure braids cannot otherwise see. It skips
+// most of what a transcript contains on purpose: of the eighteen record types
+// in one real history, only two carry a turn and the other sixteen are
+// bookkeeping. So an unfamiliar record type is not news, and a list of the
+// types braids knows would have to grow every time the harness adds one.
+//
+// What is news is a transcript with content in it that produced nothing.
+// Whether the harness renamed a type, moved the message body, or changed how
+// content nests, the symptom is the same and this catches all three. Across a
+// real history of 28 conversations no lane is in this state, and the least
+// talkative readable one still yields a message every 15 kB.
+func (ix *Index) Unreadable(ctx context.Context) ([]LaneInfo, error) {
+	rows, err := ix.db.QueryContext(ctx,
+		`SELECT id, path, size FROM lanes WHERE size > 0 AND msg_count = 0 ORDER BY size DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("find unreadable lanes: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only
+
+	var out []LaneInfo
+	for rows.Next() {
+		var l LaneInfo
+		if err := rows.Scan(&l.ID, &l.Path, &l.Size); err != nil {
+			return nil, fmt.Errorf("scan unreadable lane: %w", err)
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
 
 // Close releases the underlying database.
 func (ix *Index) Close() error { return ix.db.Close() }
@@ -658,6 +710,11 @@ func (ix *Index) searchTurns(ctx context.Context, q Query, limit int) ([]Hit, er
 		where = append(where, "parts.lane_id = ?")
 		args = append(args, q.Lane)
 	}
+	if q.Project != "" {
+		where = append(where, "lanes.project = ? COLLATE NOCASE")
+		args = append(args, q.Project)
+	}
+	where, args = q.when("parts.at", where, args)
 	if len(q.Kinds) > 0 {
 		marks := make([]string, len(q.Kinds))
 		for i, k := range q.Kinds {
@@ -1191,6 +1248,11 @@ func (ix *Index) searchDocs(ctx context.Context, q Query, of Found, limit int) (
 		where = append(where, "docs.lane_id = ?")
 		args = append(args, q.Lane)
 	}
+	if q.Project != "" {
+		where = append(where, "docs.project = ? COLLATE NOCASE")
+		args = append(args, q.Project)
+	}
+	where, args = q.when("docs.at", where, args)
 	args = append(args, limit)
 
 	query := `

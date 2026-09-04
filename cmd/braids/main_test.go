@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Ashes47/braids/internal/brand"
 	"github.com/Ashes47/braids/internal/core/model"
@@ -645,5 +646,88 @@ func TestMemoriesMarksAnAbsentOriginAsNothing(t *testing.T) {
 	// --root also makes the command reachable anywhere, like index and work.
 	if !strings.Contains(out, "no-origin") || !strings.Contains(out, "with-origin") {
 		t.Errorf("--root did not read the set:\n%s", out)
+	}
+}
+
+// A date or an age, because both are what people type at a terminal. A bare
+// date means the whole of that day, so the same date on both bounds is that
+// day rather than an empty range.
+func TestParseWhenReadsDatesAndAges(t *testing.T) {
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.Local)
+	for _, c := range []struct {
+		in       string
+		endOfDay bool
+		want     time.Time
+	}{
+		{"2026-08-01", false, time.Date(2026, 8, 1, 0, 0, 0, 0, time.Local)},
+		{"2026-08-01", true, time.Date(2026, 8, 1, 23, 59, 59, 0, time.Local)},
+		{"30d", false, now.AddDate(0, 0, -30)},
+		{"6w", false, now.Add(-6 * 7 * 24 * time.Hour)},
+		{"12h", false, now.Add(-12 * time.Hour)},
+		{"45m", false, now.Add(-45 * time.Minute)},
+		{"", false, time.Time{}},
+	} {
+		got, err := parseWhen(c.in, now, c.endOfDay)
+		if err != nil {
+			t.Errorf("parseWhen(%q): %v", c.in, err)
+			continue
+		}
+		if !got.Equal(c.want) {
+			t.Errorf("parseWhen(%q, endOfDay=%v) = %v, want %v", c.in, c.endOfDay, got, c.want)
+		}
+	}
+	for _, bad := range []string{"yesterday", "last tuesday", "5", "3y", "-2d", "d"} {
+		if _, err := parseWhen(bad, now, false); err == nil {
+			t.Errorf("parseWhen(%q) was accepted", bad)
+		}
+	}
+}
+
+// The two new filters have to actually narrow, or they are decoration.
+func TestSearchNarrowsByProjectAndDate(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "index.db")
+	runCmd(t, "index", "--root", fixtureRoot(t), "--db", db)
+
+	all := runCmd(t, "search", "--db", db, "--limit", "50", "--json", "mount")
+	var everything struct {
+		Hits []struct {
+			Project string `json:"project"`
+		} `json:"hits"`
+	}
+	if err := json.Unmarshal([]byte(all), &everything); err != nil {
+		t.Fatalf("parse search json: %v", err)
+	}
+	if len(everything.Hits) == 0 {
+		t.Fatal("the fixture matched nothing, so the test proves nothing")
+	}
+	project := everything.Hits[0].Project
+
+	narrowed := runCmd(t, "search", "--db", db, "--project", project,
+		"--limit", "50", "--json", "mount")
+	var scoped struct {
+		Hits []struct {
+			Project string `json:"project"`
+		} `json:"hits"`
+	}
+	if err := json.Unmarshal([]byte(narrowed), &scoped); err != nil {
+		t.Fatalf("parse scoped json: %v", err)
+	}
+	for _, h := range scoped.Hits {
+		if h.Project != "" && !strings.EqualFold(h.Project, project) {
+			t.Errorf("--project %s let %q through", project, h.Project)
+		}
+	}
+
+	// Nothing in a fixture was written in 1999.
+	empty := runCmd(t, "search", "--db", db, "--until", "1999-01-01",
+		"--limit", "50", "--json", "mount")
+	var none struct {
+		Hits []struct{} `json:"hits"`
+	}
+	if err := json.Unmarshal([]byte(empty), &none); err != nil {
+		t.Fatalf("parse empty json: %v", err)
+	}
+	if len(none.Hits) != 0 {
+		t.Errorf("--until 1999 returned %d hits", len(none.Hits))
 	}
 }

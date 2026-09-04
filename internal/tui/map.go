@@ -132,6 +132,10 @@ type Options struct {
 	// Version is what this build calls itself, shown in the header so a bug
 	// report can name it without anyone going looking.
 	Version string
+	// Unreadable counts conversations that hold bytes braids got no messages
+	// from, which is what a transcript format change looks like from here. It
+	// is a function because indexing while the map is open changes the answer.
+	Unreadable func() int
 	// Release reports how old this build is and when the installer last ran.
 	// It is a function because an update changes the answer while the map is
 	// open. It never reaches the network: both facts are local.
@@ -195,6 +199,7 @@ type Model struct {
 	reporting      bool
 	version        string
 	releaseFn      func() release.State
+	unreadableFn   func() int
 	updateFn       func() *exec.Cmd
 	live           map[string]hooks.Event
 	resumeCmd      func(string) (string, error)
@@ -284,6 +289,7 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		reporting:        opts.Reporting,
 		version:          opts.Version,
 		releaseFn:        opts.Release,
+		unreadableFn:     opts.Unreadable,
 		updateFn:         opts.Update,
 		resumeCmd:        opts.ResumeCommand,
 		spawn:            opts.Spawn,

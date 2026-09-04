@@ -1037,3 +1037,59 @@ func TestOpenReportsAThrownAwaySchema(t *testing.T) {
 		t.Error("an older schema was dropped without saying so, so the map would open empty")
 	}
 }
+
+// A transcript with bytes in it that yields no messages is what a format
+// change looks like from inside braids: sixteen of the eighteen record types
+// in a real history are bookkeeping it skips on purpose, so an unfamiliar type
+// is not news, and a lane that produced nothing is. Without this braids goes
+// on drawing a confident map of a history it can no longer read.
+func TestUnreadableNamesALaneThatYieldedNothing(t *testing.T) {
+	ctx := context.Background()
+	ix := openIndex(t)
+	src := newFixture()
+
+	// Same shape as a healthy lane, and the source hands back no messages.
+	src.lanes = append(src.lanes, model.Lane{
+		ID: "changed", Source: "fake", Project: "app",
+		Path: "/tmp/changed.jsonl", Size: 4 << 20,
+		Updated: time.Unix(1_700_000_000, 0),
+	})
+
+	if _, err := ix.Rebuild(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+
+	unreadable, err := ix.Unreadable(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unreadable) != 1 {
+		t.Fatalf("Unreadable found %d lanes, want the one with bytes and no messages", len(unreadable))
+	}
+	if unreadable[0].ID != "changed" {
+		t.Errorf("Unreadable named %q", unreadable[0].ID)
+	}
+	if unreadable[0].Size != 4<<20 {
+		t.Errorf("size came back as %d, so the report cannot say how much is unread", unreadable[0].Size)
+	}
+}
+
+// An empty transcript is not a broken one, and neither is a healthy history.
+func TestUnreadableStaysQuietWhenNothingIsWrong(t *testing.T) {
+	ctx := context.Background()
+	ix := openIndex(t)
+	src := newFixture()
+	src.lanes = append(src.lanes, model.Lane{
+		ID: "empty", Source: "fake", Project: "app", Path: "/tmp/empty.jsonl", Size: 0,
+	})
+	if _, err := ix.Rebuild(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	unreadable, err := ix.Unreadable(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unreadable) != 0 {
+		t.Errorf("cried wolf over %d lanes", len(unreadable))
+	}
+}

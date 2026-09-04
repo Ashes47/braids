@@ -74,7 +74,7 @@ func (m Model) facts() []fact {
 	if m.reporting {
 		reporting = "reporting"
 	}
-	return []fact{
+	facts := []fact{
 		{"Source", source},
 		{"Index", shorten(m.indexPath)},
 		{"Lanes", fmt.Sprintf("%d", len(m.all))},
@@ -82,6 +82,15 @@ func (m Model) facts() []fact {
 		{"Hooks", reporting},
 		{"Version", m.versionFact()},
 	}
+	// Only when there is something to say. A row that is always there and
+	// always says none teaches people to stop reading the header.
+	if m.unreadableFn != nil {
+		if n := m.unreadableFn(); n > 0 {
+			facts = append(facts, fact{"Unreadable",
+				fmt.Sprintf("%d · run braids index for detail", n)})
+		}
+	}
+	return facts
 }
 
 // versionFact names the build, and how old it is once nobody has checked in a

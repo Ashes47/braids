@@ -264,6 +264,11 @@ func (m Model) headerContent() ([]fact, []hint, []glyph) {
 		return m.binFacts(), binHints(), nil
 	case m.mode == workMode && m.work != nil:
 		return m.workFacts(), workHints(), nil
+	case m.mode == memoryMode && m.memories != nil && m.memories.reading != nil:
+		// The reader shows different facts and different keys, and this is
+		// the one place the header is sized from: measuring the list while
+		// drawing the reader overflows the row and drops a key binding.
+		return m.readingFacts(), readingHints(), nil
 	case m.mode == memoryMode && m.memories != nil:
 		return m.memoryFacts(), memoryHints(), m.memoryGlyphs()
 	case m.mode == spineMode && m.spine != nil:

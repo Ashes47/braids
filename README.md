@@ -117,7 +117,10 @@ whose conversation is gone.
 **Memories** — what a project has told the harness to remember, with the two
 things you cannot see from inside a session: a memory the index omits, which is
 therefore loaded by nothing, and a link pointing at a memory that is gone. `↵`
-reads it, `c` opens the conversation that wrote it. Read-only for now.
+reads it as markdown, `c` opens the conversation that wrote it. `d` deletes one
+to the bin, `r` renames it and follows the name through every link, and `i`
+repairs the index — each of them changing the index in the same breath as the
+file, and refused while a session in that project is running.
 
 **Bin** — deleting moves files aside with a manifest and a 14-day retention, so
 nothing you delete is gone the moment you regret it.

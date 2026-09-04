@@ -13,6 +13,7 @@ import (
 
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/memory"
+	"github.com/Ashes47/braids/internal/core/model"
 )
 
 const originSession = "fe00c207-1111-4000-8000-000000000001"
@@ -367,5 +368,229 @@ func TestMemoryReaderReportsAMissingFile(t *testing.T) {
 	m = m.memoryKey("enter")
 	if got := plain(m.renderMemories()); !strings.Contains(got, "vanished.md") {
 		t.Errorf("the reader does not say what it could not read:\n%s", got)
+	}
+}
+
+// curationModel wires the three curation callbacks and records what they were
+// asked to do.
+type curated struct {
+	removed  []string
+	renamed  [][2]string
+	repaired []string
+	fail     error
+}
+
+func curationModel(t *testing.T, lanes []index.LaneInfo, log *curated) Model {
+	t.Helper()
+	sets := func() ([]memory.Set, error) {
+		return []memory.Set{{
+			Location: memory.Location{Project: "microagi", Dir: "/m"},
+			Memories: []memory.Memory{
+				{Name: "shard-manifest", Kind: "project", Modified: now, Listed: true},
+				{Name: "alerting-inventory", Kind: "project", Modified: now, Listed: false},
+			},
+			Orphaned: []string{"removed-long-ago"},
+		}}, nil
+	}
+	m := NewModel(forestOf(lanes, nil), Options{
+		ASCII: true, Source: "claudecode", LoadMemories: sets,
+		RemoveMemory: func(_, name string) error {
+			if log.fail != nil {
+				return log.fail
+			}
+			log.removed = append(log.removed, name)
+			return nil
+		},
+		RenameMemory: func(_, from, to string) (int, error) {
+			if log.fail != nil {
+				return 0, log.fail
+			}
+			log.renamed = append(log.renamed, [2]string{from, to})
+			return 3, nil
+		},
+		RepairMemoryIndex: func(dir string) (int, int, error) {
+			if log.fail != nil {
+				return 0, 0, log.fail
+			}
+			log.repaired = append(log.repaired, dir)
+			return 1, 1, nil
+		},
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 100, 24
+	return m.openMemories()
+}
+
+// An idle project can be curated: delete, repair, rename.
+func TestMemoryCurationActs(t *testing.T) {
+	idle := []index.LaneInfo{laneInfo("a", "finished long ago", "microagi", 10, 72*time.Hour)}
+
+	log := &curated{}
+	m := curationModel(t, idle, log)
+	m = m.memoryKey("d")
+	if len(log.removed) != 1 || log.removed[0] != "shard-manifest" {
+		t.Errorf("removed %v", log.removed)
+	}
+	if !strings.Contains(m.memories.notice, "out of the index") {
+		t.Errorf("notice = %q, want it to say the index changed too", m.memories.notice)
+	}
+
+	log = &curated{}
+	m = curationModel(t, idle, log)
+	m = m.memoryKey("i")
+	if len(log.repaired) != 1 {
+		t.Fatalf("repaired %v", log.repaired)
+	}
+	if !strings.Contains(m.memories.notice, "nothing loaded") {
+		t.Errorf("notice = %q, want it to say what was fixed", m.memories.notice)
+	}
+
+	log = &curated{}
+	m = curationModel(t, idle, log)
+	m = m.memoryKey("r")
+	if !m.memories.naming.active {
+		t.Fatal("r did not open the rename field")
+	}
+	if !strings.Contains(plain(m.renderMemories()), "rename to:") {
+		t.Error("an open rename field is invisible")
+	}
+	// The field starts on the current name, so a small correction is small.
+	if m.memories.naming.text != "shard-manifest" {
+		t.Errorf("field starts as %q", m.memories.naming.text)
+	}
+	for range len("manifest") {
+		m = m.memoryKey("backspace")
+	}
+	for _, r := range "ordering" {
+		m = m.memoryKey(string(r))
+	}
+	m = m.memoryKey("enter")
+	if len(log.renamed) != 1 || log.renamed[0] != [2]string{"shard-manifest", "shard-ordering"} {
+		t.Fatalf("renamed %v", log.renamed)
+	}
+	// A rename that quietly rewrote other memories has to say so.
+	if !strings.Contains(m.memories.notice, "3 links followed") {
+		t.Errorf("notice = %q, want the links mentioned", m.memories.notice)
+	}
+
+	// esc abandons a rename without doing it.
+	log = &curated{}
+	m = curationModel(t, idle, log)
+	m = m.memoryKey("r")
+	m = m.memoryKey("esc")
+	if m.memories.naming.active || len(log.renamed) != 0 {
+		t.Errorf("esc did not abandon the rename: %v", log.renamed)
+	}
+}
+
+// A project with a session running is refused: braids editing a file a session
+// may also be writing is how something a person asked to be remembered gets
+// lost.
+func TestMemoryCurationRefusesWhileASessionIsLive(t *testing.T) {
+	live := []index.LaneInfo{laneInfo("a", "still working", "microagi", 10, time.Minute)}
+	live[0].Activity = model.Activity{LastRole: model.RoleUser}
+
+	for _, key := range []string{"d", "i"} {
+		log := &curated{}
+		m := curationModel(t, live, log)
+		if _, running := m.liveIn("microagi"); !running {
+			t.Fatalf("the fixture is not live, so %q proves nothing", key)
+		}
+		m = m.memoryKey(key)
+		if len(log.removed) != 0 || len(log.repaired) != 0 {
+			t.Errorf("%q acted while a session was live", key)
+		}
+		if !m.memories.failed || !strings.Contains(m.memories.notice, "still working") {
+			t.Errorf("%q: notice = %q, want it to name the conversation", key, m.memories.notice)
+		}
+	}
+
+	// And a rename typed out is refused at the point of acting, not silently.
+	log := &curated{}
+	m := curationModel(t, live, log)
+	m = m.memoryKey("r")
+	// A real change, not the name it already has: renaming to the same name is
+	// a no-op and says nothing, which would prove nothing here.
+	for range len("manifest") {
+		m = m.memoryKey("backspace")
+	}
+	for _, r := range "ordering" {
+		m = m.memoryKey(string(r))
+	}
+	m = m.memoryKey("enter")
+	if len(log.renamed) != 0 {
+		t.Error("a rename went through while a session was live")
+	}
+	if !m.memories.failed || !strings.Contains(m.memories.notice, "still working") {
+		t.Errorf("the refused rename said %q", m.memories.notice)
+	}
+
+	// A memory under a project with nothing running is still editable.
+	quiet := []index.LaneInfo{laneInfo("b", "elsewhere", "other-project", 10, time.Minute)}
+	quiet[0].Activity = model.Activity{LastRole: model.RoleUser}
+	log = &curated{}
+	m = curationModel(t, quiet, log)
+	m = m.memoryKey("d")
+	if len(log.removed) != 1 {
+		t.Errorf("a busy project elsewhere blocked an edit: %v", log.removed)
+	}
+	if m.memories.failed {
+		t.Errorf("a permitted edit was reported as a failure: %q", m.memories.notice)
+	}
+}
+
+// A failure is reported rather than leaving the screen looking as if it worked.
+func TestMemoryCurationReportsFailure(t *testing.T) {
+	idle := []index.LaneInfo{laneInfo("a", "finished", "microagi", 10, 72*time.Hour)}
+	log := &curated{fail: errors.New("read-only file system")}
+	m := curationModel(t, idle, log)
+	m = m.memoryKey("d")
+	if !m.memories.failed || !strings.Contains(m.memories.notice, "read-only") {
+		t.Errorf("notice = %q (failed=%v)", m.memories.notice, m.memories.failed)
+	}
+}
+
+// The header is sized from headerContent and drawn from headerContent. When
+// the reader drew its own facts while the plan was measured from the list, a
+// long memory name overflowed the row and the first key binding vanished.
+func TestHeaderIsSizedFromTheScreenItDraws(t *testing.T) {
+	long := strings.Repeat("release-", 4) + "hashes" // longer than any list value
+	m := memoryModel(t, func() ([]memory.Set, error) {
+		return []memory.Set{{
+			Location: memory.Location{Project: "SpinAds", Dir: "/m"},
+			Memories: []memory.Memory{{
+				Name: long, Kind: "project", Modified: now, Origin: originSession,
+				Links: []string{"one-link", "another-link"}, Listed: true, Path: "/nope.md",
+			}},
+		}}, nil
+	})
+	m = m.memoryKey("enter")
+
+	lines := strings.Split(plain(m.memoryInfo()), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("the reader header is only %d rows", len(lines))
+	}
+	// Every key the reader offers is listed. A key that works and is not shown
+	// may as well not exist.
+	header := strings.Join(lines, "\n")
+	for _, h := range readingHints() {
+		if !strings.Contains(header, h.action) {
+			t.Errorf("the header does not list %q:\n%s", h.action, header)
+		}
+	}
+	// And the rows line up: one short row means one that overflowed.
+	widths := map[int]int{}
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			widths[lipgloss.Width(line)]++
+		}
+	}
+	if len(widths) != 1 {
+		t.Errorf("header rows have differing widths %v:\n%s", widths, header)
+	}
+	for width := range widths {
+		if width > m.width {
+			t.Errorf("header rows are %d columns, frame is %d", width, m.width)
+		}
 	}
 }

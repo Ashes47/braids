@@ -459,6 +459,20 @@ func cmdMap(args []string, out *printer) error {
 		LoadMemories: func() ([]memory.Set, error) {
 			return memorySets(src, "")
 		},
+		RemoveMemory: func(dir, name string) error {
+			return memory.Remove(memory.Location{Dir: dir}, name, func(path string) error {
+				// To the bin like everything else: being wrong about a memory
+				// should cost nothing.
+				_, err := bin.Discard("memory: "+name, []string{path})
+				return err
+			})
+		},
+		RenameMemory: func(dir, from, to string) (int, error) {
+			return memory.Rename(memory.Location{Dir: dir}, from, to)
+		},
+		RepairMemoryIndex: func(dir string) (int, int, error) {
+			return memory.Repair(memory.Location{Dir: dir})
+		},
 		LoadWork: func(laneID, dir string) (tui.WorkLevel, error) {
 			lane, err := findLane(ctx, ix, laneID)
 			if err != nil {

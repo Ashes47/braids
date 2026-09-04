@@ -98,6 +98,16 @@ type Options struct {
 	// LoadMemories reads what every project remembers. Nil for a source that
 	// keeps no memories, which hides the screen rather than showing it empty.
 	LoadMemories func() ([]memory.Set, error)
+	// RemoveMemory takes a memory out: the file to the bin, and its row out of
+	// the index that decides what a session loads.
+	RemoveMemory func(dir, name string) error
+	// RenameMemory gives a memory a new name and follows it everywhere — the
+	// file, the index row, the frontmatter and every link — reporting how many
+	// links it rewrote.
+	RenameMemory func(dir, from, to string) (int, error)
+	// RepairMemoryIndex makes a project's index agree with its files: a row
+	// for every memory that has none, and none for a file that is gone.
+	RepairMemoryIndex func(dir string) (added, dropped int, err error)
 	// DiscardPaths moves particular files or directories to the bin, returning
 	// how much was moved. It is how one heavy scratch file is reclaimed without
 	// taking the rest of a session's work with it.
@@ -178,15 +188,18 @@ type Model struct {
 	archiveFn      func(string, bool) error
 	renameFn       func(string, string) error
 	// naming is the rename field, opened with r on a conversation.
-	naming       filterInput
-	deleteFn     func(string) (int64, error)
-	deleteWorkFn func(string) (int64, error)
-	loadBin      func() ([]trash.Entry, error)
-	loadWork     func(laneID, dir string) (WorkLevel, error)
-	loadMemories func() ([]memory.Set, error)
-	discardPaths func(label string, paths []string) (int64, error)
-	restoreFn    func(string) error
-	purgeFn      func(string) error
+	naming           filterInput
+	deleteFn         func(string) (int64, error)
+	deleteWorkFn     func(string) (int64, error)
+	loadBin          func() ([]trash.Entry, error)
+	loadWork         func(laneID, dir string) (WorkLevel, error)
+	loadMemories     func() ([]memory.Set, error)
+	removeMemoryFn   func(dir, name string) error
+	renameMemoryFn   func(dir, from, to string) (int, error)
+	repairMemoriesFn func(dir string) (added, dropped int, err error)
+	discardPaths     func(label string, paths []string) (int64, error)
+	restoreFn        func(string) error
+	purgeFn          func(string) error
 	// showArchived reveals what has been put away, so it can be brought back.
 	showArchived bool
 
@@ -235,41 +248,44 @@ type Model struct {
 // as soon as the terminal reports its real background.
 func NewModel(f *graph.Forest, opts Options) Model {
 	m := Model{
-		theme:          NewTheme(true, opts.ASCII),
-		ascii:          opts.ASCII,
-		source:         opts.Source,
-		indexPath:      opts.IndexPath,
-		loadSpine:      opts.LoadSpine,
-		loadAgents:     opts.LoadSubagents,
-		loadSeams:      opts.LoadCompactions,
-		workspaceOK:    opts.WorkspaceOK,
-		planMergeFn:    opts.PlanMerge,
-		mergeFn:        opts.Merge,
-		promote:        opts.Promote,
-		loadAgentSpine: opts.LoadAgentSpine,
-		branch:         opts.Branch,
-		refresh:        opts.Refresh,
-		changes:        opts.Changes,
-		liveFn:         opts.LiveEvents,
-		reporting:      opts.Reporting,
-		resumeCmd:      opts.ResumeCommand,
-		spawn:          opts.Spawn,
-		terminal:       opts.Terminal,
-		searchFn:       opts.Search,
-		archived:       opts.Archived,
-		archiveFn:      opts.Archive,
-		renameFn:       opts.Rename,
-		deleteFn:       opts.Delete,
-		deleteWorkFn:   opts.DeleteWork,
-		loadWork:       opts.LoadWork,
-		loadMemories:   opts.LoadMemories,
-		discardPaths:   opts.DiscardPaths,
-		loadBin:        opts.LoadBin,
-		restoreFn:      opts.Restore,
-		purgeFn:        opts.Purge,
-		now:            time.Now,
-		width:          80,
-		height:         24,
+		theme:            NewTheme(true, opts.ASCII),
+		ascii:            opts.ASCII,
+		source:           opts.Source,
+		indexPath:        opts.IndexPath,
+		loadSpine:        opts.LoadSpine,
+		loadAgents:       opts.LoadSubagents,
+		loadSeams:        opts.LoadCompactions,
+		workspaceOK:      opts.WorkspaceOK,
+		planMergeFn:      opts.PlanMerge,
+		mergeFn:          opts.Merge,
+		promote:          opts.Promote,
+		loadAgentSpine:   opts.LoadAgentSpine,
+		branch:           opts.Branch,
+		refresh:          opts.Refresh,
+		changes:          opts.Changes,
+		liveFn:           opts.LiveEvents,
+		reporting:        opts.Reporting,
+		resumeCmd:        opts.ResumeCommand,
+		spawn:            opts.Spawn,
+		terminal:         opts.Terminal,
+		searchFn:         opts.Search,
+		archived:         opts.Archived,
+		archiveFn:        opts.Archive,
+		renameFn:         opts.Rename,
+		deleteFn:         opts.Delete,
+		deleteWorkFn:     opts.DeleteWork,
+		loadWork:         opts.LoadWork,
+		loadMemories:     opts.LoadMemories,
+		removeMemoryFn:   opts.RemoveMemory,
+		renameMemoryFn:   opts.RenameMemory,
+		repairMemoriesFn: opts.RepairMemoryIndex,
+		discardPaths:     opts.DiscardPaths,
+		loadBin:          opts.LoadBin,
+		restoreFn:        opts.Restore,
+		purgeFn:          opts.Purge,
+		now:              time.Now,
+		width:            80,
+		height:           24,
 	}
 	m.forest = f
 	m.all = layout(f, m.theme.Glyphs, nil)
@@ -752,7 +768,7 @@ func (m Model) editing() bool {
 	case m.mode == workMode && m.work != nil:
 		return m.work.filter.active
 	case m.mode == memoryMode && m.memories != nil:
-		return m.memories.filter.active
+		return m.memories.filter.active || m.memories.naming.active
 	case m.mode == mapMode && m.naming.active:
 		return true
 	case m.mode == spineMode && m.spine != nil:

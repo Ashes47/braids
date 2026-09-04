@@ -37,6 +37,8 @@ type memoryState struct {
 	failed bool
 	// reading is the memory whose text is on screen, or nil while the list is.
 	reading *memoryDoc
+	// naming is the rename field, opened with r on a memory.
+	naming filterInput
 }
 
 // memoryDoc is one memory being read: its text, wrapped to the frame, and how
@@ -103,6 +105,9 @@ func (m Model) memoryKey(key string) Model {
 	if s.reading != nil {
 		return m.readingKey(key)
 	}
+	if s.naming.active {
+		return m.renameMemoryKey(key)
+	}
 	if s.filter.key(key) {
 		m.applyMemoryFilter()
 		return m
@@ -110,6 +115,12 @@ func (m Model) memoryKey(key string) Model {
 	switch key {
 	case "f":
 		s.filter.active = true
+	case "d":
+		return m.removeMemory()
+	case "i":
+		return m.repairMemoryIndex()
+	case "r":
+		return m.startMemoryRename()
 	case "esc", "backspace", "h", "left":
 		m.mode = m.returnTo
 		m.memories = nil
@@ -307,6 +318,10 @@ func (m Model) renderMemories() string {
 // memoryStatus is the description of what the cursor is on, or the last notice.
 func (m Model) memoryStatus() string {
 	s := m.memories
+	if s.naming.active {
+		return m.theme.Accent.Render("rename to: ") + m.theme.Value.Render(s.naming.text) +
+			m.theme.Accent.Render("▏") + m.theme.Label.Render("  enter renames · esc cancels")
+	}
 	if s.notice != "" {
 		return m.noticeStyle(s.failed).Render(truncate(s.notice, m.width-2))
 	}
@@ -363,7 +378,9 @@ func memoryHints() []hint {
 	return []hint{
 		{"j/k", "down / up"}, {"↵", "read it"},
 		{"c", "the conversation"}, {"n / N", "next / prev flagged"},
-		{"f", "filter"}, {"esc", "back"},
+		{"r", "rename"}, {"i", "repair the index"},
+		{"d", "delete"}, {"f", "filter"},
+		{"esc", "back"},
 	}
 }
 
@@ -374,11 +391,12 @@ func readingHints() []hint {
 	}
 }
 
+// memoryInfo draws the header for whichever of the two screens is showing.
+// What it draws comes from headerContent, which is also what sizes it — a
+// header measured from one screen and drawn from another overflows.
 func (m Model) memoryInfo() string {
-	if m.memories.reading != nil {
-		return m.factsBlock(m.readingFacts(), readingHints(), nil)
-	}
-	return m.factsBlock(m.memoryFacts(), memoryHints(), m.memoryGlyphs())
+	facts, keys, glyphs := m.headerContent()
+	return m.factsBlock(facts, keys, glyphs)
 }
 
 func (m Model) memoryGlyphs() []glyph {
@@ -599,4 +617,162 @@ func (m Model) renderReading() string {
 	out.WriteString("\n")
 	out.WriteString(" " + m.theme.Label.Render(truncate(doc.memory.Description, m.width-2)))
 	return out.String()
+}
+
+// Curation. Every operation here changes the index in the same breath as the
+// file, because the index is what a session loads: a memory deleted without its
+// row leaves a pointer to nothing, and one renamed without its row becomes
+// invisible while still sitting on disk.
+
+// liveIn names a conversation in a project that is being written right now.
+//
+// braids editing a file a session may also be writing breaks one writer per
+// file, and the thing at stake is something the person asked to be remembered.
+// So an edit is refused while anything in that project is live, which is
+// stricter than it needs to be and cheaper than being wrong.
+func (m Model) liveIn(project string) (string, bool) {
+	for _, r := range m.all {
+		if r.node.Lane.Project != project {
+			continue
+		}
+		switch stateOf(r.node.Lane, m.liveFor(r.node.Lane.ID), m.now()) {
+		case stateWorking, stateThinking, stateNeedsYou:
+			name := r.node.Lane.Title
+			if name == "" {
+				name = shortID(r.node.Lane.ID)
+			}
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// guardMemoryEdit refuses an edit while the project is busy, saying which
+// conversation is holding it up.
+func (m Model) guardMemoryEdit(project string) (Model, bool) {
+	who, live := m.liveIn(project)
+	if !live {
+		return m, true
+	}
+	m.memories.notice = fmt.Sprintf("%q is running — braids will not edit memories under it", truncate(who, 40))
+	m.memories.failed = true
+	return m, false
+}
+
+func (m Model) removeMemory() Model {
+	entry, ok := m.memoryCursor()
+	if !ok || m.removeMemoryFn == nil {
+		return m
+	}
+	row := m.memories.shown[m.memories.cursor]
+	if guarded, allowed := m.guardMemoryEdit(row.project); !allowed {
+		return guarded
+	}
+	if err := m.removeMemoryFn(row.set.Dir, entry.Name); err != nil {
+		m.memories.notice, m.memories.failed = err.Error(), true
+		return m
+	}
+	m = m.reloadMemories()
+	m.memories.notice = fmt.Sprintf("%s is in the bin, and out of the index · u to recover", entry.Name)
+	m.memories.failed = false
+	return m
+}
+
+func (m Model) repairMemoryIndex() Model {
+	if m.repairMemoriesFn == nil || len(m.memories.shown) == 0 {
+		return m
+	}
+	row := m.memories.shown[min(m.memories.cursor, len(m.memories.shown)-1)]
+	if guarded, allowed := m.guardMemoryEdit(row.project); !allowed {
+		return guarded
+	}
+	added, dropped, err := m.repairMemoriesFn(row.set.Dir)
+	if err != nil {
+		m.memories.notice, m.memories.failed = err.Error(), true
+		return m
+	}
+	m = m.reloadMemories()
+	switch {
+	case added == 0 && dropped == 0:
+		m.memories.notice = fmt.Sprintf("%s: the index already agrees with the files", row.project)
+	default:
+		m.memories.notice = fmt.Sprintf("%s: listed %d that nothing loaded, dropped %d pointing at nothing",
+			row.project, added, dropped)
+	}
+	m.memories.failed = false
+	return m
+}
+
+func (m Model) startMemoryRename() Model {
+	entry, ok := m.memoryCursor()
+	if !ok || m.renameMemoryFn == nil {
+		return m
+	}
+	m.memories.naming = filterInput{active: true, text: entry.Name}
+	return m
+}
+
+func (m Model) renameMemoryKey(key string) Model {
+	s := m.memories
+	switch key {
+	case "esc":
+		s.naming = filterInput{}
+		return m
+	case "enter":
+		return m.finishMemoryRename()
+	}
+	s.naming.edit(key)
+	return m
+}
+
+func (m Model) finishMemoryRename() Model {
+	s := m.memories
+	entry, ok := m.memoryCursor()
+	to := strings.TrimSpace(s.naming.text)
+	s.naming = filterInput{}
+	if !ok || to == "" || to == entry.Name {
+		return m
+	}
+	row := s.shown[s.cursor]
+	if guarded, allowed := m.guardMemoryEdit(row.project); !allowed {
+		return guarded
+	}
+	relinked, err := m.renameMemoryFn(row.set.Dir, entry.Name, to)
+	if err != nil {
+		s.notice, s.failed = err.Error(), true
+		return m
+	}
+	m = m.reloadMemories()
+	m.memories.notice = fmt.Sprintf("%s is now %s%s", entry.Name, to, relinkedNote(relinked))
+	m.memories.failed = false
+	return m
+}
+
+// relinkedNote says how many references were followed, because a rename that
+// silently rewrote a dozen other memories should say so.
+func relinkedNote(n int) string {
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return " · one link followed"
+	default:
+		return fmt.Sprintf(" · %d links followed", n)
+	}
+}
+
+// reloadMemories reads the set again after changing it, keeping the cursor
+// where it can.
+func (m Model) reloadMemories() Model {
+	if m.loadMemories == nil {
+		return m
+	}
+	at, filter := m.memories.cursor, m.memories.filter
+	sets, err := m.loadMemories()
+	state := &memoryState{sets: sets, err: err, filter: filter, cursor: at}
+	state.rows = memoryRows(state.sets)
+	state.shown = state.rows
+	m.memories = state
+	m.applyMemoryFilter()
+	return m
 }

@@ -578,14 +578,45 @@ the facts above it. `c` goes to the conversation, from the list or from the
 reader; a search hit for a memory opens it read, since searching for one means
 wanting to read it.
 
-**Read-only, deliberately.** MEMORY.md is the harness's file and a live session
-may rewrite it, which sits badly with one writer per file. Curation attaches
-without rework: the cursor already names one memory, the notice line already
-reports what happened, and the state already reloads from disk after an action.
-What a delete, rename or retype would add is a key, a function on Options, and
-one hard obligation — change the index in the same breath as the file, because
-the index is the part that is read. A guard against acting while a session in
-that project is live is what the hooks already make possible.
+### 6.4c-2 Curation — three operations, one obligation
+
+Everything that changes a memory changes the index in the same breath. The
+index is what a session loads, so a memory deleted without its row leaves a
+pointer to nothing and one renamed without its row becomes invisible while
+still sitting on disk. Both are failures you cannot see from inside a session,
+and both are what braids found in a real set the first time it looked — so they
+are the normal outcome of editing these files by hand, not a hypothetical.
+
+**Delete** (`d`) sends the file to the bin, like every other deletion in
+braids, and drops its row. The index is written first: a row pointing at a
+missing file is a worse state than a file with no row, because the row is the
+part that gets read.
+
+**Repair** (`i`) makes a project's index agree with its files — a row for every
+memory that has none, and none for a file that is gone. It is the highest value
+per keystroke, because it fixes the invisible failure and needs no judgement
+about content. Rows that were already right are written back byte for byte,
+including any shape this code does not model.
+
+**Rename** (`r`) follows the name everywhere it was used: the file, the index
+row, the frontmatter's own `name`, and every `[[link]]` pointing at it — and
+says how many links it rewrote. That last part is why it is one operation
+rather than three: a rename that leaves fourteen memories pointing at a name
+that no longer exists has traded one tidy name for fourteen broken references.
+
+**Retype was considered and dropped.** The type is a label braids groups and
+filters by; nothing loads or skips a memory because of it. Changing one is
+worth a keystroke only if a memory is badly filed, and a wrong label costs
+nothing but a wrong grouping.
+
+**The guard.** braids editing a file a live session may also be writing breaks
+one writer per file, and what is at stake is something a person asked to be
+remembered. So an edit is refused while anything in that project is running,
+naming the conversation that is holding it up. That is stricter than it needs
+to be — a session is rarely touching memory — and cheaper than being wrong.
+
+The index is replaced atomically and at `0600`, because a half-written index is
+a session that loads half a memory set.
 
 ### 6.4d Search across everything
 

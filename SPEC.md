@@ -655,6 +655,21 @@ one is in flight, so no conversation of any size can freeze the frame. That made
 the sidecars concurrently read while written, which for a Go map is not stale
 data but a crash, so they are now guarded.
 
+**The open conversation is re-read too**, so its spine grows while you sit on
+it. Before this it was a snapshot taken when you pressed `↵` — branches
+appearing off it refreshed, the turn count beside it on the map climbed, and the
+turns themselves never arrived. Re-reading is a query against the index rather
+than a parse of the file, tens of milliseconds on the longest conversation
+here, which is why it goes with the rest of the work off the thread.
+
+The cursor obeys one rule: **hold your place, unless you were at the end.**
+Someone on the last turn of a live session is watching it arrive and should keep
+watching; someone reading turn 400 is not, and dragging them to the bottom would
+lose the thing they were reading. Rows are found again by identity, which the
+filter already relied on. A subagent is exempt — it is read from its own
+transcript, so reloading by conversation ID would replace it with the wrong
+spine entirely.
+
 ### 6.5 Branch — inline at the junction, never a modal
 
 ```

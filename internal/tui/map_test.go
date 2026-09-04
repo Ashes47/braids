@@ -364,7 +364,7 @@ func TestLiveUpdatesAdoptANewForest(t *testing.T) {
 	}
 
 	// The read happens, and its result is adopted when it arrives.
-	msg := refreshInBackground(m.refresh)()
+	msg := refreshInBackground(m)()
 	if refreshed != 1 {
 		t.Fatalf("refresh called %d times, want 1", refreshed)
 	}
@@ -403,7 +403,7 @@ func TestLiveUpdatesCoalesceWhileReading(t *testing.T) {
 			m.refreshing, m.refreshAgain)
 	}
 	// Finishing the first read starts exactly one more.
-	updated, cmd := m.Update(refreshInBackground(m.refresh)())
+	updated, cmd := m.Update(refreshInBackground(m)())
 	m = updated.(Model)
 	if cmd == nil {
 		t.Fatal("the noted changes were dropped")
@@ -412,7 +412,7 @@ func TestLiveUpdatesCoalesceWhileReading(t *testing.T) {
 		t.Error("the note was not cleared, so reads would never stop")
 	}
 	// And that one settles.
-	updated, cmd = m.Update(refreshInBackground(m.refresh)())
+	updated, cmd = m.Update(refreshInBackground(m)())
 	m = updated.(Model)
 	if m.refreshing || cmd != nil {
 		t.Errorf("reads did not settle: refreshing=%v cmd=%v", m.refreshing, cmd != nil)

@@ -395,18 +395,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshAgain = true
 		default:
 			m.refreshing = true
-			cmds = append(cmds, refreshInBackground(m.refresh))
+			cmds = append(cmds, refreshInBackground(m))
 		}
 		return m, tea.Batch(cmds...)
 	case refreshedMsg:
 		m.refreshing = false
 		if msg.err == nil && msg.forest != nil {
+			m = m.adoptSpine(msg)
 			m = m.adopt(msg.forest)
+			m = m.followTail(msg)
 		}
 		if m.refreshAgain {
 			m.refreshAgain = false
 			m.refreshing = true
-			return m, refreshInBackground(m.refresh)
+			return m, refreshInBackground(m)
 		}
 		return m, nil
 	case tea.KeyPressMsg:
@@ -1300,14 +1302,80 @@ func (m Model) selected() (row, bool) {
 type refreshedMsg struct {
 	forest *graph.Forest
 	err    error
+	// spineLane is the conversation that was open when the read started, and
+	// segs, agents and seams are a fresh reading of it. A conversation being
+	// written grows under the cursor, and reading it again is a query against
+	// the index rather than a parse of the file — but it is still tens of
+	// milliseconds on a long one, which belongs off this thread with the rest.
+	spineLane string
+	segs      []graph.Segment
+	agents    []index.SubagentRow
+	seams     []index.CompactionRow
+	// atTail is whether the reader was on the last row when the read began.
+	// Someone sitting at the end of a live conversation is watching it arrive;
+	// someone reading turn 400 is not, and moving them would lose their place.
+	atTail bool
 }
 
 // refreshInBackground brings the index up to date away from the interface
-// thread. A failure is dropped on purpose: the map already holds a good view,
-// and a half-written transcript being read is normal rather than notable.
-func refreshInBackground(refresh func() (*graph.Forest, error)) tea.Cmd {
+// thread, and re-reads the open conversation while it is there. A failure is
+// dropped on purpose: the map already holds a good view, and a half-written
+// transcript being read is normal rather than notable.
+func refreshInBackground(m Model) tea.Cmd {
+	refresh, loadSpine := m.refresh, m.loadSpine
+	loadAgents, loadSeams := m.loadAgents, m.loadSeams
+	lane, atTail := "", false
+	// A subagent is read from its own transcript, not the conversation's, so
+	// reloading by lane ID would replace it with the wrong spine.
+	if m.spine != nil && m.spine.agentOf == "" {
+		lane = m.spine.lane.ID
+		atTail = m.spine.cursor == len(m.spine.visible)-1
+	}
 	return func() tea.Msg {
 		forest, err := refresh()
-		return refreshedMsg{forest: forest, err: err}
+		msg := refreshedMsg{forest: forest, err: err, atTail: atTail}
+		if lane == "" || loadSpine == nil {
+			return msg
+		}
+		segs, spineErr := loadSpine(lane)
+		if spineErr != nil {
+			return msg
+		}
+		msg.spineLane, msg.segs = lane, segs
+		if loadAgents != nil {
+			if agents, agentErr := loadAgents(lane); agentErr == nil {
+				msg.agents = agents
+			}
+		}
+		if loadSeams != nil {
+			if seams, seamErr := loadSeams(lane); seamErr == nil {
+				msg.seams = seams
+			}
+		}
+		return msg
 	}
+}
+
+// adoptSpine takes the re-read conversation, if it is still the one open. The
+// rows are rebuilt by adopt, which holds the cursor on the row it was on.
+func (m Model) adoptSpine(msg refreshedMsg) Model {
+	if msg.spineLane == "" || m.spine == nil || m.spine.lane.ID != msg.spineLane {
+		return m
+	}
+	m.spine.segs = msg.segs
+	m.spine.agents = msg.agents
+	m.spine.seams = msg.seams
+	return m
+}
+
+// followTail moves to the end of a conversation that grew, but only for a
+// reader who was already at the end.
+func (m Model) followTail(msg refreshedMsg) Model {
+	if !msg.atTail || msg.spineLane == "" || m.spine == nil ||
+		m.spine.lane.ID != msg.spineLane || len(m.spine.visible) == 0 {
+		return m
+	}
+	m.spine.cursor = len(m.spine.visible) - 1
+	m.clampSpine()
+	return m
 }

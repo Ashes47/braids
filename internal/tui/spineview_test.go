@@ -897,3 +897,119 @@ func TestFailedTurnsAreDrawnAndStoppedAt(t *testing.T) {
 		t.Errorf("n stopped at t%d, want the failure at t10", got)
 	}
 }
+
+// A conversation being written must grow under the reader: sitting on its
+// spine and seeing nothing new arrive is the whole failure this fixes.
+func TestSpineFollowsAConversationBeingWritten(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("live", "being written", "app", 3, time.Minute)}
+	short := []graph.Segment{
+		{Seq: 1, Kind: graph.SegTurn, Role: model.RoleUser, Preview: "one"},
+		{Seq: 2, Kind: graph.SegTurn, Role: model.RoleAssistant, Preview: "two"},
+		{Seq: 3, Kind: graph.SegTurn, Role: model.RoleUser, Preview: "three"},
+	}
+	grown := append(append([]graph.Segment(nil), short...),
+		graph.Segment{Seq: 4, Kind: graph.SegTurn, Role: model.RoleAssistant, Preview: "four"},
+		graph.Segment{Seq: 5, Kind: graph.SegTurn, Role: model.RoleUser, Preview: "five"},
+	)
+
+	segs := short
+	changes := make(chan struct{}, 1)
+	m := NewModel(forestOf(lanes, nil), Options{
+		ASCII: true, Source: "claudecode", Changes: changes,
+		LoadSpine: func(string) ([]graph.Segment, error) { return segs, nil },
+		Refresh:   func() (*graph.Forest, error) { return forestOf(lanes, nil), nil },
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 96, 20
+	m = m.openSpine()
+	if m.mode != spineMode {
+		t.Fatal("the spine did not open")
+	}
+	if got := plain(m.renderSpine()); strings.Contains(got, "five") {
+		t.Fatal("the fixture is not doing what the test thinks")
+	}
+
+	// The reader is sitting at the end, watching it arrive.
+	m.spine.cursor = len(m.spine.visible) - 1
+	segs = grown
+	updated, _ := m.Update(changedMsg{})
+	m = updated.(Model)
+	updated, _ = m.Update(refreshInBackground(m)())
+	m = updated.(Model)
+
+	out := plain(m.renderSpine())
+	if !strings.Contains(out, "five") {
+		t.Errorf("new turns did not arrive:\n%s", out)
+	}
+	if m.spine.cursor != len(m.spine.visible)-1 {
+		t.Errorf("cursor %d of %d: a reader at the end should stay at the end",
+			m.spine.cursor, len(m.spine.visible))
+	}
+}
+
+// A reader part-way up a live conversation must not be dragged to the bottom
+// by turns arriving underneath them.
+func TestSpineHoldsThePlaceOfSomeoneReading(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("live", "being written", "app", 3, time.Minute)}
+	segs := []graph.Segment{
+		{Seq: 1, Kind: graph.SegTurn, Role: model.RoleUser, Preview: "the first thing"},
+		{Seq: 2, Kind: graph.SegTurn, Role: model.RoleAssistant, Preview: "the second thing"},
+		{Seq: 3, Kind: graph.SegTurn, Role: model.RoleUser, Preview: "the third thing"},
+	}
+	m := NewModel(forestOf(lanes, nil), Options{
+		ASCII: true, Source: "claudecode", Changes: make(chan struct{}, 1),
+		LoadSpine: func(string) ([]graph.Segment, error) { return segs, nil },
+		Refresh:   func() (*graph.Forest, error) { return forestOf(lanes, nil), nil },
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 96, 20
+	m = m.openSpine()
+
+	// Reading the second turn, not the last.
+	m.spine.cursor = 1
+	held := rowKey(m.spine.visible[1])
+
+	segs = append(append([]graph.Segment(nil), segs...),
+		graph.Segment{Seq: 4, Kind: graph.SegTurn, Role: model.RoleAssistant, Preview: "the fourth thing"})
+	updated, _ := m.Update(changedMsg{})
+	m = updated.(Model)
+	updated, _ = m.Update(refreshInBackground(m)())
+	m = updated.(Model)
+
+	if !strings.Contains(plain(m.renderSpine()), "the fourth thing") {
+		t.Error("the new turn did not arrive")
+	}
+	if got := rowKey(m.spine.visible[m.spine.cursor]); got != held {
+		t.Errorf("the cursor moved from %q to %q", held, got)
+	}
+}
+
+// A subagent is read from its own transcript, so a refresh must not replace it
+// with the conversation that spawned it.
+func TestSpineRefreshLeavesASubagentAlone(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("live", "parent", "app", 3, time.Minute)}
+	parentSegs := []graph.Segment{{Seq: 1, Kind: graph.SegTurn, Role: model.RoleUser, Preview: "parent turn"}}
+	m := NewModel(forestOf(lanes, nil), Options{
+		ASCII: true, Source: "claudecode", Changes: make(chan struct{}, 1),
+		LoadSpine: func(string) ([]graph.Segment, error) { return parentSegs, nil },
+		Refresh:   func() (*graph.Forest, error) { return forestOf(lanes, nil), nil },
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 96, 20
+	m = m.openSpine()
+	// Stand in for reading a subagent: its own segments, and a note of whose.
+	m.spine.agentOf = "live"
+	m.spine.segs = []graph.Segment{{Seq: 1, Kind: graph.SegTurn, Role: model.RoleAssistant, Preview: "agent turn"}}
+	m.spine.build()
+
+	msg := refreshInBackground(m)()
+	if got := msg.(refreshedMsg).spineLane; got != "" {
+		t.Errorf("a subagent's spine was queued for reload as lane %q", got)
+	}
+	updated, _ := m.Update(msg)
+	m = updated.(Model)
+	if out := plain(m.renderSpine()); !strings.Contains(out, "agent turn") ||
+		strings.Contains(out, "parent turn") {
+		t.Errorf("the subagent's spine was replaced:\n%s", out)
+	}
+}

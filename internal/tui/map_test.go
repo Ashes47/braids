@@ -1028,3 +1028,25 @@ func TestNoFrameSizePanics(t *testing.T) {
 		}
 	}
 }
+
+// HideMark means no width draws the mark. It exists so a frame headed for a
+// page that already carries the logo can spend those columns on the screen.
+func TestHideMarkLeavesItOutAtEveryWidth(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("root", "main work", "app", 100, time.Hour)}
+	f := forestOf(lanes, nil)
+	for width := 60; width <= 300; width += 3 {
+		m := NewModel(f, Options{ASCII: true, Source: "claudecode", HideMark: true})
+		m.now = func() time.Time { return now }
+		m.width, m.height = width, 30
+		if p := m.headerPlan(); p.logo != nil {
+			t.Fatalf("width %d drew the mark with HideMark set", width)
+		}
+	}
+	// And it is the flag doing it, not the widths.
+	m := NewModel(f, Options{ASCII: true, Source: "claudecode"})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 300, 30
+	if m.headerPlan().logo == nil {
+		t.Error("300 columns drew no mark without HideMark, so the test proves nothing")
+	}
+}

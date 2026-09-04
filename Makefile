@@ -69,12 +69,11 @@ pages:
 	python3 site/docs.py
 
 # frames recaptures the screenshots, which needs the binary. They are real
-# braids output taken against a fake ~/.claude, never drawn by hand. 195
-# columns is the width where the header draws the facts, the glyph key, every
-# binding and the full mark.
+# braids output taken against a fake ~/.claude, never drawn by hand. The width
+# lives in demo.py, which explains the number it picked.
 frames: install
 	python3 scripts/demo.py --out /tmp/braids-demo --frames site/frames \
-		--width 195 --braids "$(shell go env GOPATH)/bin/braids" >/dev/null
+		--braids "$(shell go env GOPATH)/bin/braids" >/dev/null
 	for f in map spine search work file memories memory bin; do \
 		python3 scripts/ansi2png.py site/frames/$$f.ans assets/frames/$$f.png; \
 	done

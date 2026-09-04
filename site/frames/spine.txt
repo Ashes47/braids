@@ -1,23 +1,23 @@
- Lane:     a1b2c3d4        ●    your turn            <j/k>   down / up           <q>     quit                <o>     open terminal           ___.                          __        .___         
- Turns:    24              ●    claude's turn        <↵>     open branch/agent   <n / N> next / prev ⚠ ⊕ ← ═                                 \_ |__   ______     _____    |__|    __| _/    ______
- Branches: 3 forked out    ⋯    turns collapsed      <b>     branch here         <p>     promote agent                                        | __ \  \_  __ \   \__  \    |     / __ |    /  ___/
- Agents:   0               ⊕    agent it spawned     </>     search              <f>     filter turns                                         | \_\ \  |  | \/    / __ \_  |    / /_/ |    \___  \
-                           ⚠    a tool call failed   <m>     merge branch back   <a>     toggle archive                                       |___  /  |__|      (____  / |__|  \____ |   /____  /
-                           ══   context compacted    <esc>   back                <y>     copy resume                                              \/                  \/             \/        \/ 
+ Lane:     a1b2c3d4      ●    your turn               <j/k>   down / up           <q>     quit                <o>     open terminal      
+ Turns:    24            ●    claude's turn           <↵>     open branch/agent   <n / N> next / prev ⚠ ⊕ ← ═
+ Branches: 3 forked out  ⋯    turns collapsed         <b>     branch here         <p>     promote agent      
+ Agents:   0             ⊕    agent it spawned        </>     search              <f>     filter turns       
+                         ⚠    a tool call failed      <m>     merge branch back   <a>     toggle archive     
+                         ══   context compacted       <esc>   back                <y>     copy resume        
 
-╭─ Spine(Checkout stalls at 80% under load, then…)[13] ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  TURN  WHO     WHAT HAPPENED                                                                                                                                                            BRANCHES│
-│ ●    t1 you     checkout stalls at 80% under load and then recovers                                                                                                                             │
-│ ⋯    t2         7 turns · 1 Bash · 1 Grep · 1 Read                                                                                                                                              │
-│ ●    t9 you     which network call                                                                                                                                                              │
-│   └─● Two writers contending on the same shard index, 80% of the waits  (3 turns)                                                                                                           ← t6│
-│   └─● Blobstore is doing 11 KiB reads per object instead of batching them  (4 turns)                                                                                                        ← t8│
-│ ⋯   t10         5 turns · 2 Bash · 1 Grep                                                                                                                                                       │
-│ ⚠   t15 failed  no route to host                                                                                                                                                                │
-│   └─● Option C: move the lock inside the tax client and re-run the load test  (6 turns)                                                                                                    ← t14│
-│ ●   t16 you     skip the tax call and see if the stall goes                                                                                                                                     │
-│ ⋯   t17         5 turns · 1 Bash · 1 Edit                                                                                                                                                       │
-│ ●   t22 you     good. what does that break                                                                                                                                                      │
-│ ●   t23 claude  the receipt total is computed before tax now                                                                                                                                    │
-│ ●   t24 you     so we need the deferral to rejoin before receipt                                                                                                                                │
-╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Spine(Checkout stalls at 80% under load, then…)[13] ──────────────────────────────────────────────────────────────────────────────────╮
+│  TURN  WHO     WHAT HAPPENED                                                                                                   BRANCHES│
+│ ●    t1 you     checkout stalls at 80% under load and then recovers                                                                    │
+│ ⋯    t2         7 turns · 1 Bash · 1 Grep · 1 Read                                                                                     │
+│ ●    t9 you     which network call                                                                                                     │
+│   └─● Two writers contending on the same shard index, 80% of the waits  (3 turns)                                                  ← t6│
+│   └─● Blobstore is doing 11 KiB reads per object instead of batching them  (4 turns)                                               ← t8│
+│ ⋯   t10         5 turns · 2 Bash · 1 Grep                                                                                              │
+│ ⚠   t15 failed  no route to host                                                                                                       │
+│   └─● Option C: move the lock inside the tax client and re-run the load test  (6 turns)                                           ← t14│
+│ ●   t16 you     skip the tax call and see if the stall goes                                                                            │
+│ ⋯   t17         5 turns · 1 Bash · 1 Edit                                                                                              │
+│ ●   t22 you     good. what does that break                                                                                             │
+│ ●   t23 claude  the receipt total is computed before tax now                                                                           │
+│ ●   t24 you     so we need the deferral to rejoin before receipt                                                                       │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

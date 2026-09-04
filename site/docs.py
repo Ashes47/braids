@@ -35,22 +35,39 @@ DOCS_CSS = CSS + """
 .docs figure.frame { width:auto; margin-left:0; transform:none; }
 .side { position:sticky; top:78px; align-self:start; max-height:calc(100vh - 100px); overflow-y:auto; }
 .side h6 {
-  margin:0 0 8px; font-family:var(--mono); font-size:11px; font-weight:500;
+  margin:0 0 10px; font-family:var(--mono); font-size:11px; font-weight:500;
   letter-spacing:.09em; text-transform:uppercase; color:var(--faint);
 }
 .side nav { position:static; background:none; border:none; backdrop-filter:none; }
-.side a { display:block; color:var(--dim); font-size:14.5px; padding:4px 0 4px 11px;
-          border-left:1px solid var(--line); }
-.side a:hover { color:var(--ink); text-decoration:none; border-left-color:var(--faint); }
-/* The page you are on is a place, so it reads as a label: brighter and
-   heavier, with the accent on its rule. The accent text itself is saved for
-   the heading you are actually at, nested underneath. */
-.side a.page.on { color:var(--ink); font-weight:600; border-left-color:var(--accent); }
 .side .group { margin-bottom:24px; }
-.side .onthis { margin:2px 0 6px; }
-.side .onthis a { font-size:13px; color:var(--faint); padding:3px 0 3px 22px; }
-.side .onthis a:hover { color:var(--ink); }
-.side .onthis a.here { color:var(--accent); border-left-color:var(--accent); }
+
+/* Two lists doing two jobs, so they are drawn two ways. Which document you
+   are in is a choice among ten, and it gets a solid bar. Where you are inside
+   that document is a position along it, so the headings hang off a rail with
+   a dot on it. Same accent, different shapes: nothing has to be read twice to
+   work out which question it answers. */
+.side a.page {
+  display:block; position:relative; color:var(--dim); font-size:14.5px;
+  padding:5px 0 5px 14px; border:0;
+}
+.side a.page:hover { color:var(--ink); text-decoration:none; }
+.side a.page.on { color:var(--ink); font-weight:600; }
+.side a.page.on::before {
+  content:""; position:absolute; left:0; top:7px; bottom:7px;
+  width:3px; border-radius:2px; background:var(--accent);
+}
+
+.side .onthis { margin:4px 0 10px 14px; border-left:1px solid var(--line); }
+.side .onthis a {
+  display:block; position:relative; font-size:13px; color:var(--faint);
+  padding:4px 0 4px 16px; border:0;
+}
+.side .onthis a:hover { color:var(--ink); text-decoration:none; }
+.side .onthis a.here { color:var(--accent); }
+.side .onthis a.here::before {
+  content:""; position:absolute; left:-4px; top:50%; margin-top:-3.5px;
+  width:7px; height:7px; border-radius:50%; background:var(--accent);
+}
 
 /* ---- the docs index ---- */
 .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:18px; margin:26px 0 0; }

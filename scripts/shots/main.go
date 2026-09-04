@@ -45,6 +45,7 @@ func run() error {
 	lane := flag.String("lane", "", "conversation to land on")
 	query := flag.String("query", "", "with no screen, the search screen for this query")
 	keys := flag.String("keys", "", "keys to press, space separated, instead of --screen")
+	bare := flag.Bool("no-mark", false, "leave the ASCII mark out, for a page that has it already")
 	discard := flag.String("discard", "", "move this path to the bin first, so the bin has something in it")
 	width := flag.Int("width", 195, "frame width")
 	height := flag.Int("height", 24, "frame height")
@@ -79,8 +80,17 @@ func run() error {
 	opts := tui.Options{
 		Source:    "claudecode",
 		IndexPath: "~/.braids/index.db",
+		// The frames go on a page that carries the mark in its own header, and
+		// the mark costs the map 87 columns it would rather spend on titles.
+		HideMark: *bare,
+		// So the header says what it says on a machine with the hook
+		// installed, which is what the facts block is describing.
+		Reporting: true,
 		LoadSpine: tui.SpineLoader(ctx, ix),
-		LoadBin:   bin.List,
+		Search: func(query, scope string) ([]index.Hit, error) {
+			return ix.Search(ctx, index.Query{Text: query, Lane: scope, Limit: 200})
+		},
+		LoadBin: bin.List,
 		LoadMemories: func() ([]memory.Set, error) {
 			locations, err := src.MemoryDirs()
 			if err != nil {

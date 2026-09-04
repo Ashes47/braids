@@ -1,17 +1,17 @@
- File:     load-test-500.json    <j/k>   scroll                                                                                              ___.                          __        .___         
- Size:     597 kB                <y>     copy the path                                                                                       \_ |__   ______     _____    |__|    __| _/    ______
- Showing:  first 128 kB          <esc>   back to the list                                                                                     | __ \  \_  __ \   \__  \    |     / __ |    /  ___/
- Kind:     text                  <q>     quit                                                                                                 | \_\ \  |  | \/    / __ \_  |    / /_/ |    \___  \
-                                                                                                                                              |___  /  |__|      (____  / |__|  \____ |   /____  /
-                                                                                                                                                  \/                  \/             \/        \/ 
+ File:     load-test-500.json                                                                                    <j/k>   scroll          
+ Size:     597 kB                                                                                                <y>     copy the path   
+ Showing:  first 128 kB                                                                                          <esc>   back to the list
+ Kind:     text                                                                                                  <q>     quit            
 
-╭─ load-test-500.json ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ {"t":1,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                                                                              │
-│ {"t":2,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                                                                              │
-│ {"t":3,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                                                                              │
-│ {"t":4,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                                                                              │
-│ {"t":5,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                                                                              │
-│ {"t":6,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                                                                              │
-│ {"t":7,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                                                                              │
-╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ load-test-500.json ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ {"t":1,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                     │
+│ {"t":2,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                     │
+│ {"t":3,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                     │
+│ {"t":4,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                     │
+│ {"t":5,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                     │
+│ {"t":6,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                     │
+│ {"t":7,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                     │
+│ {"t":8,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                     │
+│ {"t":9,"concurrency":500,"p50_ms":38,"p99_ms":611,"stalled":false}                                                                     │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
  128 kB read of 597 kB, the rest is on disk · /tmp/braids-demo/jobs/a1b2c3d4/tmp/load-test-500.json

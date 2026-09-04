@@ -102,6 +102,18 @@ def ansi_to_html(text: str) -> str:
     return "".join(out)
 
 
+def mark() -> str:
+    """The ASCII mark for the page header, as `braids help` prints it.
+
+    Read from the capture rather than written out here, so the page and
+    internal/brand cannot disagree about the shape of the word.
+    """
+    lines = (FRAMES / "mark.txt").read_text().rstrip("\n").split("\n")
+    art = "\n".join(html.escape(line) for line in lines[:-1])
+    tag = html.escape(lines[-1])
+    return f'<pre class="ascii" aria-hidden="true">{art}\n<span class="tag">{tag}</span></pre>'
+
+
 def frame(name: str, caption: str = "", cmd: str = "", then: str = "") -> str:
     """A verbatim braids screenshot, as produced by scripts/demo.py.
 
@@ -145,10 +157,11 @@ NAV = """<nav><div class="wrap">
     <span class="name">braids</span>
   </a>
   <span class="spacer"></span>
-  <a class="link" href="#what">What it does</a>
-  <a class="link" href="#work">Screens</a>
+  <a class="link" href="#map">Map</a>
+  <a class="link" href="#branch">Branch</a>
+  <a class="link" href="#search">Search</a>
   <a class="link" href="#local">Local</a>
-  <a class="link" href="#commands">Commands</a>
+  <a class="link" href="#install">Install</a>
   <a class="link" href="docs/">Docs</a>
   <a class="link" href="https://github.com/Ashes47/braids">GitHub</a>
   <a class="link" href="#star">★ Star</a>
@@ -158,10 +171,10 @@ FOOTER = """<footer><div class="wrap">
   <div class="cols footcols">
     <div>
       <h5>braids</h5>
-      <a href="#what">What it does</a>
+      <a href="#map">The map</a>
+      <a href="#branch">Branch</a>
       <a href="#local">Local</a>
-      <a href="#commands">Commands</a>
-      <a href="#star">Star it</a>
+      <a href="#install">Install</a>
     </div>
     <div>
       <h5>Read</h5>
@@ -242,6 +255,15 @@ def page(*, title: str, description: str, body: str, css: str,
 """
 
 
+def _frame_columns() -> int:
+    """How wide the captured frames are, in columns."""
+    widest = 0
+    for f in FRAMES.glob("*.ans"):
+        for line in f.read_text().split("\n"):
+            widest = max(widest, len(SGR.sub("", line)))
+    return widest or 138
+
+
 CSS = """
 :root {
   --bg:#0b0d10; --panel:#11141a; --line:#232833; --ink:#e6edf3; --dim:#8b949e;
@@ -280,7 +302,19 @@ nav a.link.on { color:var(--accent); }
 
 /* ---- hero ---- */
 header { padding:72px 0 8px; }
-header .mark { height:104px; width:auto; margin-bottom:26px; }
+header .marks { display:flex; align-items:center; gap:26px; margin-bottom:28px; }
+header .mark { height:92px; width:auto; }
+header pre.ascii {
+  font-family:var(--mono); font-size:clamp(6px,.92vw,11px); line-height:1.25;
+  margin:0; color:var(--accent); white-space:pre;
+}
+header pre.ascii .tag { color:var(--dim); }
+@media (max-width:640px) { header pre.ascii { display:none; } }
+
+/* A section that has a page of its own says so, once, at the end of it. */
+p.more { margin:18px 0 0; font-size:14.5px; }
+p.more a { font-weight:600; }
+p.more a::after { content:" \2192"; }
 h1 {
   font-size:clamp(30px,4.6vw,52px); line-height:1.1; margin:0 0 18px;
   letter-spacing:-.02em; font-weight:650;
@@ -329,9 +363,14 @@ p.sub { color:var(--dim); margin-top:0; }
    sideways is a screenshot nobody reads. Narrow windows still scroll, at a
    size you can actually see. */
 figure.frame {
-  margin:26px 0 0; width:min(1400px, calc(100vw - 40px));
+  /* Wider than the prose column, but only just: a frame is FRAME_COLS columns
+     and at this width the text lands at the size cap rather than being shrunk
+     to fit. It used to be 195 columns, 87 of which were the ASCII mark, and
+     the frame had to take the whole window to show them. The mark is in the
+     page header now. */
+  margin:26px 0 0; width:min(1120px, calc(100vw - 40px));
   margin-left:50%; transform:translateX(-50%);
-  /* So the size above is worked out from this box rather than the window. */
+  /* So the size below is worked out from this box rather than the window. */
   container-type:inline-size;
 }
 figure.frame .shell {
@@ -359,14 +398,14 @@ figure.frame pre {
      anything above it dashes the rules. Sitting just under it gives the ASCII
      mark as much air as it can have while the borders still join. */
   line-height:1.25;
-  /* A frame is 195 columns and has to fit its box, or the panel border
+  /* A frame is FRAME_COLS columns and has to fit its box, or the panel border
      scrolls off the right. One column is 0.6em in every face in --mono, so
      the size comes from the width the figure actually gets. The first value
      is the fallback for browsers without container queries; the second is
      exact, because 100cqw is this figure, which inside the docs layout is not
      the window. */
-  font-size:min(11.5px, calc((min(1400px, 100vw - 40px) - 34px) / 121));
-  font-size:min(11.5px, calc((100cqw - 34px) / 121));
+  font-size:min(12px, calc((min(1120px, 100vw - 40px) - 34px) / FRAME_DIV));
+  font-size:min(12px, calc((100cqw - 34px) / FRAME_DIV));
 }
 @media (max-width:700px) {
   /* On a phone 195 columns cannot both fit and be legible. Pick legible and
@@ -395,6 +434,11 @@ kbd {
 .cols { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:22px; margin-top:26px; }
 .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px 20px; }
 .card h4 { margin:0 0 7px; font-size:15px; }
+.card h4 a { color:var(--ink); }
+.card h4 a::after { content:" \2192"; color:var(--accent); opacity:0; transition:opacity .12s ease; }
+.card:hover { border-color:var(--faint); }
+.card:hover h4 a { color:var(--accent); text-decoration:none; }
+.card:hover h4 a::after { opacity:1; }
 .card p { margin:0; color:var(--dim); font-size:14.5px; max-width:none; }
 table { border-collapse:collapse; width:100%; margin-top:22px; font-size:14.5px; }
 th, td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
@@ -434,3 +478,11 @@ footer .icons a:hover { color:var(--ink); text-decoration:none; }
   header { padding:44px 0 0; }
 }
 """
+
+# One column is 0.6em in every face in --mono; the divisor carries a little
+# slack for one that runs wider. Substituted rather than written out so a
+# recapture at a different width cannot leave this behind.
+_COLS = _frame_columns()
+CSS = (CSS.replace("FRAME_COLS", str(_COLS))
+          .replace("FRAME_DIV", str(round(_COLS * 0.62))))
+assert "FRAME_COLS" not in CSS and "FRAME_DIV" not in CSS, "placeholder left in the stylesheet"

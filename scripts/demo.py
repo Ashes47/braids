@@ -236,8 +236,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True, help="where to build the fake ~/.claude")
     ap.add_argument("--frames", help="write the screenshots here as .ans and .txt")
-    ap.add_argument("--width", type=int, default=195,
-                    help="the width where the whole header fits")
+    ap.add_argument("--width", type=int, default=138,
+                    help="the width at which no screen elides anything")
     ap.add_argument("--braids", default="braids", help="the binary to run")
     ap.add_argument("--shots", default="go run ./scripts/shots",
                     help="the screenshot tool, for the screens --print cannot reach")
@@ -252,37 +252,43 @@ def main() -> None:
     subprocess.run([args.braids, "index", "--root", str(out / "projects"), "--db", str(db)],
                    check=True, capture_output=True)
 
+    # The mark, taken from `braids help` so the page cannot drift from
+    # internal/brand. Seven lines: the art and the tagline under it.
+    if args.frames:
+        helped = subprocess.run([args.braids, "help"], check=True,
+                                capture_output=True, text=True).stdout
+        mark = "\n".join(helped.split("\n")[:7]).rstrip()
+        into = pathlib.Path(args.frames).expanduser()
+        into.mkdir(parents=True, exist_ok=True)
+        (into / "mark.ans").write_text(mark + "\n")
+        (into / "mark.txt").write_text(plain(mark) + "\n")
+
     lane = LANES[0][0][:8]
-    # name -> (height, tool, arguments). The map, a spine and search come from
-    # the program's own --print, so those three frames go through the same path
-    # a user does. The rest are screens you reach with keys, which --print does
-    # not do and should not grow a flag for, so scripts/shots presses the keys
-    # and draws the frame. The bin comes last: filling it moves a file out of
-    # the work products, and the work frames are taken before that happens.
+    # name -> (height, arguments). Every frame comes from scripts/shots, which
+    # can reach the screens you get to with keys and can leave the ASCII mark
+    # out. That matters more than it sounds: the map needs 108 columns for its
+    # facts, its glyph key and all fourteen bindings, and 195 for those plus
+    # the mark. Captured at 195 the frames were mostly decoration and the text
+    # came out tiny wherever they were shown. The mark lives on the page now.
+    #
+    # The bin comes last: filling it moves a file out of the work products,
+    # and the work frames are taken before that happens.
     shots = {
-        "map": (18, "braids", []),
-        "spine": (24, "braids", ["--lane", lane]),
-        "search": (20, "braids", ["--query", "lock"]),
-        "work": (13, "shots", ["--screen", "work", "--lane", lane]),
-        "file": (18, "shots", ["--screen", "file", "--lane", lane]),
-        "memories": (16, "shots", ["--screen", "memories"]),
-        "memory": (21, "shots", ["--screen", "memory"]),
-        "bin": (12, "shots", ["--screen", "bin", "--discard",
-                              str(out / "jobs" / lane / "tmp" / "row-ids-out.txt")]),
+        "map": (18, []),
+        "spine": (24, ["--screen", "spine", "--lane", lane]),
+        "search": (18, ["--query", "lock"]),
+        "work": (11, ["--screen", "work", "--lane", lane]),
+        "file": (18, ["--screen", "file", "--lane", lane]),
+        "memories": (15, ["--screen", "memories"]),
+        "memory": (20, ["--screen", "memory"]),
+        "bin": (9, ["--screen", "bin", "--discard",
+                    str(out / "jobs" / lane / "tmp" / "row-ids-out.txt")]),
     }
-    # 195 columns for every frame, everywhere. It is the width at which all
-    # three screens draw the facts, the glyph key, every binding and the full
-    # mark; below it the header starts dropping them, and it drops them at a
-    # different width per screen, so a narrower set had the mark on search and
-    # not on the map.
-    for name, (height, tool, extra) in shots.items():
-        if tool == "braids":
-            command = [args.braids, "map", "--print", "--db", str(db)]
-        else:
-            command = args.shots.split() + ["--db", str(db),
-                                            "--root", str(out / "projects")]
+    for name, (height, extra) in shots.items():
         frame = subprocess.run(
-            command + ["--width", str(args.width), "--height", str(height)] + extra,
+            args.shots.split() + ["--db", str(db), "--root", str(out / "projects"),
+                                  "--no-mark", "--width", str(args.width),
+                                  "--height", str(height)] + extra,
             check=True, capture_output=True, text=True).stdout
         frame = sanitize(frame, str(db))
         if args.frames:

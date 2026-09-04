@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/charmbracelet/x/ansi"
 	"strings"
 
 	"github.com/Ashes47/braids/internal/core/memory"
@@ -35,6 +36,21 @@ type memoryState struct {
 	err    error
 	notice string
 	failed bool
+	// reading is the memory whose text is on screen, or nil while the list is.
+	reading *memoryDoc
+}
+
+// memoryDoc is one memory being read: its text, wrapped to the frame, and how
+// far down it the reader has scrolled.
+type memoryDoc struct {
+	memory memory.Memory
+	text   string
+	lines  []string
+	offset int
+	// width is what the text was wrapped to, so a resize re-wraps it rather
+	// than leaving it ragged.
+	width int
+	err   error
 }
 
 // memoryRow is one line: either a project heading or a memory under it.
@@ -85,6 +101,9 @@ func memoryRows(sets []memory.Set) []memoryRow {
 
 func (m Model) memoryKey(key string) Model {
 	s := m.memories
+	if s.reading != nil {
+		return m.readingKey(key)
+	}
 	if s.filter.key(key) {
 		m.applyMemoryFilter()
 		return m
@@ -110,7 +129,9 @@ func (m Model) memoryKey(key string) Model {
 		return m.nextFlagged(1)
 	case "N":
 		return m.nextFlagged(-1)
-	case "enter":
+	case "enter", "l", "right":
+		return m.readMemory()
+	case "c":
 		return m.openMemoryOrigin()
 	}
 	m.clampMemories()
@@ -247,6 +268,9 @@ func (m *Model) clampMemories() {
 
 func (m Model) renderMemories() string {
 	s := m.memories
+	if s.reading != nil {
+		return m.renderReading()
+	}
 	var out strings.Builder
 	out.WriteString(m.memoryInfo())
 	out.WriteString("\n\n")
@@ -338,13 +362,23 @@ func (m Model) memoryFacts() []fact {
 
 func memoryHints() []hint {
 	return []hint{
-		{"j/k", "down / up"}, {"↵", "open the conversation"},
-		{"n / N", "next / prev flagged"}, {"f", "filter"},
-		{"esc", "back"}, {"q", "quit"},
+		{"j/k", "down / up"}, {"↵", "read it"},
+		{"c", "the conversation"}, {"n / N", "next / prev flagged"},
+		{"f", "filter"}, {"esc", "back"},
+	}
+}
+
+func readingHints() []hint {
+	return []hint{
+		{"j/k", "scroll"}, {"c", "the conversation"},
+		{"esc", "back to the list"}, {"q", "quit"},
 	}
 }
 
 func (m Model) memoryInfo() string {
+	if m.memories.reading != nil {
+		return m.factsBlock(m.readingFacts(), readingHints(), nil)
+	}
 	return m.factsBlock(m.memoryFacts(), memoryHints(), m.memoryGlyphs())
 }
 
@@ -456,4 +490,115 @@ func danglingFrom(set *memory.Set, name string) []memory.Link {
 		}
 	}
 	return out
+}
+
+// readMemory opens the memory under the cursor for reading. The list says what
+// braids knows *about* a memory; this is the memory itself, which is the thing
+// you actually came to check.
+func (m Model) readMemory() Model {
+	entry, ok := m.memoryCursor()
+	if !ok {
+		return m
+	}
+	body, err := memory.Body(entry.Path)
+	doc := &memoryDoc{memory: entry, text: body, err: err}
+	doc.rewrap(m.contentWidth() - 2)
+	m.memories.reading = doc
+	m.memories.notice, m.memories.failed = "", false
+	return m
+}
+
+func (m Model) readingKey(key string) Model {
+	doc := m.memories.reading
+	switch key {
+	case "esc", "backspace", "h", "left":
+		m.memories.reading = nil
+	case "j", "down":
+		doc.offset++
+	case "k", "up":
+		doc.offset--
+	case "g", "home":
+		doc.offset = 0
+	case "G", "end":
+		doc.offset = len(doc.lines)
+	case "ctrl+d", "pgdown", " ", "space":
+		doc.offset += m.bodyHeight()
+	case "ctrl+u", "pgup":
+		doc.offset -= m.bodyHeight()
+	case "c":
+		m.memories.reading = nil
+		return m.openMemoryOrigin()
+	}
+	m.clampReading()
+	return m
+}
+
+func (m *Model) clampReading() {
+	doc := m.memories.reading
+	if doc == nil {
+		return
+	}
+	// Stop with the last line on screen rather than scrolling past the end
+	// into blank space.
+	doc.offset = min(max(doc.offset, 0), max(len(doc.lines)-m.bodyHeight(), 0))
+}
+
+// rewrap lays the text out for a frame of this width. Wrapping on words, not
+// characters: a memory is prose.
+func (doc *memoryDoc) rewrap(width int) {
+	if width < 20 {
+		width = 20
+	}
+	if doc.width == width && doc.lines != nil {
+		return
+	}
+	doc.width = width
+	doc.lines = nil
+	for _, para := range strings.Split(ansi.Wordwrap(doc.text, width, " -"), "\n") {
+		doc.lines = append(doc.lines, para)
+	}
+}
+
+func (m Model) readingFacts() []fact {
+	doc := m.memories.reading
+	return []fact{
+		{"Memory", doc.memory.Name},
+		{"Kind", orDash(doc.memory.Kind)},
+		{"Changed", doc.memory.Modified.Format("2006-01-02")},
+		{"Written by", orDash(shortID(doc.memory.Origin))},
+		{"Links", strings.Join(doc.memory.Links, ", ")},
+	}
+}
+
+func (m Model) renderReading() string {
+	doc := m.memories.reading
+	doc.rewrap(m.contentWidth() - 2)
+	m.clampReading()
+
+	var out strings.Builder
+	out.WriteString(m.memoryInfo())
+	out.WriteString("\n\n")
+	title := doc.memory.Name
+	if !doc.memory.Listed {
+		title += " · not in the index"
+	}
+	out.WriteString(m.panelTopTitled(truncate(title, m.contentWidth()-6)))
+	out.WriteString("\n")
+
+	blank := repeat(" ", m.contentWidth())
+	switch {
+	case doc.err != nil:
+		out.WriteString(m.framed(padRight(" "+m.theme.Empty.Render(doc.err.Error()), m.contentWidth())) + "\n")
+		m.fill(&out, blank, m.bodyHeight()-1)
+	default:
+		end := min(doc.offset+m.bodyHeight(), len(doc.lines))
+		for i := doc.offset; i < end; i++ {
+			out.WriteString(m.framed(padRight(" "+m.theme.Value.Render(doc.lines[i]), m.contentWidth())) + "\n")
+		}
+		m.fill(&out, blank, m.bodyHeight()-(end-doc.offset))
+	}
+	out.WriteString(m.panelBottom())
+	out.WriteString("\n")
+	out.WriteString(" " + m.theme.Label.Render(truncate(doc.memory.Description, m.width-2)))
+	return out.String()
 }

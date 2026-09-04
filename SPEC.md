@@ -570,6 +570,14 @@ the index omits is broken. An index row with no file is a stale pointer. A link
 to a name that does not exist yet is a legitimate note to self, and braids says
 so rather than calling it a fault.
 
+`↵` reads the memory itself. The list says what braids knows *about* one — its
+kind, its links, whether the index loads it, which conversation wrote it — and
+that is not what you came to check. The text is wrapped to the frame, scrolls,
+and shows the body without the frontmatter, because the frontmatter is already
+the facts above it. `c` goes to the conversation, from the list or from the
+reader; a search hit for a memory opens it read, since searching for one means
+wanting to read it.
+
 **Read-only, deliberately.** MEMORY.md is the harness's file and a live session
 may rewrite it, which sits badly with one writer per file. Curation attaches
 without rework: the cursor already names one memory, the notice line already

@@ -2,6 +2,9 @@ package tui
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -93,7 +96,7 @@ func TestMemoryScreenSkipsHeadings(t *testing.T) {
 // having: ↵ goes to the conversation where the decision was made.
 func TestMemoryScreenOpensTheConversationThatWroteIt(t *testing.T) {
 	m := memoryModel(t, nil)
-	m = m.memoryKey("enter")
+	m = m.memoryKey("c")
 	if m.mode != mapMode || m.memories != nil {
 		t.Fatalf("mode = %v, want the map", m.mode)
 	}
@@ -110,7 +113,7 @@ func TestMemoryScreenOpensTheConversationThatWroteIt(t *testing.T) {
 func TestMemoryScreenSaysWhenItCannotOpenTheConversation(t *testing.T) {
 	m := memoryModel(t, nil)
 	m = m.memoryKey("G") // no-origin
-	m = m.memoryKey("enter")
+	m = m.memoryKey("c")
 	if m.mode != memoryMode || !m.memories.failed ||
 		!strings.Contains(m.memories.notice, "did not record") {
 		t.Errorf("notice = %q, want it to say no conversation was recorded", m.memories.notice)
@@ -123,7 +126,7 @@ func TestMemoryScreenSaysWhenItCannotOpenTheConversation(t *testing.T) {
 				Modified: now, Listed: true}},
 		}}, nil
 	})
-	m = m.memoryKey("enter")
+	m = m.memoryKey("c")
 	if m.mode != memoryMode || !strings.Contains(m.memories.notice, "not indexed") {
 		t.Errorf("notice = %q, want it to say the conversation is not indexed", m.memories.notice)
 	}
@@ -247,5 +250,122 @@ func TestMemoryNextFlagged(t *testing.T) {
 	clean = clean.memoryKey("n")
 	if !strings.Contains(clean.memories.notice, "nothing here is unlisted") {
 		t.Errorf("notice = %q", clean.memories.notice)
+	}
+}
+
+// The list says what braids knows about a memory; ↵ shows the memory itself,
+// which is the thing you came to check.
+func TestMemoryReaderShowsTheText(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shard-manifest.md")
+	body := "The manifest is written twice.\n\nThe reader needs it before the writer finishes, " +
+		"which is a long enough sentence to have to wrap across more than one line of a narrow frame.\n"
+	if err := os.WriteFile(path, []byte("---\nname: shard-manifest\ndescription: why twice\n"+
+		"metadata:\n  type: project\n---\n\n"+body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := memoryModel(t, func() ([]memory.Set, error) {
+		return []memory.Set{{
+			Location: memory.Location{Project: "p", Dir: dir},
+			Memories: []memory.Memory{{
+				Name: "shard-manifest", Description: "why twice", Kind: "project",
+				Origin: originSession, Path: path, Modified: now,
+				Links: []string{"reader-contract"}, Listed: true,
+			}},
+		}}, nil
+	})
+
+	m = m.memoryKey("enter")
+	if m.memories.reading == nil {
+		t.Fatal("↵ did not open the memory")
+	}
+	out := plain(m.renderMemories())
+	for _, want := range []string{
+		"The manifest is written twice", "shard-manifest", "reader-contract", "why twice",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the reader is missing %q:\n%s", want, out)
+		}
+	}
+	// Frontmatter is not text: it is already in the facts above.
+	if strings.Contains(out, "metadata:") || strings.Contains(out, "description: why twice") {
+		t.Errorf("frontmatter leaked into the body:\n%s", out)
+	}
+	// Prose wraps to the frame rather than being cut off.
+	for _, line := range strings.Split(out, "\n") {
+		if lipgloss.Width(line) > m.width {
+			t.Errorf("a line is %d columns wide, frame is %d:\n%q", lipgloss.Width(line), m.width, line)
+		}
+	}
+
+	// esc returns to the list, not out of the screen.
+	m = m.memoryKey("esc")
+	if m.memories == nil || m.memories.reading != nil {
+		t.Fatal("esc did not return to the list")
+	}
+	if m.mode != memoryMode {
+		t.Error("esc left the memory screen entirely")
+	}
+
+	// From the reader, c still reaches the conversation that wrote it.
+	m = m.memoryKey("enter")
+	m = m.memoryKey("c")
+	if m.mode != mapMode {
+		t.Errorf("c from the reader went to %v, want the map", m.mode)
+	}
+}
+
+// Scrolling stops at the ends rather than running off into blank space.
+func TestMemoryReaderScrollingStaysInBounds(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "long.md")
+	var lines []string
+	for i := range 60 {
+		lines = append(lines, fmt.Sprintf("line %d of the memory", i))
+	}
+	if err := os.WriteFile(path, []byte("---\nname: long\ndescription: d\nmetadata:\n  type: project\n---\n\n"+
+		strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := memoryModel(t, func() ([]memory.Set, error) {
+		return []memory.Set{{
+			Location: memory.Location{Project: "p", Dir: dir},
+			Memories: []memory.Memory{{Name: "long", Path: path, Modified: now, Listed: true}},
+		}}, nil
+	})
+	m = m.memoryKey("enter")
+
+	m = m.memoryKey("k")
+	if got := m.memories.reading.offset; got != 0 {
+		t.Errorf("scrolled above the first line to %d", got)
+	}
+	m = m.memoryKey("G")
+	last := m.memories.reading.offset
+	if last == 0 {
+		t.Fatal("G did not scroll")
+	}
+	m = m.memoryKey("j")
+	if got := m.memories.reading.offset; got != last {
+		t.Errorf("scrolled past the end to %d, was %d", got, last)
+	}
+	// The last line is on screen at the bottom, not scrolled out of view.
+	if !strings.Contains(plain(m.renderMemories()), "line 59 of the memory") {
+		t.Error("the end of the memory is not visible at the bottom")
+	}
+}
+
+// A memory whose file has gone says so instead of showing an empty frame.
+func TestMemoryReaderReportsAMissingFile(t *testing.T) {
+	m := memoryModel(t, func() ([]memory.Set, error) {
+		return []memory.Set{{
+			Location: memory.Location{Project: "p", Dir: "/m"},
+			Memories: []memory.Memory{{
+				Name: "vanished", Path: filepath.Join("/m", "vanished.md"), Modified: now, Listed: true,
+			}},
+		}}, nil
+	})
+	m = m.memoryKey("enter")
+	if got := plain(m.renderMemories()); !strings.Contains(got, "vanished.md") {
+		t.Errorf("the reader does not say what it could not read:\n%s", got)
 	}
 }

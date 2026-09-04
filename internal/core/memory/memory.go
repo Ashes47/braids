@@ -366,3 +366,20 @@ func Fingerprint(loc Location) (count int, newest time.Time) {
 	}
 	return count, newest
 }
+
+// Body reads a memory's text, without the frontmatter.
+//
+// Read deliberately does not load bodies: a listing needs names, kinds and
+// links, and a set can hold hundreds. This is called for the one being read.
+func Body(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	_, body := splitFrontmatter(string(raw))
+	// splitFrontmatter hands back the closing --- with the body behind it.
+	if rest, ok := strings.CutPrefix(strings.TrimLeft(body, "\n"), "---"); ok {
+		body = rest
+	}
+	return strings.Trim(body, "\n"), nil
+}

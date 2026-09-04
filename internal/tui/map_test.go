@@ -16,9 +16,9 @@ import (
 	"github.com/Ashes47/braids/internal/core/model"
 )
 
-var ansi = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+var ansiCodes = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
-func plain(s string) string { return ansi.ReplaceAllString(s, "") }
+func plain(s string) string { return ansiCodes.ReplaceAllString(s, "") }
 
 var now = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 

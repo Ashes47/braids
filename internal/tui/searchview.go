@@ -368,6 +368,11 @@ func (m Model) jumpToMemory(hit index.Hit) Model {
 	// filter visible so it is obvious why the list is short.
 	m.memories.filter.text = hit.Name
 	m.applyMemoryFilter()
+	// Searching for a memory means wanting to read it, not to look at a row
+	// describing it.
+	if entry, ok := m.memoryCursor(); ok && entry.Name == hit.Name {
+		return m.readMemory()
+	}
 	return m
 }
 

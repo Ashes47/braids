@@ -20,6 +20,7 @@ const (
 	infoLines = 4
 	labelCol  = 10
 	hintCol   = 8
+	glyphCol  = 5
 )
 
 type fact struct{ label, value string }
@@ -40,33 +41,54 @@ func (m Model) facts() []fact {
 
 func hints() []hint {
 	return []hint{
-		{"j/k", "move"}, {"↵", "open spine"},
-		{"n/N", "next waiting"}, {"/", "search"},
-		{"f", "filter"}, {"y/o", "copy / open"},
+		{"j/k", "down / up"}, {"↵", "open spine"},
+		{"n / N", "next / prev waiting"}, {"/", "search"},
+		{"f", "filter"}, {"y / o", "copy / open"},
 	}
 }
 
-// info renders the map's facts block and key hints.
-func (m Model) info() string { return m.factsBlock(m.facts(), hints()) }
+// info renders the map's facts block, key hints and glyph key.
+func (m Model) info() string { return m.factsBlock(m.facts(), hints(), m.mapGlyphs()) }
+
+// mapGlyphs explains the marks the map draws.
+func (m Model) mapGlyphs() []hint {
+	g := m.theme.Glyphs
+	return []hint{
+		{g.Lane, "conversation"},
+		{g.Branch, "branched from above"},
+		{g.Fork + "t12", "branched at turn 12"},
+	}
+}
 
 // factsBlock renders labelled facts on the left and key hints on the right. The
 // hint block is padded to a fixed width before being pushed right, so the keys
 // form a clean column instead of a ragged edge.
-func (m Model) factsBlock(facts []fact, keys []hint) string {
-	hintWidth := hintCol
-	for _, k := range keys {
-		hintWidth = max(hintWidth, hintCol+lipgloss.Width(k.action))
-	}
+func (m Model) factsBlock(facts []fact, keys []hint, glyphs []hint) string {
 	labelWidth := labelCol
 	for _, f := range facts {
 		labelWidth = max(labelWidth, lipgloss.Width(f.label)+2)
 	}
-	// Two columns of hints: one column cannot hold everything a screen binds,
-	// and a legend that omits a working key is worse than no legend.
-	rows := (len(keys) + 1) / 2
-	if rows > infoLines {
-		rows = infoLines
+	factWidth := 0
+	for _, f := range facts {
+		factWidth = max(factWidth, labelWidth+lipgloss.Width(f.value))
 	}
+	hintWidth := hintCol
+	for _, k := range keys {
+		hintWidth = max(hintWidth, hintCol+lipgloss.Width(k.action))
+	}
+	glyphWidth := 0
+	for _, g := range glyphs {
+		glyphWidth = max(glyphWidth, glyphCol+lipgloss.Width(g.action))
+	}
+
+	// Choose the widest layout that fits, dropping columns rather than letting
+	// the header spill past the edge of the terminal.
+	columns, showGlyphs := m.fitColumns(factWidth, hintWidth, glyphWidth, len(keys) > 0, len(glyphs) > 0)
+	rows := len(keys)
+	if columns == 2 {
+		rows = (len(keys) + 1) / 2
+	}
+	rows = min(max(rows, 1), infoLines)
 
 	lines := make([]string, 0, infoLines)
 	for i := range infoLines {
@@ -75,13 +97,51 @@ func (m Model) factsBlock(facts []fact, keys []hint) string {
 			left = m.theme.Label.Render(padRight(facts[i].label+":", labelWidth)) +
 				m.theme.Value.Render(facts[i].value)
 		}
-		right := strings.Repeat(" ", hintWidth*2+1)
-		if i < rows {
+		right := ""
+		switch {
+		case columns == 2 && i < rows:
 			right = m.hintCell(keys, i, hintWidth) + " " + m.hintCell(keys, i+rows, hintWidth)
+		case columns == 2:
+			right = strings.Repeat(" ", hintWidth*2+1)
+		case columns == 1:
+			right = m.hintCell(keys, i, hintWidth)
+		}
+		if showGlyphs {
+			right = m.glyphCell(glyphs, i, glyphWidth) + "  " + right
 		}
 		lines = append(lines, " "+spread(left, right, m.width-2))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// fitColumns decides how much of the header the terminal can hold.
+func (m Model) fitColumns(factWidth, hintWidth, glyphWidth int, haveHints, haveGlyphs bool) (columns int, glyphs bool) {
+	room := m.width - 3 // one space either side of the gap, one for the margin
+	fits := func(width int) bool { return factWidth+width <= room }
+
+	if !haveHints {
+		return 0, haveGlyphs && fits(glyphWidth)
+	}
+	twoCols := hintWidth*2 + 1
+	switch {
+	case haveGlyphs && fits(glyphWidth+2+twoCols):
+		return 2, true
+	case fits(twoCols):
+		return 2, false
+	case fits(hintWidth):
+		return 1, false
+	default:
+		return 0, false
+	}
+}
+
+// glyphCell renders one line of the glyph key: the mark, then what it means.
+func (m Model) glyphCell(glyphs []hint, i, width int) string {
+	if i >= len(glyphs) {
+		return strings.Repeat(" ", width)
+	}
+	return m.theme.Rail.Render(padRight(glyphs[i].key, glyphCol)) +
+		m.theme.Label.Render(padRight(glyphs[i].action, width-glyphCol))
 }
 
 func (m Model) hintCell(keys []hint, i, width int) string {

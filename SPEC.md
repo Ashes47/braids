@@ -572,6 +572,15 @@ column in the sweep screen.
 - One accent for "needs you". Everything else is greyscale weight.
 - Idle age is always right-aligned; it is the field people scan.
 - Never render more than one junction per row.
+- **The header and the table are laid out by the same code.** Columns drop from
+  the right as the terminal narrows — size, then status, then project, then
+  turns — keeping the name and the age, which answer what it is and whether it
+  is stale. The two width bugs this screen has had were both the header and the
+  rows computing their own widths and drifting apart.
+- A glyph key sits beside the facts when the terminal is wide enough, and is
+  dropped rather than squeezed when it is not.
+- A paired key says what each half does: `n / N  next / prev marker`, not
+  `n/N  next marker`.
 - Animation is limited to a lane growing out of a junction on branch creation.
   That single motion is what teaches the model.
 

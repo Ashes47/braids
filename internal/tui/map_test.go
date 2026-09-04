@@ -674,3 +674,45 @@ func TestWrap(t *testing.T) {
 		}
 	}
 }
+
+func TestGlyphKeyAppearsOnlyWhenThereIsRoom(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("a", "first", "app", 5, time.Hour)}
+	m := newTestModel(t, forestOf(lanes, nil))
+
+	m.width = 132
+	wide := plain(m.render())
+	for _, want := range []string{"conversation", "branched at turn 12"} {
+		if !strings.Contains(wide, want) {
+			t.Errorf("wide layout missing the glyph key %q:\n%s", want, wide)
+		}
+	}
+
+	m.width = 90
+	narrow := plain(m.render())
+	if strings.Contains(narrow, "conversation") {
+		t.Error("the glyph key should be dropped rather than squeezed")
+	}
+	if !strings.Contains(narrow, "search") {
+		t.Error("the keys should survive after the glyph key is dropped")
+	}
+	// Whichever layout is chosen, nothing may overflow.
+	for _, w := range []int{132, 110, 90, 70, 50, 30} {
+		m.width = w
+		for _, line := range strings.Split(plain(m.render()), "\n") {
+			if got := len([]rune(line)); got > w {
+				t.Errorf("at width %d a line ran to %d: %q", w, got, line)
+			}
+		}
+	}
+}
+
+func TestKeyHintsNameBothDirections(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("a", "first", "app", 5, time.Hour)}
+	m := newTestModel(t, forestOf(lanes, nil))
+	m.width = 132
+	out := plain(m.render())
+	// "n/N next waiting" left it unsaid which of the two goes backwards.
+	if !strings.Contains(out, "next / prev waiting") {
+		t.Errorf("a paired key should say what each half does:\n%s", out)
+	}
+}

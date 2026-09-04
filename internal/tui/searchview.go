@@ -235,9 +235,9 @@ func (m Model) searchInfo() string {
 	}
 	keys := []hint{
 		{"↵", "jump to turn"}, {"tab", "change scope"},
-		{"↑/↓", "move"}, {"esc", "back"},
+		{"↑ / ↓", "down / up"}, {"esc", "back"},
 	}
-	return m.factsBlock(facts, keys)
+	return m.factsBlock(facts, keys, nil)
 }
 
 // orDash keeps an empty fact readable rather than blank.

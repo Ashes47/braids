@@ -566,6 +566,45 @@ func (m Model) nextWaiting(from, step int) int {
 	return from
 }
 
+// rowLayout is which columns the map draws. Both the header and the rows are
+// built from it, so they cannot drift apart — the two width bugs this screen
+// has already had were exactly that drift.
+type rowLayout struct {
+	fork, project, turns, size, status bool
+	right                              int // total width of everything after the title
+}
+
+// layoutFor drops columns from the right as the terminal narrows, keeping the
+// name and the age: what it is, and whether it is stale.
+func (m Model) layoutFor() rowLayout {
+	l := rowLayout{fork: m.showFork, project: m.showProject, turns: true, size: true, status: true}
+	width := func(l rowLayout) int {
+		n := ageWidth
+		for on, w := range map[*bool]int{
+			&l.fork: forkWidth, &l.project: projectWidth, &l.turns: msgsWidth, &l.size: sizeWidth,
+			&l.status: statusWidth,
+		} {
+			if *on {
+				n += w + 2
+			}
+		}
+		return n
+	}
+	// Give up the least informative column first.
+	for _, drop := range []*bool{&l.size, &l.status, &l.project, &l.turns, &l.fork} {
+		if m.contentWidth()-4-width(l) >= minTitleWidth {
+			break
+		}
+		*drop = false
+	}
+	l.right = width(l)
+	return l
+}
+
+// minTitleWidth is the least a conversation's name may be squeezed to before
+// columns start being dropped instead.
+const minTitleWidth = 16
+
 // renderRow draws one lane. A selected row is painted as a single flat band so
 // that no nested style can tear the background; an unselected row gets the
 // per-segment colouring.
@@ -595,9 +634,9 @@ func (m Model) rowParts(r row) (plain, styled string) {
 		suffix = "  " + shortID(lane.ID)
 	}
 
+	layout := m.layoutFor()
 	var rightPlain, rightStyled string
-	rightWidth := 0
-	if m.showFork {
+	if layout.fork {
 		fork := ""
 		if r.node.ParentID != "" {
 			fork = fmt.Sprintf("%s t%d", g.Fork, r.node.ForkSeq)
@@ -605,29 +644,36 @@ func (m Model) rowParts(r row) (plain, styled string) {
 		cell := padLeft(fork, forkWidth)
 		rightPlain += cell + "  "
 		rightStyled += m.theme.Faint.Render(cell) + "  "
-		rightWidth += forkWidth + 2
 	}
-	if m.showProject {
+	if layout.project {
 		cell := padRight(truncate(lane.Project, projectWidth), projectWidth)
 		rightPlain += cell + "  "
 		rightStyled += m.theme.Faint.Render(cell) + "  "
-		rightWidth += projectWidth + 2
 	}
-	msgs := padLeft(fmt.Sprintf("%d", lane.Messages), msgsWidth)
-	size := padLeft(humanBytes(lane.Size), sizeWidth)
+	if layout.turns {
+		cell := padLeft(fmt.Sprintf("%d", lane.Messages), msgsWidth)
+		rightPlain += cell + "  "
+		rightStyled += m.theme.Value.Render(cell) + "  "
+	}
+	if layout.size {
+		cell := padLeft(humanBytes(lane.Size), sizeWidth)
+		rightPlain += cell + "  "
+		rightStyled += m.theme.Faint.Render(cell) + "  "
+	}
 	age := padLeft(humanAge(m.now().Sub(lane.Updated)), ageWidth)
-	status := padLeft(string(state), statusWidth)
-	statusStyle := m.styleFor(lane, state)
-	rightPlain += msgs + "  " + size + "  " + age + "  " + status
-	rightStyled += m.theme.Value.Render(msgs) + "  " + m.theme.Faint.Render(size) + "  " +
-		m.theme.Dim.Render(age) + "  " + statusStyle.Render(status)
-	rightWidth += msgsWidth + 2 + sizeWidth + 2 + ageWidth + 2 + statusWidth
+	rightPlain += age
+	rightStyled += m.theme.Dim.Render(age)
+	if layout.status {
+		cell := padLeft(string(state), statusWidth)
+		rightPlain += "  " + cell
+		rightStyled += "  " + m.styleFor(lane, state).Render(cell)
+	}
 
 	// row = " " + prefix + glyph + " " + title + suffix + " " + right,
 	// so the fixed cost either side of the title is 4 cells.
-	titleWidth := m.contentWidth() - 4 - lipgloss.Width(r.prefix) - rightWidth - lipgloss.Width(suffix)
-	if titleWidth < 8 {
-		titleWidth = 8
+	titleWidth := m.contentWidth() - 4 - lipgloss.Width(r.prefix) - layout.right - lipgloss.Width(suffix)
+	if titleWidth < 4 {
+		titleWidth = 4
 	}
 	name := padRight(truncate(title, titleWidth), titleWidth)
 
@@ -643,19 +689,28 @@ func (m Model) rowParts(r row) (plain, styled string) {
 
 // columns draws the k9s-style header row above the lanes.
 func (m Model) columns() string {
+	layout := m.layoutFor()
 	right := ""
-	if m.showFork {
+	if layout.fork {
 		right += padLeft("FORK", forkWidth) + "  "
 	}
-	if m.showProject {
+	if layout.project {
 		right += padRight("PROJECT", projectWidth) + "  "
 	}
-	right += padLeft("TURNS", msgsWidth) + "  " + padLeft("SIZE", sizeWidth) + "  " +
-		padLeft("AGE", ageWidth) + "  " + padLeft("STATUS", statusWidth)
+	if layout.turns {
+		right += padLeft("TURNS", msgsWidth) + "  "
+	}
+	if layout.size {
+		right += padLeft("SIZE", sizeWidth) + "  "
+	}
+	right += padLeft("AGE", ageWidth)
+	if layout.status {
+		right += "  " + padLeft("STATUS", statusWidth)
+	}
 
 	nameWidth := m.contentWidth() - 2 - lipgloss.Width(right)
-	if nameWidth < 8 {
-		nameWidth = 8
+	if nameWidth < 4 {
+		nameWidth = 4
 	}
 	return m.theme.Column.Render(" " + padRight(" CONVERSATION", nameWidth) + " " + right)
 }
@@ -736,10 +791,12 @@ func humanAge(d time.Duration) string {
 // spread pushes left and right to opposite edges of the given width.
 func spread(left, right string, width int) string {
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		gap = 1
+	if gap >= 1 {
+		return left + strings.Repeat(" ", gap) + right
 	}
-	return left + strings.Repeat(" ", gap) + right
+	// Nothing fits: keep the left side, which carries the facts, and truncate
+	// rather than run past the edge of the terminal.
+	return truncate(left, width)
 }
 
 // truncate cuts to a display width, measuring cells rather than runes so that

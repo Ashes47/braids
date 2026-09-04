@@ -403,12 +403,23 @@ func (m Model) spineInfo() string {
 		{"Agents", fmt.Sprintf("%d", agents)},
 	}
 	keys := []hint{
-		{"j/k", "move"}, {"b", "branch here"},
+		{"j/k", "down / up"}, {"b", "branch here"},
 		{"p", "promote agent"}, {"/", "search"},
-		{"↵", "open branch/agent"}, {"n/N", "next marker"},
-		{"y/o", "copy / open"}, {"esc", "back"},
+		{"↵", "open branch/agent"}, {"n / N", "next / prev marker"},
+		{"y / o", "copy / open"}, {"esc", "back"},
 	}
-	return m.factsBlock(facts, keys)
+	return m.factsBlock(facts, keys, m.spineGlyphs())
+}
+
+// spineGlyphs explains the marks a conversation is drawn with.
+func (m Model) spineGlyphs() []hint {
+	g := m.theme.Glyphs
+	return []hint{
+		{g.Lane, "a turn"},
+		{g.Run, "turns collapsed"},
+		{g.Agent, "agent it spawned"},
+		{g.Branch, "branch / split"},
+	}
 }
 
 // describeBranches names the two kinds of branch a conversation can have, since

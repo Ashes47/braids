@@ -555,3 +555,15 @@ func TestPromotingFromInsideTheAgentBeingRead(t *testing.T) {
 		t.Error("expected confirmation")
 	}
 }
+
+func TestSpineGlyphKeyNamesTheMarks(t *testing.T) {
+	m := spineModel(t, demoSegments(), nil)
+	m = m.openSpine()
+	m.width = 132
+	out := plain(m.renderSpine())
+	for _, want := range []string{"a turn", "turns collapsed", "agent it spawned", "next / prev marker"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("spine legend missing %q:\n%s", want, out)
+		}
+	}
+}

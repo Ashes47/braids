@@ -1,0 +1,20 @@
+ Source:         claudecode
+ Index:          ~/.braids/index.db
+ Lanes:          6
+ Waiting on you: 4
+ Hooks:          reporting
+╭─ Conversations(all)[6] ──────────────────────────────────────────────────────────────╮
+│  CONVERSATION                   FORK    TURNS      SIZE       WORK    AGE      STATUS│
+│ ● checkout-flow                            24      6 kB    1004 kB     8m  unanswered│
+│ ├─● try-option-c               ← t14        6      2 kB                3m   your turn│
+│ │  └─● cache-gate-probe         ← t3        4      1 kB                3h   your turn│
+│ ├─● blobstore-density           ← t8        4      1 kB                2d   your turn│
+│ └─● index-contention            ← t6        3     814 B               14d  unanswered│
+│ ● import-pipeline                           8      2 kB                5d   your turn│
+│                                                                                      │
+│                                                                                      │
+│                                                                                      │
+│                                                                                      │
+│                                                                                      │
+│                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────╯

@@ -23,3 +23,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Write access to Ashes47/homebrew-tap, so the release can publish
+          # the formula. The workflow's own GITHUB_TOKEN is scoped to this
+          # repository and cannot push to another one.
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}

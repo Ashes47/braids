@@ -1,0 +1,23 @@
+ Query:    lock                                                 <↵>     open the result
+ Scope:    every conversation                                   <tab>   change scope
+ Hits:     9                                                    <↑ / ↓> down / up
+ Took:     285µs                                                <esc>   back
+╭─ Search(everywhere)[9] ──────────────────────────────────────────────────────────────╮
+│ TYPE   WHERE                     TURN KIND        MATCH                              │
+│ convo  index-contention            t2 Bash        {"command": "counting [lock] waits…│
+│ memory lock-scope-rule                            [lock]-scope-rule A [lock] must no…│
+│ work   tmp/lock-waits-by-sha…                     tmp/[lock]-waits-by-shard.tsv      │
+│ convo  checkout-flow               t4 Grep        {"command": "grep for the [lock] a…│
+│ memory import-nulls                               …Related: [[[lock]-scope-rule]].   │
+│ convo  checkout-flow               t8 text        the [lock] is held across a networ…│
+│ convo  try-option-c                t2 Edit        {"command": "moving the [lock] and…│
+│ convo  checkout-flow               t2 Read        {"command": "reading the handler a…│
+│ convo  try-option-c                t1 text        try option c: move the [lock] insi…│
+│                                                                                      │
+│                                                                                      │
+│                                                                                      │
+│                                                                                      │
+│                                                                                      │
+│                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+ /lock▏  ↵ open · tab scope · esc back

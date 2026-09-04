@@ -1,0 +1,22 @@
+ Lane:     a1b2c3d4             <j/k>   down / up           <n / N> next / prev ⚠ ⊕ ← ═
+ Turns:    24                   <↵>     open branch/agent   <p>     promote agent
+ Branches: 3 forked out         <b>     branch here         <f>     filter turns
+ Agents:   0                    </>     search              <a>     toggle archive
+                                <m>     merge branch back   <y>     copy resume
+                                <esc>   back                <o>     open terminal
+                                <q>     quit
+╭─ Spine(checkout-flow)[13] ───────────────────────────────────────────────────────────╮
+│  TURN  WHO     WHAT HAPPENED                                                 BRANCHES│
+│ ●    t1 you     checkout stalls at 80% under load and then recovers                  │
+│ ⋯    t2         7 turns · 1 Bash · 1 Grep · 1 Read                                   │
+│ ●    t9 you     which network call                                                   │
+│   └─● index-contention  (3 turns)                                                ← t6│
+│   └─● blobstore-density  (4 turns)                                               ← t8│
+│ ⋯   t10         5 turns · 2 Bash · 1 Grep                                            │
+│ ⚠   t15 failed  no route to host                                                     │
+│   └─● try-option-c  (6 turns)                                                   ← t14│
+│ ●   t16 you     skip the tax call and see if the stall goes                          │
+│ ⋯   t17         5 turns · 1 Bash · 1 Edit                                            │
+│ ●   t22 you     good. what does that break                                           │
+│ ●   t23 claude  the receipt total is computed before tax now                         │
+╰──────────────────────────────────────────────────────────────────────────────────────╯

@@ -22,6 +22,33 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# One command to install, without needing Go. Homebrew core requires a
+# notability bar braids has not cleared, so this publishes to a tap of our own
+# — `brew install ashes47/tap/braids` works from the first release.
+#
+# A formula rather than a cask, though goreleaser is phasing `brews` out in
+# favour of `homebrew_casks`: a cask is macOS only, and braids ships Linux
+# builds that Homebrew on Linux can install from a formula. When the option
+# goes away, Linux users still have the installer at braids.chat/install.sh.
+#
+# Needs a TAP_GITHUB_TOKEN secret with write access to Ashes47/homebrew-tap:
+# the workflow's own GITHUB_TOKEN cannot push to another repository.
+brews:
+  - name: braids
+    repository:
+      owner: Ashes47
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    homepage: https://braids.chat
+    description: Branch your Claude Code conversations and resume any of them from any turn
+    license: MIT
+    # No dependencies on purpose: pure-Go SQLite, so the binary needs nothing
+    # but a kernel.
+    install: |
+      bin.install "braids"
+    test: |
+      assert_match "braids", shell_output("#{bin}/braids version")
+
 changelog:
   use: github
   sort: asc

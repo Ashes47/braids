@@ -1,0 +1,38 @@
+name: site
+
+# Publishes braids.chat from site/ on every push to main.
+#
+# GitHub Pages rather than a host with an account and a bill: the repo is
+# already here, the site is one static file with no build step and no external
+# requests, and Pages gives a custom domain and TLS for nothing.
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", ".github/workflows/site.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a queued run supersedes an older one rather than
+# racing it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

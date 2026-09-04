@@ -32,6 +32,22 @@ jobs:
       - name: coverage
         run: make cover
 
+  # Windows has no make and a different shell, so the commands are spelled out
+  # rather than run through the Makefile. This is the only verification braids
+  # has that its Windows build works at all, so it runs the tests rather than
+  # only compiling.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: true
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...
+
   lint:
     runs-on: ubuntu-latest
     steps:

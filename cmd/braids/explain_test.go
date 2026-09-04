@@ -44,7 +44,7 @@ func repoWithCommit(t *testing.T, when time.Time, subject string) (repo, file st
 // not, which is the distinction explain has to respect.
 func transcript(t *testing.T, root, id, title, cwd string, said map[time.Time]string) {
 	t.Helper()
-	dir := filepath.Join(root, "-"+strings.ReplaceAll(strings.TrimPrefix(cwd, "/"), "/", "-"))
+	dir := filepath.Join(root, projectDirName(cwd))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +78,24 @@ func transcript(t *testing.T, root, id, title, cwd string, said map[time.Time]st
 	if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// projectDirName turns a working directory into one directory name, the way
+// the harness files transcripts. Anything that is not a letter or a digit
+// becomes a dash, which keeps it a legal name on every platform: a Windows
+// temporary directory is C:\Users\..., and neither the colon nor the
+// backslashes can appear in a name.
+func projectDirName(cwd string) string {
+	var b strings.Builder
+	b.WriteByte('-')
+	for _, r := range cwd {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteByte('-')
+	}
+	return b.String()
 }
 
 func sortedTimes(m map[time.Time]string) []time.Time {

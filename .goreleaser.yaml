@@ -9,7 +9,7 @@ builds:
     main: ./cmd/braids
     binary: braids
     env: [CGO_ENABLED=0]          # pure-Go sqlite: no cgo, so cross-compiles cleanly
-    goos: [darwin, linux]
+    goos: [darwin, linux, windows]
     goarch: [amd64, arm64]
     flags: [-trimpath]
     ldflags:
@@ -17,6 +17,11 @@ builds:
 
 archives:
   - formats: [tar.gz]
+    # Windows gets a zip, which is what a Windows machine can open without
+    # installing something first.
+    format_overrides:
+      - goos: windows
+        formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:

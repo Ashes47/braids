@@ -108,10 +108,17 @@ func (m Model) versionFact() string {
 	if !state.Due(m.now()) {
 		return m.version
 	}
-	if age, ok := state.BuildAge(m.now()); ok {
-		return fmt.Sprintf("%s · %s old · v to update", m.version, release.Age(age))
+	// The key is only offered where it can work. On a platform braids has no
+	// tested installer for, the row still says how old the build is and stops
+	// short of promising a keystroke that would do nothing.
+	offer := ""
+	if m.updateFn != nil {
+		offer = " · v to update"
 	}
-	return m.version + " · v to update"
+	if age, ok := state.BuildAge(m.now()); ok {
+		return fmt.Sprintf("%s · %s old%s", m.version, release.Age(age), offer)
+	}
+	return m.version + offer
 }
 
 func hints() []hint {

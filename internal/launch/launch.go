@@ -27,7 +27,7 @@ type Launcher func(ctx context.Context, dir, name, command string) error
 // A nil Launcher means this terminal cannot be told to run a command, which is
 // a fact about the terminal rather than a failure.
 func Detect(env func(string) string) (Launcher, string) {
-	if template := strings.TrimSpace(env("BRAIDS_SPAWN")); template != "" {
+	if template := strings.TrimSpace(env("BRAIDS_SPAWN")); template != "" && shellTemplates {
 		return fromTemplate(template), "BRAIDS_SPAWN"
 	}
 	if env("TMUX") != "" {
@@ -97,7 +97,7 @@ func fromTemplate(template string) Launcher {
 			"{name}", shellQuote(name),
 			"{dir}", shellQuote(dir),
 		).Replace(template)
-		return run(ctx, "sh", "-c", expanded)
+		return runTemplate(ctx, expanded)
 	}
 }
 

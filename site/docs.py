@@ -211,6 +211,24 @@ rm -rf ~/.braids         # the index and its sidecar files
   removing braids costs you the map and nothing else.
 </p>
 
+<h3>Windows</h3>
+<p>
+  There are Windows builds, as a zip on the
+  <a href="https://github.com/Ashes47/braids/releases">releases page</a>: unzip
+  it and put <code>braids.exe</code> somewhere on your PATH. There is no
+  one-line installer, because the one braids has is a POSIX shell script and it
+  will not ship a PowerShell one it has never run.
+</p>
+<p>
+  Everything reads and searches the same. Two things are not offered rather
+  than offered broken: <kbd>o</kbd> does not open a terminal through
+  <code>BRAIDS_SPAWN</code>, because that template runs through a shell and
+  quoting it for <code>cmd.exe</code> is a different set of rules that braids
+  cannot test, and <kbd>v</kbd> does not update, because there is no installer
+  to run. Both fall back to copying, which is what braids already does for any
+  terminal it cannot drive. The tests run on Windows in CI.
+</p>
+
 <h3>Staying current</h3>
 <p>
   Run the same line again to update. It asks the binary it would replace what

@@ -64,6 +64,12 @@ Or with Go:
 go install github.com/Ashes47/braids/cmd/braids@latest
 ```
 
+On Windows, download the zip from
+[releases](https://github.com/Ashes47/braids/releases) and put `braids.exe` on
+your PATH. Everything reads and searches the same; opening a terminal with `o`
+and updating with `v` are not offered there, because both would mean guessing at
+shell quoting braids cannot test.
+
 Or from source:
 
 ```sh

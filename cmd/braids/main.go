@@ -42,6 +42,7 @@ usage:
   braids search [flags] QUERY            search every indexed message
   braids lanes                           list indexed conversations
   braids branch --lane ID --at TURN      cut a new conversation at that turn
+                 [--workspace]           ...with a git worktree of its own
   braids agents --lane ID                list the subagents a conversation spawned
   braids promote --lane ID --agent ID    turn a subagent into its own conversation
   braids version
@@ -403,6 +404,7 @@ func cmdBranch(args []string, out *printer) error {
 	laneRef := fs.String("lane", "", "conversation to branch from (ID prefix)")
 	at := fs.Int("at", 0, "turn number to branch at")
 	name := fs.String("name", "", "name for the new conversation")
+	workspace := fs.Bool("workspace", false, "give the branch a git worktree of its own")
 	db := fs.String("db", "", "index location")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -426,12 +428,45 @@ func cmdBranch(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
+	kinds, err := sidecar.Load[string](sidecarPath(dbPath, "kinds.json"))
+	if err != nil {
+		return err
+	}
+	// Check before cutting: a branch that cannot be the kind it was asked for
+	// should not exist at all. The source lane's directory is the one the
+	// branch will run in.
+	if *workspace {
+		source, err := findLane(ctx, ix, *laneRef)
+		if err != nil {
+			return err
+		}
+		if err := worktreeOK(source.Cwd); err != nil {
+			return err
+		}
+	}
 	newID, err := branchAt(ctx, ix, provenance, *laneRef, *at, *name)
 	if err != nil {
 		return err
 	}
-	out.printf("branched %s at turn %d\n  new conversation %s\n  resume with: claude --resume %s%s\n",
-		shortID(*laneRef), *at, newID, newID, nameFlag(*name))
+	if *workspace {
+		if err := kinds.Set(newID, workspaceKind); err != nil {
+			return err
+		}
+	}
+	// Index the new lane so the command reported below can be built from it.
+	root, err := claudecode.DefaultRoot()
+	if err != nil {
+		return err
+	}
+	if _, err := ix.Sync(ctx, claudecode.New(root)); err != nil {
+		return err
+	}
+	command, err := resumeCommand(ctx, ix, kinds, newID)
+	if err != nil {
+		return err
+	}
+	out.printf("branched %s at turn %d as a %s\n  new conversation %s\n  resume with: %s\n",
+		shortID(*laneRef), *at, branchKindName(*workspace), newID, command)
 	out.printf("\nthe map picks it up on its own; `braids index` if you want it now\n")
 	return out.Err()
 }
@@ -480,11 +515,12 @@ func sidecarPath(dbPath, name string) string {
 	return filepath.Join(filepath.Dir(dbPath), name)
 }
 
-func nameFlag(name string) string {
-	if name == "" {
-		return ""
+// branchKindName describes what was cut, for the line reporting it.
+func branchKindName(workspace bool) string {
+	if workspace {
+		return "workspace"
 	}
-	return fmt.Sprintf(" --name %q", name)
+	return "thought"
 }
 
 func cmdPromote(args []string, out *printer) error {
@@ -758,11 +794,19 @@ func slug(name, fallback string) string {
 		}
 	}
 	trimmed := strings.Trim(string(out), "-")
-	if trimmed == "" {
-		return shortID(fallback)
+	if trimmed != "" {
+		return trimmed
 	}
-	return trimmed
+	// shortID is for reading, not for paths: it elides with a character no
+	// directory name should carry.
+	if len(fallback) > shortIDLen {
+		return fallback[:shortIDLen]
+	}
+	return fallback
 }
+
+// shortIDLen is how much of an ID identifies it well enough for a path.
+const shortIDLen = 8
 
 // spawner opens a terminal for a lane, or reports that this terminal cannot be
 // driven. The name it goes by is reported too, so the map can say what it used.

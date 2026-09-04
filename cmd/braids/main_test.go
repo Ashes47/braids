@@ -175,3 +175,28 @@ func TestTruncateIsRuneSafe(t *testing.T) {
 		}
 	}
 }
+
+func TestSlugMakesADirectoryName(t *testing.T) {
+	tests := []struct{ name, fallback, want string }{
+		{"try option c", "abc12345678", "try-option-c"},
+		{"NULLS LAST / starved", "abc12345678", "nulls-last-starved"},
+		{"  spaced  out  ", "abc12345678", "spaced-out"},
+		{"", "abc12345678", "abc12345"},
+		{"!!!", "abc12345678", "abc12345"},
+		{"already-fine", "abc12345678", "already-fine"},
+	}
+	for _, tt := range tests {
+		if got := slug(tt.name, tt.fallback); got != tt.want {
+			t.Errorf("slug(%q) = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestWorktreeOKRejectsSomewhereThatIsNotARepo(t *testing.T) {
+	if err := worktreeOK(t.TempDir()); err == nil {
+		t.Error("a directory that is not a repository cannot hold a worktree")
+	}
+	if err := worktreeOK(""); err == nil {
+		t.Error("a conversation with no directory cannot either")
+	}
+}

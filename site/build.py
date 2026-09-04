@@ -196,15 +196,16 @@ BODY = f"""
   <div class="cta">
     <div class="install">
       <span class="prompt">$</span>
-      <span id="cmd">brew install ashes47/tap/braids</span>
+      <span id="cmd">curl -fsSL https://braids.chat/install.sh | sh</span>
       <button class="copy" onclick="copyCmd(this)">copy</button>
     </div>
     <a class="btn primary" href="docs/">Read the docs</a>
     <a class="btn" href="https://github.com/Ashes47/braids">Star on GitHub</a>
   </div>
   <p class="note">
-    Or <code>curl -fsSL https://braids.chat/install.sh | sh</code> without
-    Homebrew. One binary, no daemon, no configuration file.
+    One binary, no daemon, no configuration file. Or
+    <code>go install github.com/Ashes47/braids/cmd/braids@latest</code> if you
+    have Go.
   </p>
 </div></header>
 
@@ -361,10 +362,7 @@ BODY = f"""
 
 <section><div class="wrap">
   <h2><span class="kicker">Install</span>One binary</h2>
-<pre class="sh"><span class="c"># homebrew</span>
-brew install ashes47/tap/braids
-
-<span class="c"># or without it — downloads the build for your machine and checks it</span>
+<pre class="sh"><span class="c"># works out the build for your machine and verifies it</span>
 curl -fsSL https://braids.chat/install.sh | sh
 
 <span class="c"># or with Go</span>

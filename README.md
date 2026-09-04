@@ -61,18 +61,12 @@ wrapper, no proxy, no protocol of its own.
 ## Install
 
 ```sh
-brew install ashes47/tap/braids
-```
-
-Or without Homebrew:
-
-```sh
 curl -fsSL https://braids.chat/install.sh | sh
 ```
 
-That downloads the release build for your machine, checks it against the
+That works out the release build for your machine, checks it against the
 published checksums, and puts one binary on your PATH. Nothing else — no
-daemon, no configuration file.
+daemon, no configuration file, and nothing to uninstall but the file.
 
 Or with Go:
 

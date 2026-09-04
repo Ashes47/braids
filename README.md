@@ -90,8 +90,10 @@ conversation they were cut from, and how far behind each one is.
 came back, where it failed, where it was compacted. A 25,000-turn conversation
 becomes a few hundred lines you can actually read.
 
-**Search** — full text over every message and tool call, in about a millisecond.
-Search is the front door; the graph is the confirmation.
+**Search** — full text over every message and tool call, plus your memories and
+the names of every work product, in a few milliseconds. Each result says whether
+it is a conversation, a memory or a work product, and `↵` opens the screen that
+can act on it. Search is the front door; the graph is the confirmation.
 
 **Branch** — put the cursor on any turn and press `b`. braids writes a new
 session file containing that turn's ancestry, and hands you the `claude --resume`
@@ -144,7 +146,7 @@ Two properties make this work, and both are deliberate:
 ```
 braids                                  open the map
 braids index [--full]                   index new and changed transcripts
-braids search QUERY [--kind K] [--limit N]
+braids search QUERY [--type T] [--kind K] [--limit N]
 braids lanes                            list indexed conversations
 braids agents  --lane ID                list the subagents a conversation spawned
 braids work    --lane ID [--path SUB]   browse a session's work products

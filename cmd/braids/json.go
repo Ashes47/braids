@@ -45,6 +45,14 @@ func laneOf(l index.LaneInfo) laneOut {
 }
 
 type hitOut struct {
+	// Of says what was found: a conversation's turn, a memory, or a work
+	// product. A result whose kind you cannot tell is one you have to open
+	// before you understand it.
+	Of string `json:"of"`
+	// Name is a memory's slug or a work product's path, empty for a turn.
+	Name string `json:"name,omitempty"`
+	// Path is the file it lives in, for the things that are files.
+	Path      string `json:"path,omitempty"`
 	Lane      string `json:"lane"`
 	LaneTitle string `json:"lane_title"`
 	Project   string `json:"project"`
@@ -61,6 +69,7 @@ type hitOut struct {
 
 func hitOf(h index.Hit) hitOut {
 	return hitOut{
+		Of: found(h), Name: h.Name, Path: h.Path,
 		Lane: h.LaneID, LaneTitle: h.LaneTitle, Project: h.Project,
 		Message: h.MessageID, Turn: h.Seq, Kind: string(h.Kind),
 		Role: string(h.Role), Tool: h.Tool, Snippet: h.Snippet, At: h.At,
@@ -238,4 +247,13 @@ func memoriesOut(sets []memory.Set) any {
 	return struct {
 		Projects []setOut `json:"projects"`
 	}{rows}
+}
+
+// found is the kind of thing a hit is, defaulting to a conversation turn: the
+// zero value is the common case and the original one.
+func found(h index.Hit) string {
+	if h.IsTurn() {
+		return string(index.FoundTurn)
+	}
+	return string(h.Of)
 }

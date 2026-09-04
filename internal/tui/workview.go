@@ -20,11 +20,14 @@ type workState struct {
 	// cursor currently is, always inside root.
 	root, dir string
 	entries   []artifacts.Entry
-	cursor    int
-	offset    int
-	err       error
-	notice    string
-	failed    bool
+	// shown is entries after the filter, which is what the cursor indexes.
+	shown  []artifacts.Entry
+	filter filterInput
+	cursor int
+	offset int
+	err    error
+	notice string
+	failed bool
 }
 
 // WorkLevel is one level of a conversation's work products.
@@ -50,7 +53,8 @@ func (m Model) openWork() Model {
 	if err != nil {
 		return m.withNotice(err.Error(), true)
 	}
-	m.work = &workState{lane: lane.node.Lane.ID, root: level.Root, dir: level.Dir, entries: level.Entries}
+	m.work = &workState{lane: lane.node.Lane.ID, root: level.Root, dir: level.Dir,
+		entries: level.Entries, shown: level.Entries}
 	m.returnTo = m.mode
 	m.mode = workMode
 	return m
@@ -58,7 +62,13 @@ func (m Model) openWork() Model {
 
 func (m Model) workKey(key string) Model {
 	w := m.work
+	if w.filter.key(key) {
+		m.applyWorkFilter()
+		return m
+	}
 	switch key {
+	case "f":
+		w.filter.active = true
 	case "esc", "backspace", "h", "left":
 		// Up a level, and out only from the top: the obvious key for "back"
 		// should retrace the way in rather than abandon it.
@@ -69,13 +79,13 @@ func (m Model) workKey(key string) Model {
 		}
 		return m.enterWork(filepath.Dir(w.dir))
 	case "j", "down":
-		w.cursor = wrap(w.cursor, 1, len(w.entries))
+		w.cursor = wrap(w.cursor, 1, len(w.shown))
 	case "k", "up":
-		w.cursor = wrap(w.cursor, -1, len(w.entries))
+		w.cursor = wrap(w.cursor, -1, len(w.shown))
 	case "g", "home":
 		w.cursor = 0
 	case "G", "end":
-		w.cursor = len(w.entries) - 1
+		w.cursor = len(w.shown) - 1
 	case "enter", "l", "right":
 		if e, ok := m.workCursor(); ok && e.Dir {
 			return m.enterWork(e.Path)
@@ -105,16 +115,18 @@ func (m Model) enterWork(dir string) Model {
 	}
 	w.dir, w.entries, w.cursor, w.offset = level.Dir, level.Entries, 0, 0
 	w.notice, w.failed = "", false
-	m.clampWork()
+	// The filter follows you down: hunting one name through a tree is the
+	// reason to have typed it.
+	m.applyWorkFilter()
 	return m
 }
 
 func (m Model) workCursor() (artifacts.Entry, bool) {
 	w := m.work
-	if w == nil || w.cursor < 0 || w.cursor >= len(w.entries) {
+	if w == nil || w.cursor < 0 || w.cursor >= len(w.shown) {
 		return artifacts.Entry{}, false
 	}
-	return w.entries[w.cursor], true
+	return w.shown[w.cursor], true
 }
 
 // discardWorkEntry moves one file or directory to the bin. Recoverable, like
@@ -140,7 +152,7 @@ func (m Model) discardWorkEntry() Model {
 	// work-products column, and a stale number there is a lie about a disk.
 	m = m.catchUp()
 	m = m.enterWork(w.dir)
-	m.work.cursor = max(min(was, len(m.work.entries)-1), 0)
+	m.work.cursor = max(min(was, len(m.work.shown)-1), 0)
 	// Say plainly that the room is not back yet: the bin still holds it, and a
 	// person deleting a 231 MB dump is watching a disk, not a list.
 	m.work.notice = fmt.Sprintf("%s moved to the bin — still holding %s until it expires",
@@ -155,7 +167,7 @@ func (m *Model) clampWork() {
 	if w == nil {
 		return
 	}
-	w.cursor = min(max(w.cursor, 0), max(len(w.entries)-1, 0))
+	w.cursor = min(max(w.cursor, 0), max(len(w.shown)-1, 0))
 	h := m.bodyHeight()
 	if w.cursor < w.offset {
 		w.offset = w.cursor
@@ -171,7 +183,8 @@ func (m Model) renderWork() string {
 	var out strings.Builder
 	out.WriteString(m.workInfo())
 	out.WriteString("\n\n")
-	out.WriteString(m.panelTopTitled(fmt.Sprintf("Work products(%s)[%d]", m.workWhere(), len(w.entries))))
+	out.WriteString(m.panelTopTitled(fmt.Sprintf("Work products(%s%s)[%d]",
+		m.workWhere(), w.filter.label(), len(w.shown))))
 	out.WriteString("\n")
 	out.WriteString(m.framed(m.workColumns()))
 	out.WriteString("\n")
@@ -181,19 +194,21 @@ func (m Model) renderWork() string {
 	case w.err != nil:
 		out.WriteString(m.framed(padRight(" "+m.theme.Empty.Render(w.err.Error()), m.contentWidth())) + "\n")
 		m.fill(&out, blank, m.bodyHeight()-1)
-	case len(w.entries) == 0:
-		out.WriteString(m.framed(padRight(" "+m.theme.Empty.Render("nothing here"), m.contentWidth())) + "\n")
+	case len(w.shown) == 0:
+		out.WriteString(m.framed(padRight(" "+m.theme.Empty.Render(m.workEmpty()), m.contentWidth())) + "\n")
 		m.fill(&out, blank, m.bodyHeight()-1)
 	default:
-		end := min(w.offset+m.bodyHeight(), len(w.entries))
+		end := min(w.offset+m.bodyHeight(), len(w.shown))
 		for i := w.offset; i < end; i++ {
-			out.WriteString(m.framed(m.renderWorkRow(w.entries[i], i == w.cursor)) + "\n")
+			out.WriteString(m.framed(m.renderWorkRow(w.shown[i], i == w.cursor)) + "\n")
 		}
 		m.fill(&out, blank, m.bodyHeight()-(end-w.offset))
 	}
 	out.WriteString(m.panelBottom())
 	out.WriteString("\n")
-	if w.notice != "" {
+	if prompt := m.filterPrompt(w.filter); prompt != "" {
+		out.WriteString(" " + prompt)
+	} else if w.notice != "" {
 		out.WriteString(" " + m.noticeStyle(w.failed).Render(truncate(w.notice, m.width-2)))
 	}
 	return out.String()
@@ -211,7 +226,7 @@ func (m Model) workWhere() string {
 func (m Model) workFacts() []fact {
 	var bytes int64
 	var files int
-	for _, e := range m.work.entries {
+	for _, e := range m.work.shown {
 		bytes += e.Bytes
 		files += e.Files
 	}
@@ -223,11 +238,37 @@ func (m Model) workFacts() []fact {
 	}
 }
 
+// applyWorkFilter narrows this level by name.
+func (m *Model) applyWorkFilter() {
+	w := m.work
+	if !w.filter.on() {
+		w.shown = w.entries
+		m.clampWork()
+		return
+	}
+	shown := make([]artifacts.Entry, 0, len(w.entries))
+	for _, e := range w.entries {
+		if w.filter.matches(e.Name) {
+			shown = append(shown, e)
+		}
+	}
+	w.shown = shown
+	m.clampWork()
+}
+
+// workEmpty says why the level is empty: nothing here, or nothing matching.
+func (m Model) workEmpty() string {
+	if m.work.filter.on() {
+		return fmt.Sprintf("nothing at this level matches %q", m.work.filter.text)
+	}
+	return "nothing here"
+}
+
 func workHints() []hint {
 	return []hint{
 		{"j/k", "down / up"}, {"↵", "open directory"},
-		{"d", "delete to bin"}, {"esc", "up a level"},
-		{"q", "quit"},
+		{"d", "delete to bin"}, {"f", "filter"},
+		{"esc", "up a level"}, {"q", "quit"},
 	}
 }
 

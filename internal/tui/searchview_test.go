@@ -8,8 +8,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/Ashes47/braids/internal/core/artifacts"
 	"github.com/Ashes47/braids/internal/core/graph"
 	"github.com/Ashes47/braids/internal/core/index"
+	"github.com/Ashes47/braids/internal/core/memory"
 	"github.com/Ashes47/braids/internal/core/model"
 )
 
@@ -71,7 +73,7 @@ func TestSlashOpensSearchAndTypingQueries(t *testing.T) {
 	out := plain(m.renderSearch())
 	for _, want := range []string{
 		"Query:", "gcs", "Scope:", "every conversation", "Hits:", "Search(everywhere)[2]",
-		"nvidia delivery", "t12", "the [gcsfuse] mount", "Bash", "jump to turn",
+		"nvidia delivery", "t12", "the [gcsfuse] mount", "Bash", "open the result",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("search screen missing %q:\n%s", want, out)
@@ -221,5 +223,94 @@ func TestSearchResultsWrapAround(t *testing.T) {
 	m = typeSearch(m, "down")
 	if m.search.cursor != 0 {
 		t.Errorf("down from the last hit = %d, want the first", m.search.cursor)
+	}
+}
+
+// Search covers three kinds of thing, so every result says which it is and ↵
+// opens the screen that can act on it.
+func TestSearchNamesTheKindAndOpensItsScreen(t *testing.T) {
+	laneID := "9419fd9c-f899-4812-8ced-96a9e9890413"
+	hits := []index.Hit{
+		{Of: index.FoundTurn, LaneID: laneID, LaneTitle: "annotation pipeline", Seq: 12,
+			Kind: "text", Snippet: "the [pods] stall", At: now},
+		{Of: index.FoundMemory, Name: "pod-scheduling", LaneID: laneID,
+			Snippet: "how [pods] are placed", At: now},
+		{Of: index.FoundArtifact, Name: "tmp/pods.json", LaneID: laneID,
+			Snippet: "tmp/[pods].json", At: now},
+	}
+	build := func() Model {
+		lanes := []index.LaneInfo{laneInfo(laneID, "annotation pipeline", "microagi", 100, time.Hour)}
+		m := NewModel(forestOf(lanes, nil), Options{
+			ASCII: true, Source: "claudecode",
+			Search:    func(string, string) ([]index.Hit, error) { return hits, nil },
+			LoadSpine: func(string) ([]graph.Segment, error) { return demoSegments(), nil },
+			LoadMemories: func() ([]memory.Set, error) {
+				return []memory.Set{{
+					Location: memory.Location{Project: "microagi", Dir: "/m"},
+					Memories: []memory.Memory{
+						{Name: "pod-scheduling", Kind: "project", Modified: now, Listed: true},
+						{Name: "something-else", Kind: "project", Modified: now, Listed: true},
+					},
+				}}, nil
+			},
+			LoadWork: func(_, dir string) (WorkLevel, error) {
+				if dir == "" {
+					return WorkLevel{Root: "/j", Dir: "/j", Entries: []artifacts.Entry{
+						{Name: "tmp", Path: "/j/tmp", Dir: true, Bytes: 100, Files: 2},
+					}}, nil
+				}
+				return WorkLevel{Root: "/j", Dir: "/j/tmp", Entries: []artifacts.Entry{
+					{Name: "other.json", Path: "/j/tmp/other.json", Bytes: 10, Files: 1},
+					{Name: "pods.json", Path: "/j/tmp/pods.json", Bytes: 90, Files: 1},
+				}}, nil
+			},
+		})
+		m.now = func() time.Time { return now }
+		m.width, m.height = 110, 18
+		m = m.openSearch()
+		for _, r := range "pods" {
+			m = m.searchKey(string(r))
+		}
+		return m
+	}
+
+	out := plain(build().renderSearch())
+	for _, want := range []string{"TYPE", "convo", "memory", "work", "tmp/pods.json", "pod-scheduling", "t12"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("search screen is missing %q:\n%s", want, out)
+		}
+	}
+
+	// A turn opens the spine at that turn.
+	m := build()
+	m = m.searchKey("enter")
+	if m.mode != spineMode {
+		t.Errorf("a conversation hit opened %v, want the spine", m.mode)
+	}
+
+	// A memory opens the memory screen, with that memory under the cursor.
+	m = build()
+	m = m.searchKey("down")
+	m = m.searchKey("enter")
+	if m.mode != memoryMode {
+		t.Fatalf("a memory hit opened %v, want the memory screen", m.mode)
+	}
+	if entry, ok := m.memoryCursor(); !ok || entry.Name != "pod-scheduling" {
+		t.Errorf("cursor is on %+v, want pod-scheduling", entry)
+	}
+
+	// A work product opens the browser at its directory, on the file itself.
+	m = build()
+	m = m.searchKey("down")
+	m = m.searchKey("down")
+	m = m.searchKey("enter")
+	if m.mode != workMode {
+		t.Fatalf("a work-product hit opened %v, want the work browser", m.mode)
+	}
+	if got := m.workWhere(); got != "tmp" {
+		t.Errorf("opened at %q, want tmp", got)
+	}
+	if entry, ok := m.workCursor(); !ok || entry.Name != "pods.json" {
+		t.Errorf("cursor is on %+v, want pods.json", entry)
 	}
 }

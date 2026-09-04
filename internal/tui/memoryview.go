@@ -26,7 +26,10 @@ type memoryState struct {
 	// set and cursor are which project and which memory within it. The two
 	// lists are flattened for movement so j and k cross a project boundary
 	// without a second key.
-	rows   []memoryRow
+	rows []memoryRow
+	// shown is rows after the filter, which is what the cursor indexes.
+	shown  []memoryRow
+	filter filterInput
 	cursor int
 	offset int
 	err    error
@@ -56,6 +59,7 @@ func (m Model) openMemories() Model {
 	sets, err := m.loadMemories()
 	state := &memoryState{sets: sets, err: err}
 	state.rows = memoryRows(state.sets)
+	state.shown = state.rows
 	m.memories = state
 	m.returnTo = m.mode
 	m.mode = memoryMode
@@ -81,7 +85,13 @@ func memoryRows(sets []memory.Set) []memoryRow {
 
 func (m Model) memoryKey(key string) Model {
 	s := m.memories
+	if s.filter.key(key) {
+		m.applyMemoryFilter()
+		return m
+	}
 	switch key {
+	case "f":
+		s.filter.active = true
 	case "esc", "backspace", "h", "left":
 		m.mode = m.returnTo
 		m.memories = nil
@@ -94,8 +104,12 @@ func (m Model) memoryKey(key string) Model {
 		s.cursor = 0
 		m = m.nextMemory(1, true)
 	case "G", "end":
-		s.cursor = len(s.rows) - 1
+		s.cursor = len(s.shown) - 1
 		m = m.nextMemory(-1, true)
+	case "n":
+		return m.nextFlagged(1)
+	case "N":
+		return m.nextFlagged(-1)
 	case "enter":
 		return m.openMemoryOrigin()
 	}
@@ -107,23 +121,77 @@ func (m Model) memoryKey(key string) Model {
 // here is true the current row counts, so g and G can land rather than step.
 func (m Model) nextMemory(step int, here bool) Model {
 	s := m.memories
-	if len(s.rows) == 0 {
+	if len(s.shown) == 0 {
 		return m
 	}
 	at := s.cursor
 	if !here {
-		at = wrap(at, step, len(s.rows))
+		at = wrap(at, step, len(s.shown))
 	}
-	for range len(s.rows) {
-		if s.rows[at].memory != nil {
+	for range len(s.shown) {
+		if s.shown[at].memory != nil {
 			s.cursor = at
 			m.clampMemories()
 			return m
 		}
-		at = wrap(at, step, len(s.rows))
+		at = wrap(at, step, len(s.shown))
 	}
 	m.clampMemories()
 	return m
+}
+
+// applyMemoryFilter narrows the list, keeping a project heading only while one
+// of its memories is still showing: a heading over nothing is noise.
+func (m *Model) applyMemoryFilter() {
+	s := m.memories
+	if !s.filter.on() {
+		s.shown = s.rows
+		m.clampMemories()
+		m.landOnMemory()
+		return
+	}
+	shown := make([]memoryRow, 0, len(s.rows))
+	for i, r := range s.rows {
+		if r.memory != nil {
+			// Name, kind, description and project: what a person would
+			// remember about a memory they are looking for.
+			if s.filter.matches(r.memory.Name + " " + r.memory.Kind + " " +
+				r.memory.Description + " " + r.project) {
+				shown = append(shown, r)
+			}
+			continue
+		}
+		if memoriesMatch(s.rows[i+1:], s.filter) {
+			shown = append(shown, r)
+		}
+	}
+	s.shown = shown
+	m.clampMemories()
+	m.landOnMemory()
+}
+
+// landOnMemory keeps the cursor off a heading after the list changes under it.
+func (m *Model) landOnMemory() {
+	s := m.memories
+	if s.cursor < len(s.shown) && s.shown[s.cursor].memory != nil {
+		return
+	}
+	moved := m.nextMemory(1, true)
+	m.memories = moved.memories
+}
+
+// memoriesMatch reports whether the rows before the next heading hold a match.
+func memoriesMatch(rest []memoryRow, f filterInput) bool {
+	for _, r := range rest {
+		if r.memory == nil {
+			return false
+		}
+		if f.matches(r.memory.Name + " " + r.memory.Kind + " " +
+			r.memory.Description + " " + r.project) {
+			return true
+		}
+	}
+	return false
 }
 
 // openMemoryOrigin jumps to the conversation that wrote the memory under the
@@ -155,10 +223,10 @@ func (m Model) openMemoryOrigin() Model {
 
 func (m Model) memoryCursor() (memory.Memory, bool) {
 	s := m.memories
-	if s == nil || s.cursor < 0 || s.cursor >= len(s.rows) || s.rows[s.cursor].memory == nil {
+	if s == nil || s.cursor < 0 || s.cursor >= len(s.shown) || s.shown[s.cursor].memory == nil {
 		return memory.Memory{}, false
 	}
-	return *s.rows[s.cursor].memory, true
+	return *s.shown[s.cursor].memory, true
 }
 
 func (m *Model) clampMemories() {
@@ -166,7 +234,7 @@ func (m *Model) clampMemories() {
 	if s == nil {
 		return
 	}
-	s.cursor = min(max(s.cursor, 0), max(len(s.rows)-1, 0))
+	s.cursor = min(max(s.cursor, 0), max(len(s.shown)-1, 0))
 	h := m.bodyHeight()
 	if s.cursor < s.offset {
 		s.offset = s.cursor
@@ -182,7 +250,8 @@ func (m Model) renderMemories() string {
 	var out strings.Builder
 	out.WriteString(m.memoryInfo())
 	out.WriteString("\n\n")
-	out.WriteString(m.panelTopTitled(fmt.Sprintf("Memories[%d]", m.memoryCount())))
+	out.WriteString(m.panelTopTitled(fmt.Sprintf("Memories(%s)[%d]",
+		orAll(s.filter.label()), m.memoryCount())))
 	out.WriteString("\n")
 	out.WriteString(m.framed(m.memoryColumns()))
 	out.WriteString("\n")
@@ -192,19 +261,23 @@ func (m Model) renderMemories() string {
 	case s.err != nil:
 		out.WriteString(m.framed(padRight(" "+m.theme.Empty.Render(s.err.Error()), m.contentWidth())) + "\n")
 		m.fill(&out, blank, m.bodyHeight()-1)
-	case len(s.rows) == 0:
-		out.WriteString(m.framed(padRight(" "+m.theme.Empty.Render("nothing is remembered yet"), m.contentWidth())) + "\n")
+	case len(s.shown) == 0:
+		out.WriteString(m.framed(padRight(" "+m.theme.Empty.Render(m.memoryEmpty()), m.contentWidth())) + "\n")
 		m.fill(&out, blank, m.bodyHeight()-1)
 	default:
-		end := min(s.offset+m.bodyHeight(), len(s.rows))
+		end := min(s.offset+m.bodyHeight(), len(s.shown))
 		for i := s.offset; i < end; i++ {
-			out.WriteString(m.framed(m.renderMemoryRow(s.rows[i], i == s.cursor)) + "\n")
+			out.WriteString(m.framed(m.renderMemoryRow(s.shown[i], i == s.cursor)) + "\n")
 		}
 		m.fill(&out, blank, m.bodyHeight()-(end-s.offset))
 	}
 	out.WriteString(m.panelBottom())
 	out.WriteString("\n")
-	out.WriteString(" " + m.memoryStatus())
+	if prompt := m.filterPrompt(s.filter); prompt != "" {
+		out.WriteString(" " + prompt)
+	} else {
+		out.WriteString(" " + m.memoryStatus())
+	}
 	return out.String()
 }
 
@@ -221,9 +294,18 @@ func (m Model) memoryStatus() string {
 	return m.theme.Label.Render(truncate(entry.Description, m.width-2))
 }
 
+// memoryEmpty says why the list is empty: nothing remembered, or nothing
+// matching.
+func (m Model) memoryEmpty() string {
+	if m.memories.filter.on() {
+		return fmt.Sprintf("nothing matches %q", m.memories.filter.text)
+	}
+	return "nothing is remembered yet"
+}
+
 func (m Model) memoryCount() int {
 	n := 0
-	for _, r := range m.memories.rows {
+	for _, r := range m.memories.shown {
 		if r.memory != nil {
 			n++
 		}
@@ -257,6 +339,7 @@ func (m Model) memoryFacts() []fact {
 func memoryHints() []hint {
 	return []hint{
 		{"j/k", "down / up"}, {"↵", "open the conversation"},
+		{"n / N", "next / prev flagged"}, {"f", "filter"},
 		{"esc", "back"}, {"q", "quit"},
 	}
 }
@@ -291,18 +374,13 @@ func (m Model) renderMemoryRow(r memoryRow, selected bool) string {
 		return " " + m.theme.Title.Render(padRight(truncate(label, m.contentWidth()-2), m.contentWidth()-2)) + " "
 	}
 	entry := *r.memory
-	marks := ""
-	if !entry.Listed {
-		marks += m.theme.Glyphs.Failed
-	}
-	if len(danglingFrom(r.set, entry.Name)) > 0 {
-		marks += m.theme.Glyphs.Agent
-	}
-	name := entry.Name
+	marks, markStyles := m.memoryMarks(r, entry)
+	label := "  " + marks
 	if marks != "" {
-		name = marks + " " + name
+		label += " "
 	}
-	nameCell := padRight(truncate("  "+name, m.memoryNameWidth()), m.memoryNameWidth())
+	label += entry.Name
+	nameCell := padRight(truncate(label, m.memoryNameWidth()), m.memoryNameWidth())
 	kind := padRight(truncate(entry.Kind, memKindWidth), memKindWidth)
 	links := padLeft(fmt.Sprintf("%d", len(entry.Links)), memLinksWidth)
 	when := padLeft(entry.Modified.Format("01-02"), memWhenWidth)
@@ -310,15 +388,63 @@ func (m Model) renderMemoryRow(r memoryRow, selected bool) string {
 
 	plain := " " + nameCell + " " + kind + " " + links + " " + when + " " + from
 	if selected {
+		// One background across the row: styling inside it would tear the fill.
 		return m.theme.Selected.Width(m.contentWidth()).Render(plain)
 	}
 	style := m.theme.Value
 	if !entry.Listed {
 		style = m.theme.Urgent
 	}
-	return " " + style.Render(nameCell) + " " + m.theme.Faint.Render(kind) + " " +
-		m.theme.Faint.Render(links) + " " + m.theme.Faint.Render(when) + " " +
-		m.theme.Faint.Render(from)
+	// The marks carry the same colour here as in the legend. A legend that
+	// teaches a colour the rows do not use teaches nothing.
+	return " " + markStyles + style.Render(strings.TrimPrefix(nameCell, "  "+marks)) + " " +
+		m.theme.Faint.Render(kind) + " " + m.theme.Faint.Render(links) + " " +
+		m.theme.Faint.Render(when) + " " + m.theme.Faint.Render(from)
+}
+
+// memoryMarks are the flags on a memory: the plain characters, and the same
+// characters wearing the colours the legend gives them.
+func (m Model) memoryMarks(r memoryRow, entry memory.Memory) (plain, styled string) {
+	styled = "  "
+	if !entry.Listed {
+		plain += m.theme.Glyphs.Failed
+		styled += m.theme.Urgent.Render(m.theme.Glyphs.Failed)
+	}
+	if len(danglingFrom(r.set, entry.Name)) > 0 {
+		plain += m.theme.Glyphs.Agent
+		styled += m.theme.Accent.Render(m.theme.Glyphs.Agent)
+	}
+	return plain, styled
+}
+
+// flagged reports whether a memory has anything wrong with it, which is what
+// n and N step between.
+func (m Model) flagged(r memoryRow) bool {
+	if r.memory == nil {
+		return false
+	}
+	return !r.memory.Listed || len(danglingFrom(r.set, r.memory.Name)) > 0
+}
+
+// nextFlagged moves to the next memory with a flag on it. Nothing flagged is
+// said rather than silently doing nothing.
+func (m Model) nextFlagged(step int) Model {
+	s := m.memories
+	if len(s.shown) == 0 {
+		return m
+	}
+	at := s.cursor
+	for range len(s.shown) {
+		at = wrap(at, step, len(s.shown))
+		if m.flagged(s.shown[at]) {
+			s.cursor = at
+			s.notice = ""
+			m.clampMemories()
+			return m
+		}
+	}
+	s.notice, s.failed = "nothing here is unlisted or pointing at a missing memory", false
+	return m
 }
 
 // danglingFrom is the loose links one memory has.

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/memory"
 )
@@ -177,5 +179,73 @@ func TestMemoryScreenShowsAReadFailure(t *testing.T) {
 	})
 	if got := plain(m.renderMemories()); !strings.Contains(got, "permission denied") {
 		t.Errorf("screen does not report the failure:\n%s", got)
+	}
+}
+
+// A legend that teaches a colour the rows do not use teaches nothing.
+func TestMemoryMarksWearTheLegendColour(t *testing.T) {
+	m := memoryModel(t, func() ([]memory.Set, error) {
+		return []memory.Set{{
+			Location: memory.Location{Project: "p", Dir: "/m"},
+			Memories: []memory.Memory{
+				{Name: "fine", Kind: "project", Origin: originSession, Modified: now, Listed: true},
+				{Name: "unlisted", Kind: "project", Origin: originSession, Modified: now, Listed: false},
+				{Name: "loose", Kind: "project", Origin: originSession, Modified: now,
+					Links: []string{"nowhere"}, Listed: true},
+			},
+		}}, nil
+	})
+	rows := map[string]string{}
+	for _, r := range m.memories.rows {
+		if r.memory == nil {
+			continue
+		}
+		rows[r.memory.Name] = m.renderMemoryRow(r, false)
+	}
+	urgent := m.theme.Urgent.Render(m.theme.Glyphs.Failed)
+	accent := m.theme.Accent.Render(m.theme.Glyphs.Agent)
+	if !strings.Contains(rows["unlisted"], urgent) {
+		t.Errorf("the unlisted mark is not in the legend's colour:\n%q", rows["unlisted"])
+	}
+	if !strings.Contains(rows["loose"], accent) {
+		t.Errorf("the loose-link mark is not in the legend's colour:\n%q", rows["loose"])
+	}
+	if strings.Contains(rows["fine"], urgent) || strings.Contains(rows["fine"], accent) {
+		t.Errorf("a memory with nothing wrong is wearing a mark:\n%q", rows["fine"])
+	}
+	// And the plain text still lines up: the marks must not widen the column.
+	for _, name := range []string{"fine", "unlisted", "loose"} {
+		if got := lipgloss.Width(plain(rows[name])); got != m.contentWidth() {
+			t.Errorf("row %q is %d columns, want %d", name, got, m.contentWidth())
+		}
+	}
+}
+
+// n and N step between the memories that have something wrong with them.
+func TestMemoryNextFlagged(t *testing.T) {
+	m := memoryModel(t, nil) // shard-manifest (loose link), alerting-inventory (unlisted), no-origin (fine)
+	m = m.memoryKey("n")
+	if entry, _ := m.memoryCursor(); entry.Name != "alerting-inventory" {
+		t.Errorf("n landed on %q, want the unlisted one", entry.Name)
+	}
+	m = m.memoryKey("n")
+	if entry, _ := m.memoryCursor(); entry.Name != "shard-manifest" {
+		t.Errorf("n wrapped to %q, want the one with a loose link", entry.Name)
+	}
+	m = m.memoryKey("N")
+	if entry, _ := m.memoryCursor(); entry.Name != "alerting-inventory" {
+		t.Errorf("N landed on %q", entry.Name)
+	}
+
+	// Nothing flagged says so rather than sitting still.
+	clean := memoryModel(t, func() ([]memory.Set, error) {
+		return []memory.Set{{
+			Location: memory.Location{Project: "p", Dir: "/m"},
+			Memories: []memory.Memory{{Name: "fine", Modified: now, Listed: true}},
+		}}, nil
+	})
+	clean = clean.memoryKey("n")
+	if !strings.Contains(clean.memories.notice, "nothing here is unlisted") {
+		t.Errorf("notice = %q", clean.memories.notice)
 	}
 }

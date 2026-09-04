@@ -18,11 +18,14 @@ import (
 // to look at what was deleted, which means a screen rather than a keystroke.
 type binState struct {
 	entries []trash.Entry
-	cursor  int
-	offset  int
-	err     error
-	notice  string
-	failed  bool
+	// shown is entries after the filter, which is what the cursor indexes.
+	shown  []trash.Entry
+	filter filterInput
+	cursor int
+	offset int
+	err    error
+	notice string
+	failed bool
 }
 
 const (
@@ -37,7 +40,7 @@ func (m Model) openBin() Model {
 		return m.withNotice("the bin is unavailable", true)
 	}
 	entries, err := m.loadBin()
-	m.bin = &binState{entries: entries, err: err}
+	m.bin = &binState{entries: entries, shown: entries, err: err}
 	m.returnTo = m.mode
 	m.mode = binMode
 	return m
@@ -45,18 +48,24 @@ func (m Model) openBin() Model {
 
 func (m Model) binKey(key string) Model {
 	b := m.bin
+	if b.filter.key(key) {
+		m.applyBinFilter()
+		return m
+	}
 	switch key {
+	case "f":
+		b.filter.active = true
 	case "esc", "backspace", "h", "left":
 		m.mode = m.returnTo
 		m.bin = nil
 	case "j", "down":
-		b.cursor = wrap(b.cursor, 1, len(b.entries))
+		b.cursor = wrap(b.cursor, 1, len(b.shown))
 	case "k", "up":
-		b.cursor = wrap(b.cursor, -1, len(b.entries))
+		b.cursor = wrap(b.cursor, -1, len(b.shown))
 	case "g", "home":
 		b.cursor = 0
 	case "G", "end":
-		b.cursor = len(b.entries) - 1
+		b.cursor = len(b.shown) - 1
 	case "enter", "r":
 		return m.restoreFromBin()
 	case "d":
@@ -71,7 +80,7 @@ func (m *Model) clampBin() {
 	if b == nil {
 		return
 	}
-	b.cursor = min(max(b.cursor, 0), max(len(b.entries)-1, 0))
+	b.cursor = min(max(b.cursor, 0), max(len(b.shown)-1, 0))
 	h := m.bodyHeight()
 	if b.cursor < b.offset {
 		b.offset = b.cursor
@@ -84,10 +93,10 @@ func (m *Model) clampBin() {
 
 func (m Model) restoreFromBin() Model {
 	b := m.bin
-	if b.cursor >= len(b.entries) || m.restoreFn == nil {
+	if b.cursor >= len(b.shown) || m.restoreFn == nil {
 		return m
 	}
-	entry := b.entries[b.cursor]
+	entry := b.shown[b.cursor]
 	if err := m.restoreFn(entry.ID); err != nil {
 		b.notice, b.failed = err.Error(), true
 		return m
@@ -95,23 +104,23 @@ func (m Model) restoreFromBin() Model {
 	m = m.catchUp()
 	m.bin.entries = remove(m.bin.entries, entry.ID)
 	m.bin.notice, m.bin.failed = fmt.Sprintf("restored %s · it is back on the map", entry.Label), false
-	m.clampBin()
+	m.applyBinFilter()
 	return m
 }
 
 func (m Model) purgeFromBin() Model {
 	b := m.bin
-	if b.cursor >= len(b.entries) || m.purgeFn == nil {
+	if b.cursor >= len(b.shown) || m.purgeFn == nil {
 		return m
 	}
-	entry := b.entries[b.cursor]
+	entry := b.shown[b.cursor]
 	if err := m.purgeFn(entry.ID); err != nil {
 		b.notice, b.failed = err.Error(), true
 		return m
 	}
 	b.entries = remove(b.entries, entry.ID)
 	b.notice, b.failed = fmt.Sprintf("%s is gone for good", entry.Label), false
-	m.clampBin()
+	m.applyBinFilter()
 	return m
 }
 
@@ -130,7 +139,8 @@ func (m Model) renderBin() string {
 	var out strings.Builder
 	out.WriteString(m.binInfo())
 	out.WriteString("\n\n")
-	out.WriteString(m.panelTopTitled(fmt.Sprintf("Deleted[%d]", len(b.entries))))
+	out.WriteString(m.panelTopTitled(fmt.Sprintf("Deleted(%s)[%d]",
+		orAll(b.filter.label()), len(b.shown))))
 	out.WriteString("\n")
 	out.WriteString(m.framed(m.binColumns()))
 	out.WriteString("\n")
@@ -140,19 +150,21 @@ func (m Model) renderBin() string {
 	case b.err != nil:
 		out.WriteString(m.framed(padRight(" "+m.theme.Empty.Render(b.err.Error()), m.contentWidth())) + "\n")
 		m.fill(&out, blank, m.bodyHeight()-1)
-	case len(b.entries) == 0:
-		out.WriteString(m.framed(padRight(" "+m.theme.Empty.Render("nothing has been deleted"), m.contentWidth())) + "\n")
+	case len(b.shown) == 0:
+		out.WriteString(m.framed(padRight(" "+m.theme.Empty.Render(m.binEmpty()), m.contentWidth())) + "\n")
 		m.fill(&out, blank, m.bodyHeight()-1)
 	default:
-		end := min(b.offset+m.bodyHeight(), len(b.entries))
+		end := min(b.offset+m.bodyHeight(), len(b.shown))
 		for i := b.offset; i < end; i++ {
-			out.WriteString(m.framed(m.renderBinRow(b.entries[i], i == b.cursor)) + "\n")
+			out.WriteString(m.framed(m.renderBinRow(b.shown[i], i == b.cursor)) + "\n")
 		}
 		m.fill(&out, blank, m.bodyHeight()-(end-b.offset))
 	}
 	out.WriteString(m.panelBottom())
 	out.WriteString("\n")
-	if b.notice != "" {
+	if prompt := m.filterPrompt(b.filter); prompt != "" {
+		out.WriteString(" " + prompt)
+	} else if b.notice != "" {
 		out.WriteString(" " + m.noticeStyle(b.failed).Render(truncate(b.notice, m.width-2)))
 	}
 	return out.String()
@@ -167,24 +179,51 @@ func (m Model) fill(out *strings.Builder, blank string, n int) {
 func (m Model) binFacts() []fact {
 	var bytes int64
 	soonest := ""
-	for _, e := range m.bin.entries {
+	for _, e := range m.bin.shown {
 		bytes += e.Bytes
 	}
-	if n := len(m.bin.entries); n > 0 {
-		soonest = expiryOf(m.bin.entries[n-1], m.now())
+	if n := len(m.bin.shown); n > 0 {
+		soonest = expiryOf(m.bin.shown[n-1], m.now())
 	}
 	return []fact{
-		{"Deleted", fmt.Sprintf("%d", len(m.bin.entries))},
+		{"Deleted", fmt.Sprintf("%d", len(m.bin.shown))},
 		{"Holding", humanBytes(bytes)},
 		{"Kept for", fmt.Sprintf("%d days", int(trash.Retention.Hours()/24))},
 		{"Next to go", orDash(soonest)},
 	}
 }
 
+// applyBinFilter narrows the bin by what was deleted.
+func (m *Model) applyBinFilter() {
+	b := m.bin
+	if !b.filter.on() {
+		b.shown = b.entries
+		m.clampBin()
+		return
+	}
+	shown := make([]trash.Entry, 0, len(b.entries))
+	for _, e := range b.entries {
+		if b.filter.matches(e.Label) {
+			shown = append(shown, e)
+		}
+	}
+	b.shown = shown
+	m.clampBin()
+}
+
+// binEmpty says why the bin looks empty: nothing deleted, or nothing matching.
+func (m Model) binEmpty() string {
+	if m.bin.filter.on() {
+		return fmt.Sprintf("nothing deleted matches %q", m.bin.filter.text)
+	}
+	return "nothing has been deleted"
+}
+
 func binHints() []hint {
 	return []hint{
 		{"j/k", "down / up"}, {"↵ / r", "restore"},
-		{"d", "delete for good"}, {"esc", "back"},
+		{"d", "delete for good"}, {"f", "filter"},
+		{"esc", "back"},
 	}
 }
 

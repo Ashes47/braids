@@ -1,9 +1,13 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"charm.land/lipgloss/v2"
 
 	"github.com/Ashes47/braids/internal/core/index"
 )
@@ -23,6 +27,8 @@ type searchState struct {
 }
 
 const (
+	// hitTypeWidth holds the longest label, "memory".
+	hitTypeWidth = 6
 	hitLaneWidth = 22
 	hitTurnWidth = 7
 	hitKindWidth = 11
@@ -125,6 +131,13 @@ func (m Model) jumpToHit() Model {
 		return m
 	}
 	hit := s.hits[s.cursor]
+	// Each kind of result opens on the screen that can act on it.
+	switch hit.Of {
+	case index.FoundMemory:
+		return m.jumpToMemory(hit)
+	case index.FoundArtifact:
+		return m.jumpToArtifact(hit)
+	}
 	for i, r := range m.all {
 		if r.node.Lane.ID != hit.LaneID {
 			continue
@@ -134,6 +147,12 @@ func (m Model) jumpToHit() Model {
 		m.cursor = i
 		m.clamp()
 		m = m.openNode(r.node, false)
+		if m.spine == nil {
+			// The spine refused to open — no loader, or the transcript could
+			// not be read. It has already said why; there is nothing to point
+			// a cursor at.
+			return m
+		}
 		m.spine.cursor = rowAtOrBefore(m.spine.visible, hit.Seq)
 		m.clampSpine()
 		m.spine.notice = fmt.Sprintf("jumped to t%d", hit.Seq)
@@ -198,7 +217,7 @@ func (m Model) renderSearch() string {
 	b.WriteString("\n")
 	b.WriteString(" " + m.theme.Column.Render("/") + m.theme.Value.Render(s.input.text) +
 		m.theme.Column.Render("▏") + "  " +
-		m.theme.Label.Render("↵ jump · tab scope · esc back"))
+		m.theme.Label.Render("↵ open · tab scope · esc back"))
 	return b.String()
 }
 
@@ -224,7 +243,7 @@ func (m Model) searchInfo() string {
 // searchHints are every binding the search screen has.
 func searchHints() []hint {
 	return []hint{
-		{"↵", "jump to turn"}, {"tab", "change scope"},
+		{"↵", "open the result"}, {"tab", "change scope"},
 		{"↑ / ↓", "down / up"}, {"esc", "back"},
 	}
 }
@@ -256,41 +275,143 @@ func orDash(s string) string {
 }
 
 func (m Model) searchColumns() string {
-	// Mirrors renderHit exactly: " " + lane + " " + turn + " " + kind + " " + match.
-	nameWidth := m.contentWidth() - 4 - hitLaneWidth - hitTurnWidth - hitKindWidth
-	if nameWidth < 8 {
-		nameWidth = 8
-	}
-	return m.theme.Column.Render(" " + padRight("CONVERSATION", hitLaneWidth) + " " +
+	// Mirrors renderHit exactly: " " + type + " " + where + " " + turn + " "
+	// + kind + " " + match.
+	return m.theme.Column.Render(" " + padRight("TYPE", hitTypeWidth) + " " +
+		padRight("WHERE", hitLaneWidth) + " " +
 		padLeft("TURN", hitTurnWidth) + " " + padRight("KIND", hitKindWidth) + " " +
-		padRight("MATCH", nameWidth))
+		padRight("MATCH", m.hitTextWidth()))
+}
+
+// hitTextWidth is what is left for the matched text.
+func (m Model) hitTextWidth() int {
+	return max(m.contentWidth()-5-hitTypeWidth-hitLaneWidth-hitTurnWidth-hitKindWidth, 8)
+}
+
+// hitWhere names the thing found: the conversation for a turn, the memory or
+// the work product's path for the others.
+func hitWhere(hit index.Hit) string {
+	if !hit.IsTurn() && hit.Name != "" {
+		return hit.Name
+	}
+	if hit.LaneTitle != "" {
+		return hit.LaneTitle
+	}
+	return shortID(hit.LaneID)
+}
+
+// hitTypeLabel is the one-word column saying what a result is. Search covers
+// conversations, memories and work products at once, and a result you cannot
+// tell the kind of is one you have to open before you understand it.
+func hitTypeLabel(hit index.Hit) string {
+	switch hit.Of {
+	case index.FoundMemory:
+		return "memory"
+	case index.FoundArtifact:
+		return "work"
+	default:
+		return "convo"
+	}
+}
+
+// hitTypeStyle colours the type, so the three kinds separate at a glance.
+func (m Model) hitTypeStyle(hit index.Hit) lipgloss.Style {
+	switch hit.Of {
+	case index.FoundMemory:
+		return m.theme.Accent
+	case index.FoundArtifact:
+		return m.theme.Label
+	default:
+		return m.theme.Dim
+	}
 }
 
 func (m Model) renderHit(hit index.Hit, selected bool) string {
-	lane := hit.LaneTitle
-	if lane == "" {
-		lane = shortID(hit.LaneID)
-	}
 	kind := string(hit.Kind)
 	if hit.Tool != "" {
 		kind = hit.Tool
 	}
-	snippetWidth := m.contentWidth() - 4 - hitLaneWidth - hitTurnWidth - hitKindWidth
-	if snippetWidth < 8 {
-		snippetWidth = 8
+	turn := ""
+	if hit.IsTurn() {
+		turn = fmt.Sprintf("t%d", hit.Seq)
 	}
 
-	laneCell := padRight(truncate(lane, hitLaneWidth), hitLaneWidth)
-	turnCell := padLeft(fmt.Sprintf("t%d", hit.Seq), hitTurnWidth)
+	typeCell := padRight(hitTypeLabel(hit), hitTypeWidth)
+	laneCell := padRight(truncate(hitWhere(hit), hitLaneWidth), hitLaneWidth)
+	turnCell := padLeft(turn, hitTurnWidth)
 	kindCell := padRight(truncate(kind, hitKindWidth), hitKindWidth)
-	textCell := padRight(truncate(oneLine(hit.Snippet), snippetWidth), snippetWidth)
+	textCell := padRight(truncate(oneLine(hit.Snippet), m.hitTextWidth()), m.hitTextWidth())
 
-	plain := " " + laneCell + " " + turnCell + " " + kindCell + " " + textCell
+	plain := " " + typeCell + " " + laneCell + " " + turnCell + " " + kindCell + " " + textCell
 	if selected {
 		return m.theme.Selected.Width(m.contentWidth()).Render(plain)
 	}
-	return " " + m.theme.Value.Render(laneCell) + " " +
+	return " " + m.hitTypeStyle(hit).Render(typeCell) + " " +
+		m.theme.Value.Render(laneCell) + " " +
 		m.theme.Faint.Render(turnCell) + " " +
 		m.theme.Dim.Render(kindCell) + " " +
 		m.theme.Title.Render(textCell)
+}
+
+// jumpToMemory opens the memory screen with the found memory under the cursor.
+func (m Model) jumpToMemory(hit index.Hit) Model {
+	if m.loadMemories == nil {
+		m.search.err = errors.New("memories are unavailable")
+		return m
+	}
+	m.search = nil
+	m = m.openMemories()
+	if m.memories == nil {
+		return m
+	}
+	// Filtering to the name is what puts the cursor on it, and leaves the
+	// filter visible so it is obvious why the list is short.
+	m.memories.filter.text = hit.Name
+	m.applyMemoryFilter()
+	return m
+}
+
+// jumpToArtifact opens the work browser at the directory holding the file.
+func (m Model) jumpToArtifact(hit index.Hit) Model {
+	if m.loadWork == nil {
+		m.search.err = errors.New("work products are unavailable")
+		return m
+	}
+	for i, r := range m.all {
+		if r.node.Lane.ID != hit.LaneID {
+			continue
+		}
+		m.search = nil
+		m.cursor = i
+		m.clamp()
+		m = m.openWork()
+		if m.work == nil {
+			return m
+		}
+		if dir := filepath.Dir(hit.Name); dir != "." {
+			m = m.enterWork(filepath.Join(m.work.root, dir))
+		}
+		// The file itself, rather than the directory it happens to sit in.
+		for i, e := range m.work.shown {
+			if e.Name == filepath.Base(hit.Name) {
+				m.work.cursor = i
+				break
+			}
+		}
+		m.clampWork()
+		return m
+	}
+	m.search.err = fmt.Errorf("conversation %s is no longer indexed", shortID(hit.LaneID))
+	return m
+}
+
+// filterPrompt is what a list screen shows while its filter is taking keys.
+// An active field that looks like an inactive one is how every keystroke ends
+// up somewhere the person did not intend.
+func (m Model) filterPrompt(f filterInput) string {
+	if !f.active {
+		return ""
+	}
+	return m.theme.Accent.Render("filter: ") + m.theme.Value.Render(f.text) +
+		m.theme.Accent.Render("▏") + m.theme.Label.Render("  enter keeps it · esc clears")
 }

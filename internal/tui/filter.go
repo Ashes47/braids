@@ -15,6 +15,11 @@ type filterInput struct {
 // esc peels one layer at a time: it first leaves the field, then clears the
 // text, and only then declines the key so the screen can act on it. That way
 // escaping out of a filtered spine never skips straight back to the map.
+//
+// Opening the field is the screen's job, bound to f. This deliberately does not
+// claim "/": that key means "search everything" throughout braids, and a field
+// that opens itself on it swallows every keystroke after — silently, because an
+// empty field looks like no field at all.
 func (f *filterInput) key(k string) bool {
 	switch {
 	case k == "esc":
@@ -31,10 +36,6 @@ func (f *filterInput) key(k string) bool {
 
 	case k == "enter" && f.active:
 		f.active = false
-		return true
-
-	case k == "/" && !f.active:
-		f.active = true
 		return true
 
 	case f.active:

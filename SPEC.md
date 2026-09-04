@@ -492,6 +492,13 @@ The same ellipsis is accepted on the way back in. Copying a shortened ID off the
 screen and pasting it is the obvious thing to do with one, and refusing an ID
 braids itself printed teaches nobody anything.
 
+**Every list screen filters the same way**, with `f`, and says in its title
+what is being held back. `/` means *search everything* throughout braids and is
+claimed before any screen sees it — a filter that opened itself on `/` swallowed
+every keystroke after it, silently, because an empty field looks like no field
+at all. An open field now says so on the status line, and `editing()` lists
+every field braids has: one missing from it quits the program mid-word.
+
 **The mark is decoration, and priced accordingly.** braids sets its name in the
 angular ASCII face k9s uses, flush right in the header, in the same accent as
 everything else that is braids' own voice rather than the harness's data. It is
@@ -572,8 +579,37 @@ one hard obligation — change the index in the same breath as the file, because
 the index is the part that is read. A guard against acting while a session in
 that project is live is what the hooks already make possible.
 
-Search does not cover memories yet. That is the next slice rather than an
-oversight: it needs the index schema to hold something other than transcripts.
+### 6.4d Search across everything
+
+Search covers conversations, memories and the names of work products, and every
+result says which it is — a hit whose kind you cannot tell is one you have to
+open before you understand it. `↵` opens the screen that can act on it: a turn
+in the spine, a memory on the memory screen, a work product in the browser at
+its directory with the file under the cursor.
+
+Three decisions the data forced:
+
+**A separate table, not a column.** A memory and a work product have no message,
+no role and no position in a conversation. Crowding them into the table of turns
+would make every column optional.
+
+**Names, not contents, for work products.** One of them is 231 MB. Reading them
+to index their text would cost more than everything else braids does put
+together — and vendored directories are skipped, because a `node_modules` holds
+thousands of files called `index.js` and indexing them buries the one dump you
+were looking for. On this machine that is 8,823 names indexed out of 12,957
+files.
+
+**Each kind is queried for its own best results, then merged by taking one of
+each in turn.** bm25 rewards a match in a short document, and a filename is
+three words against a turn's several hundred: ranked together, filenames bury
+every conversation, which is the opposite of what a search across everything is
+for. One shared query has the same flaw one level down — a thousand filenames
+starve the memories before the merge sees them.
+
+Memories and work-product names are indexed by `braids index` rather than on
+every refresh, because measuring the work tree walks it. So they are as fresh as
+the last index run, while the map stays as live as the files.
 
 ### 6.5 Branch — inline at the junction, never a modal
 

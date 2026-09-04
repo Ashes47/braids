@@ -139,7 +139,7 @@ func TestSpineFilterNarrowsAndTitles(t *testing.T) {
 	m := spineModel(t, demoSegments(), nil)
 	m = m.openSpine()
 
-	m, _ = m.spineKey("/")
+	m, _ = m.spineKey("f")
 	for _, k := range []string{"o", "p", "t", "i", "o", "n"} {
 		m, _ = m.spineKey(k)
 	}
@@ -156,7 +156,7 @@ func TestSpineFilterNarrowsAndTitles(t *testing.T) {
 
 	// Runs are matched on their summary, so a tool name finds them.
 	m, _ = m.spineKey("esc")
-	m, _ = m.spineKey("/")
+	m, _ = m.spineKey("f")
 	for _, k := range []string{"b", "a", "s", "h"} {
 		m, _ = m.spineKey(k)
 	}
@@ -168,7 +168,7 @@ func TestSpineFilterNarrowsAndTitles(t *testing.T) {
 func TestSpineEscapePeelsFilterBeforeLeaving(t *testing.T) {
 	m := spineModel(t, demoSegments(), nil)
 	m = m.openSpine()
-	m, _ = m.spineKey("/")
+	m, _ = m.spineKey("f")
 	m, _ = m.spineKey("o")
 
 	m, _ = m.spineKey("esc")
@@ -187,7 +187,7 @@ func TestSpineEscapePeelsFilterBeforeLeaving(t *testing.T) {
 func TestTypingQInAFilterDoesNotQuit(t *testing.T) {
 	m := spineModel(t, demoSegments(), nil)
 	m = m.openSpine()
-	m, _ = m.spineKey("/")
+	m, _ = m.spineKey("f")
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 	if cmd != nil {

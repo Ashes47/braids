@@ -221,7 +221,7 @@ func TestTheBinLetsYouRecoverSomethingDeletedDaysAgo(t *testing.T) {
 	out := plain(m.renderBin())
 	for _, want := range []string{
 		"Deleted:", "Holding:", "Kept for:", "14 days",
-		"Deleted[3]", "the one you want back", "2d ago", "restore",
+		"Deleted(all)[3]", "the one you want back", "2d ago", "restore",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the bin is missing %q:\n%s", want, out)
@@ -571,4 +571,76 @@ func TestRowEmphasis(t *testing.T) {
 	if !strings.Contains(urgent, "1;") {
 		t.Errorf("the urgent style is not bold: %q", urgent)
 	}
+}
+
+// Every list screen filters the same way, with f, and says in its title that
+// rows are being held back.
+func TestEveryListScreenFilters(t *testing.T) {
+	t.Run("bin", func(t *testing.T) {
+		lanes := []index.LaneInfo{laneInfo("a", "still here", "app", 5, time.Hour)}
+		m, h := keepingModel(t, lanes)
+		h.entries = []trash.Entry{
+			{ID: "1", Label: "gcsfuse density", At: now, Bytes: 10},
+			{ID: "2", Label: "worktree probe", At: now, Bytes: 20},
+		}
+		m = press(m, "u")
+		m = m.binKey("f")
+		for _, r := range "worktree" {
+			m = m.binKey(string(r))
+		}
+		out := plain(m.renderBin())
+		if !strings.Contains(out, "worktree probe") || strings.Contains(out, "gcsfuse density") {
+			t.Errorf("filtered bin:\n%s", out)
+		}
+		if !strings.Contains(out, "/worktree") {
+			t.Errorf("the title does not say what is filtered:\n%s", out)
+		}
+		// A filter that matches nothing says so rather than looking empty.
+		for range len("worktree") {
+			m = m.binKey("backspace")
+		}
+		for _, r := range "zzz" {
+			m = m.binKey(string(r))
+		}
+		if got := plain(m.renderBin()); !strings.Contains(got, `nothing deleted matches "zzz"`) {
+			t.Errorf("empty filtered bin:\n%s", got)
+		}
+	})
+
+	t.Run("work", func(t *testing.T) {
+		m, _ := workModel(t, nil)
+		m = m.workKey("enter") // into tmp: pods.json, deep
+		m = m.workKey("f")
+		for _, r := range "pods" {
+			m = m.workKey(string(r))
+		}
+		out := plain(m.renderWork())
+		if !strings.Contains(out, "pods.json") || strings.Contains(out, "deep/") {
+			t.Errorf("filtered work products:\n%s", out)
+		}
+		if !strings.Contains(out, "/pods") {
+			t.Errorf("the title does not say what is filtered:\n%s", out)
+		}
+	})
+
+	t.Run("memories", func(t *testing.T) {
+		m := memoryModel(t, nil)
+		m = m.memoryKey("f")
+		for _, r := range "alert" {
+			m = m.memoryKey(string(r))
+		}
+		out := plain(m.renderMemories())
+		if !strings.Contains(out, "alerting-inventory") || strings.Contains(out, "shard-manifest") {
+			t.Errorf("filtered memories:\n%s", out)
+		}
+		// The cursor never rests on a project heading, filtered or not.
+		if _, ok := m.memoryCursor(); !ok {
+			t.Error("the cursor landed on a heading after filtering")
+		}
+		// esc peels the filter before leaving the screen.
+		m = m.memoryKey("esc")
+		if m.mode != memoryMode {
+			t.Error("esc left the screen instead of clearing the filter")
+		}
+	})
 }

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ashes47/braids/internal/core/artifacts"
+	"github.com/Ashes47/braids/internal/core/memory"
 	"github.com/Ashes47/braids/internal/core/model"
 	"github.com/Ashes47/braids/internal/core/store"
 
@@ -20,7 +22,7 @@ import (
 // schemaVersion is bumped whenever the tables change. The index holds no unique
 // state — it rebuilds from the transcripts in seconds — so an old schema is
 // dropped and recreated rather than migrated.
-const schemaVersion = 9
+const schemaVersion = 10
 
 const dropAll = `
 DROP TABLE IF EXISTS parts;
@@ -91,6 +93,22 @@ CREATE VIRTUAL TABLE IF NOT EXISTS parts USING fts5(
 	tool    UNINDEXED,
 	at      UNINDEXED,
 	tokenize='porter unicode61'
+);
+
+-- docs holds everything searchable that is not a conversation turn: the
+-- memories a project keeps, and the names of the work products a session left.
+-- A separate table rather than a kind column on parts, because these have
+-- nothing in common with a turn — no message, no role, no position in a
+-- conversation — and crowding them in would make every column optional.
+CREATE VIRTUAL TABLE IF NOT EXISTS docs USING fts5(
+	body,
+	doc_type UNINDEXED,
+	name     UNINDEXED,
+	path     UNINDEXED,
+	project  UNINDEXED,
+	lane_id  UNINDEXED,
+	at       UNINDEXED,
+	tokenize='porter unicode61'
 );`
 
 // Index is a searchable snapshot of every lane a Source can see.
@@ -109,6 +127,9 @@ type Stats struct {
 // Query selects messages. An empty Lane searches every lane, and empty Kinds
 // searches every kind of content.
 type Query struct {
+	// Types narrows to conversations, memories or work products. Empty means
+	// all of them, so search stays global unless asked otherwise.
+	Types []Found
 	Text  string
 	Lane  string
 	Kinds []model.PartKind
@@ -135,6 +156,16 @@ type Overlap struct {
 // Hit is one search result, carrying enough context to render a row without a
 // second lookup.
 type Hit struct {
+	// Of says what this is: a turn in a conversation, a memory, or the name of
+	// a work product. A result you cannot tell the kind of is a result you
+	// have to open before you understand it.
+	Of Found
+	// Name is a memory's slug or a work product's relative path. Empty for a
+	// turn, which is named by its conversation and position instead.
+	Name string
+	// Path is the file it lives in, for the things that are files.
+	Path      string
+	Score     float64
 	LaneID    string
 	LaneTitle string
 	Project   string
@@ -565,6 +596,34 @@ func (ix *Index) Search(ctx context.Context, q Query) ([]Hit, error) {
 		limit = 20
 	}
 
+	// Turns and documents are ranked by separate bm25 scales, so they are
+	// queried apart and merged on score. Comparing bm25 across two tables is
+	// approximate; it is still a far better order than showing one kind first
+	// and burying the other.
+	turns, err := ix.searchTurns(ctx, q, limit)
+	if err != nil {
+		return nil, err
+	}
+	// Each kind is queried for its own best results. One query covering both
+	// memories and work products would hand them a shared limit, and a
+	// thousand filenames would starve the memories before the merge ever saw
+	// them.
+	sets := [][]Hit{turns}
+	for _, of := range []Found{FoundMemory, FoundArtifact} {
+		found, err := ix.searchDocs(ctx, q, of, limit)
+		if err != nil {
+			return nil, err
+		}
+		sets = append(sets, found)
+	}
+	return interleave(limit, sets...), nil
+}
+
+// searchTurns finds what was said in a conversation.
+func (ix *Index) searchTurns(ctx context.Context, q Query, limit int) ([]Hit, error) {
+	if !q.wants(FoundTurn) {
+		return nil, nil
+	}
 	var (
 		where = []string{"parts MATCH ?"}
 		args  = []any{BuildMatch(q.Text)}
@@ -586,7 +645,8 @@ func (ix *Index) Search(ctx context.Context, q Query) ([]Hit, error) {
 	query := `
 		SELECT parts.lane_id, COALESCE(lanes.title,''), COALESCE(lanes.project,''),
 		       parts.msg_id, COALESCE(messages.seq,0), parts.kind, parts.role,
-		       parts.tool, parts.at, snippet(parts, 0, '[', ']', '…', 12)
+		       parts.tool, parts.at, snippet(parts, 0, '[', ']', '…', 12),
+		       bm25(parts)
 		FROM parts
 		LEFT JOIN lanes ON lanes.id = parts.lane_id
 		LEFT JOIN messages ON messages.lane_id = parts.lane_id AND messages.msg_id = parts.msg_id
@@ -605,9 +665,10 @@ func (ix *Index) Search(ctx context.Context, q Query) ([]Hit, error) {
 		var kind, role string
 		var at int64
 		if err := rows.Scan(&h.LaneID, &h.LaneTitle, &h.Project, &h.MessageID, &h.Seq,
-			&kind, &role, &h.Tool, &at, &h.Snippet); err != nil {
+			&kind, &role, &h.Tool, &at, &h.Snippet, &h.Score); err != nil {
 			return nil, fmt.Errorf("scan hit: %w", err)
 		}
+		h.Of = FoundTurn
 		h.Kind = model.PartKind(kind)
 		h.Role = model.Role(role)
 		h.At = time.Unix(at, 0)
@@ -891,4 +952,216 @@ func (ix *Index) RefreshArtifacts(ctx context.Context, src store.Source) error {
 		}
 	}
 	return nil
+}
+
+// Found says what a hit is. Search returns turns, memories and work products
+// together, and a result you cannot tell the kind of is a result you have to
+// open to understand.
+type Found string
+
+// The kinds of thing search can find.
+const (
+	FoundTurn     Found = "conversation"
+	FoundMemory   Found = "memory"
+	FoundArtifact Found = "artifact"
+)
+
+// IsTurn reports whether a hit is something said in a conversation.
+//
+// The zero value counts as one: a turn is the common case and the original
+// kind, so a Hit built without naming its kind is a turn rather than nothing.
+func (h Hit) IsTurn() bool { return h.Of == "" || h.Of == FoundTurn }
+
+// SyncDocs rebuilds the searchable index of memories and work-product names.
+//
+// Rebuilt whole rather than incrementally: the corpus is a few hundred
+// kilobytes of memories and some thousands of filenames, so tracking what
+// changed would cost more than redoing it. Called by `braids index` rather than
+// by every Sync, because measuring the work-product tree walks it — tens of
+// milliseconds — and the map refreshes on every transcript write.
+func (ix *Index) SyncDocs(ctx context.Context, src store.Source) error {
+	lanes, err := ix.Lanes(ctx)
+	if err != nil {
+		return err
+	}
+	tx, err := ix.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once committed
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM docs`); err != nil {
+		return fmt.Errorf("clear docs: %w", err)
+	}
+	insert, err := tx.PrepareContext(ctx,
+		`INSERT INTO docs (body, doc_type, name, path, project, lane_id, at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("prepare docs: %w", err)
+	}
+	defer insert.Close() //nolint:errcheck // tx-scoped
+
+	if err := indexMemories(ctx, insert, src); err != nil {
+		return err
+	}
+	if err := indexArtifacts(ctx, insert, lanes); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit docs: %w", err)
+	}
+	return nil
+}
+
+// indexMemories makes a project's memories searchable: name, description and
+// the whole body, which is small enough to store outright.
+func indexMemories(ctx context.Context, insert *sql.Stmt, src store.Source) error {
+	rememberer, ok := src.(store.Rememberer)
+	if !ok {
+		return nil
+	}
+	locations, err := rememberer.MemoryDirs()
+	if err != nil {
+		return err
+	}
+	for _, location := range locations {
+		set, err := memory.Read(location)
+		if err != nil {
+			return err
+		}
+		for _, m := range set.Memories {
+			body, err := os.ReadFile(m.Path)
+			if err != nil {
+				// A memory that vanished between listing and reading is not a
+				// reason to abandon the whole index.
+				continue
+			}
+			searchable := m.Name + "\n" + m.Description + "\n" + string(body)
+			if _, err := insert.ExecContext(ctx, searchable, string(FoundMemory),
+				m.Name, m.Path, set.Project, m.Origin, m.Modified.Unix()); err != nil {
+				return fmt.Errorf("index memory %s: %w", m.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// indexArtifacts makes work products findable by name. Names only: one of them
+// can be 231 MB, and reading them to index their contents would cost more than
+// everything else braids does put together.
+func indexArtifacts(ctx context.Context, insert *sql.Stmt, lanes []LaneInfo) error {
+	for _, lane := range lanes {
+		if lane.ArtifactPath == "" {
+			continue
+		}
+		files, err := artifacts.Files(lane.ArtifactPath)
+		if err != nil {
+			continue // a job directory that went away mid-scan
+		}
+		for _, f := range files {
+			if _, err := insert.ExecContext(ctx, f.Rel, string(FoundArtifact),
+				f.Rel, f.Path, lane.Project, lane.ID, f.At.Unix()); err != nil {
+				return fmt.Errorf("index work product %s: %w", f.Rel, err)
+			}
+		}
+	}
+	return nil
+}
+
+// searchDocs finds memories and work-product names.
+func (ix *Index) searchDocs(ctx context.Context, q Query, of Found, limit int) ([]Hit, error) {
+	if !q.wants(of) {
+		return nil, nil
+	}
+	where := []string{"docs MATCH ?", "docs.doc_type = ?"}
+	args := []any{BuildMatch(q.Text), string(of)}
+	if q.Lane != "" {
+		where = append(where, "docs.lane_id = ?")
+		args = append(args, q.Lane)
+	}
+	args = append(args, limit)
+
+	query := `
+		SELECT docs.doc_type, docs.name, docs.path, docs.project, docs.lane_id,
+		       COALESCE(lanes.title,''), docs.at,
+		       snippet(docs, 0, '[', ']', '…', 12), bm25(docs)
+		FROM docs
+		LEFT JOIN lanes ON lanes.id = docs.lane_id
+		WHERE ` + strings.Join(where, " AND ") + `
+		ORDER BY rank LIMIT ?`
+
+	rows, err := ix.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search documents: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only
+
+	var hits []Hit
+	for rows.Next() {
+		var h Hit
+		var of string
+		var at int64
+		if err := rows.Scan(&of, &h.Name, &h.Path, &h.Project, &h.LaneID,
+			&h.LaneTitle, &at, &h.Snippet, &h.Score); err != nil {
+			return nil, fmt.Errorf("scan document hit: %w", err)
+		}
+		h.Of = Found(of)
+		h.At = time.Unix(at, 0)
+		hits = append(hits, h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate document hits: %w", err)
+	}
+	return hits, nil
+}
+
+// wants reports whether a query asks for a kind of result. An empty Types
+// means everything, so a plain search stays global.
+func (q Query) wants(of Found) bool {
+	if len(q.Types) == 0 {
+		return true
+	}
+	for _, t := range q.Types {
+		if t == of {
+			return true
+		}
+	}
+	return false
+}
+
+// interleave merges result sets by taking the best remaining of each kind in
+// turn, rather than by score across all of them.
+//
+// bm25 rewards a match in a short document, and a work product's name is three
+// words against a conversation turn's several hundred. Ranking them together
+// buries every conversation under a list of filenames — which is the opposite
+// of what a search across everything is for. Each kind keeps its own order;
+// the merge only decides how many of each you see first.
+func interleave(limit int, sets ...[]Hit) []Hit {
+	byKind := map[Found][]Hit{}
+	var order []Found
+	for _, set := range sets {
+		for _, h := range set {
+			if _, seen := byKind[h.Of]; !seen {
+				order = append(order, h.Of)
+			}
+			byKind[h.Of] = append(byKind[h.Of], h)
+		}
+	}
+	hits := make([]Hit, 0, limit)
+	for len(hits) < limit {
+		took := false
+		for _, of := range order {
+			if len(byKind[of]) == 0 || len(hits) >= limit {
+				continue
+			}
+			hits = append(hits, byKind[of][0])
+			byKind[of] = byKind[of][1:]
+			took = true
+		}
+		if !took {
+			break
+		}
+	}
+	return hits
 }

@@ -198,7 +198,8 @@ func TestFilterNarrowsAndClears(t *testing.T) {
 		return m
 	}
 
-	m = press(m, "/", "s", "c", "h")
+	// f opens the filter; / is global search everywhere in braids.
+	m = press(m, "f", "s", "c", "h")
 	if len(m.visible) != 1 || m.visible[0].node.Lane.ID != "b" {
 		t.Fatalf("filter left %d lanes, want just the schema one", len(m.visible))
 	}

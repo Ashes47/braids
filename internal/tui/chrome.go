@@ -345,13 +345,10 @@ func (m Model) hintCell(keys []hint, i, width int) string {
 
 // panelTitle names what the table is showing, k9s style: Conversations(all)[21].
 func (m Model) panelTitle() string {
-	scope := "all"
-	if m.filter.on() {
-		scope = m.filter.label()
-	}
 	// A map that silently omits conversations is a map you stop trusting, so
 	// the title always says whether anything is being held back.
-	return fmt.Sprintf("Conversations(%s)[%d]%s", scope, len(m.visible), m.archivedNote())
+	return fmt.Sprintf("Conversations(%s)[%d]%s",
+		orAll(m.filter.label()), len(m.visible), m.archivedNote())
 }
 
 func (m Model) panelTop() string { return m.panelTopTitled(m.panelTitle()) }
@@ -427,4 +424,13 @@ func repeat(s string, n int) string {
 		return ""
 	}
 	return strings.Repeat(s, n)
+}
+
+// orAll names a scope for a panel title: the filter, or "all" when nothing is
+// being held back. A list that silently omits rows is a list you stop trusting.
+func orAll(label string) string {
+	if label == "" {
+		return "all"
+	}
+	return label
 }

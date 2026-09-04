@@ -7,9 +7,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Ashes47/braids/internal/core/memory"
 	"github.com/Ashes47/braids/internal/core/model"
 	"github.com/Ashes47/braids/internal/core/store"
 	"github.com/Ashes47/braids/internal/core/store/claudecode"
@@ -601,4 +603,124 @@ func laneOf(t *testing.T, ctx context.Context, ix *Index, id string) LaneInfo {
 	}
 	t.Fatalf("no lane %s", id)
 	return LaneInfo{}
+}
+
+// Search covers conversations, memories and work-product names at once, and
+// says which kind each result is.
+func TestSearchFindsAllThreeKinds(t *testing.T) {
+	root := t.TempDir()
+	projects := filepath.Join(root, "projects", "-p")
+	memories := filepath.Join(projects, "memory")
+	if err := os.MkdirAll(memories, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const session = "a1b2c3d4-0000-4000-8000-000000000001"
+	transcript := `{"type":"ai-title","aiTitle":"the pods work","sessionId":"` + session + `"}` + "\n" +
+		`{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-09-01T10:00:00Z",` +
+		`"message":{"role":"user","content":"the pods are stalling again"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(projects, session+".jsonl"), []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(memories, "pod-scheduling.md"),
+		[]byte("---\nname: pod-scheduling\ndescription: how pods get placed\nmetadata:\n  type: project\n  originSessionId: "+
+			session+"\n---\n\nPods land wherever the scheduler says.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(memories, memory.IndexFile),
+		[]byte("- [Pod scheduling](pod-scheduling.md) — placement\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job := filepath.Join(root, "jobs", session[:8], "tmp")
+	if err := os.MkdirAll(filepath.Join(job, "node_modules", "junk"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(job, "pods.json"), make([]byte, 128), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A vendored directory nobody searches their own machine for.
+	if err := os.WriteFile(filepath.Join(job, "node_modules", "junk", "pods.js"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	ix, err := Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer ix.Close() //nolint:errcheck // test cleanup
+
+	src := claudecode.New(filepath.Join(root, "projects"))
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if err := ix.SyncDocs(ctx, src); err != nil {
+		t.Fatalf("SyncDocs: %v", err)
+	}
+
+	hits, err := ix.Search(ctx, Query{Text: "pods", Limit: 20})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	found := map[Found]string{}
+	for _, h := range hits {
+		found[h.Of] = h.Name
+		if h.Of == "" {
+			t.Errorf("a hit came back with no kind: %+v", h)
+		}
+	}
+	for _, want := range []Found{FoundTurn, FoundMemory, FoundArtifact} {
+		if _, ok := found[want]; !ok {
+			t.Errorf("no %s in %v", want, found)
+		}
+	}
+	if found[FoundMemory] != "pod-scheduling" {
+		t.Errorf("memory hit named %q", found[FoundMemory])
+	}
+	if found[FoundArtifact] != filepath.Join("tmp", "pods.json") {
+		t.Errorf("work-product hit named %q", found[FoundArtifact])
+	}
+	for _, h := range hits {
+		if strings.Contains(h.Name, "node_modules") {
+			t.Errorf("a vendored file was indexed: %s", h.Name)
+		}
+	}
+
+	// Narrowing to one kind returns only that kind.
+	only, err := ix.Search(ctx, Query{Text: "pods", Types: []Found{FoundMemory}, Limit: 20})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(only) != 1 || only[0].Of != FoundMemory {
+		t.Errorf("--type memory returned %+v", only)
+	}
+}
+
+// bm25 rewards a match in a short document, so filenames would bury every
+// conversation. Each kind gets a place in the first results instead.
+func TestInterleaveGivesEachKindAPlace(t *testing.T) {
+	turns := []Hit{{Of: FoundTurn, Name: "t1"}, {Of: FoundTurn, Name: "t2"}, {Of: FoundTurn, Name: "t3"}}
+	docs := []Hit{
+		{Of: FoundArtifact, Name: "a1"}, {Of: FoundArtifact, Name: "a2"},
+		{Of: FoundMemory, Name: "m1"},
+	}
+	got := interleave(4, turns, docs)
+	if len(got) != 4 {
+		t.Fatalf("got %d hits, want the limit", len(got))
+	}
+	kinds := map[Found]int{}
+	for _, h := range got {
+		kinds[h.Of]++
+	}
+	if kinds[FoundTurn] == 0 || kinds[FoundArtifact] == 0 || kinds[FoundMemory] == 0 {
+		t.Errorf("a kind was crowded out: %v", kinds)
+	}
+	// Within a kind the original order stands.
+	if got[0].Name != "t1" {
+		t.Errorf("first hit is %q, want the best turn", got[0].Name)
+	}
+	// Asking for more than exists returns everything, once.
+	all := interleave(50, turns, docs)
+	if len(all) != 6 {
+		t.Errorf("got %d hits, want all six", len(all))
+	}
 }

@@ -460,11 +460,19 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode == searchMode {
 		return m.searchKey(key), nil
 	}
-	if m.mode == binMode {
-		return m.binKey(key), nil
-	}
 	if m.mode == mapMode && m.naming.active {
 		return m.renameKey(key), nil
+	}
+	// Global search is the same key everywhere, and it is claimed before any
+	// screen sees it. A list screen filters with f: letting / mean "filter
+	// here" on some screens and "search everything" on others turns the most
+	// familiar key in the program into a coin toss — and a filter activated by
+	// accident swallows every keystroke after it.
+	if key == "/" && m.searchFn != nil && !m.editing() {
+		return m.openSearch(), nil
+	}
+	if m.mode == binMode {
+		return m.binKey(key), nil
 	}
 	if key == "u" && m.loadBin != nil {
 		return m.openBin(), nil
@@ -474,9 +482,6 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.mode == memoryMode {
 		return m.memoryKey(key), nil
-	}
-	if key == "/" && m.searchFn != nil {
-		return m.openSearch(), nil
 	}
 	if m.mode == spineMode {
 		return m.spineKey(key)
@@ -701,12 +706,19 @@ func (m Model) withNotice(text string, failed bool) Model {
 
 // editing reports whether a text field currently owns typed keys, so that "q"
 // types a letter instead of quitting.
+// editing reports whether a text field is taking keys. It decides whether q
+// quits or types a letter, so every field braids has must be listed here — one
+// that is missing quits the program mid-word.
 func (m Model) editing() bool {
 	switch {
 	case m.mode == searchMode:
 		return true
-	case m.mode == binMode:
-		return false
+	case m.mode == binMode && m.bin != nil:
+		return m.bin.filter.active
+	case m.mode == workMode && m.work != nil:
+		return m.work.filter.active
+	case m.mode == memoryMode && m.memories != nil:
+		return m.memories.filter.active
 	case m.mode == mapMode && m.naming.active:
 		return true
 	case m.mode == spineMode && m.spine != nil:

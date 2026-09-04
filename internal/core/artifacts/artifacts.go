@@ -166,3 +166,53 @@ func claimed(id string, known []string) bool {
 	}
 	return false
 }
+
+// File is one work product, named by its path relative to the top of the job.
+type File struct {
+	Rel   string
+	Path  string
+	Bytes int64
+	At    time.Time
+}
+
+// vendored are directories whose contents nobody searches their own machine
+// for. A node_modules holds thousands of files with names like index.js, and
+// indexing them buries the one dump you were actually looking for.
+var vendored = map[string]bool{
+	"node_modules": true, ".git": true, "__pycache__": true,
+	".venv": true, "venv": true, ".mypy_cache": true, ".pytest_cache": true,
+	".next": true, ".cache": true, "site-packages": true,
+}
+
+// Files lists the work products under dir by relative path, skipping vendored
+// directories. Names only: a work product can be 231 MB, and reading them to
+// index their contents would cost more than everything else braids does put
+// together.
+func Files(dir string) ([]File, error) {
+	var files []File
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil //nolint:nilerr // an unreadable branch contributes nothing
+		}
+		if d.IsDir() {
+			if vendored[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil //nolint:nilerr // vanished between listing and stat
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return nil //nolint:nilerr // outside the tree; not ours to report
+		}
+		files = append(files, File{Rel: rel, Path: path, Bytes: info.Size(), At: info.ModTime()})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk %s: %w", dir, err)
+	}
+	return files, nil
+}

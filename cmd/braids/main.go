@@ -82,6 +82,9 @@ map flags:
 
 search flags:
   --lane ID        restrict to one conversation
+  --type LIST      conversation,memory,artifact (comma separated). Search
+                   covers all three unless narrowed; each result says which
+                   it is, and work products are matched by name, not contents
   --kind LIST      text,thinking,tool_use,tool_result (comma separated)
   --limit N        maximum hits (default 20)
 
@@ -571,10 +574,22 @@ func cmdIndex(args []string, out *printer) error {
 	if *full {
 		sync = ix.Rebuild
 	}
-	stats, err := sync(context.Background(), src)
+	ctx := context.Background()
+	stats, err := sync(ctx, src)
 	if err != nil {
 		return err
 	}
+	// Memories and work-product names are indexed here rather than on every
+	// refresh: measuring the work tree walks it, and the map refreshes on
+	// every transcript write.
+	docsStart := time.Now()
+	if err := ix.SyncDocs(ctx, src); err != nil {
+		return err
+	}
+	// Counted in what is reported: indexing memories and work-product names
+	// is part of indexing, and a duration that leaves it out is a duration
+	// that does not match the wait.
+	stats.Duration += time.Since(docsStart)
 	if *asJSON {
 		return out.emit(struct {
 			Lanes    int     `json:"lanes"`
@@ -593,6 +608,7 @@ func cmdSearch(args []string, out *printer) error {
 	fs.SetOutput(out)
 	lane := fs.String("lane", "", "restrict to one conversation")
 	kinds := fs.String("kind", "", "comma-separated part kinds")
+	types := fs.String("type", "", "conversation,memory,artifact (default all three)")
 	limit := fs.Int("limit", 20, "maximum hits")
 	db := fs.String("db", "", "index location")
 	asJSON := jsonFlag(fs)
@@ -608,6 +624,10 @@ func cmdSearch(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
+	wanted, err := parseTypes(*types)
+	if err != nil {
+		return err
+	}
 
 	ix, err := openIndex(*db)
 	if err != nil {
@@ -617,7 +637,7 @@ func cmdSearch(args []string, out *printer) error {
 
 	start := time.Now()
 	hits, err := ix.Search(context.Background(),
-		index.Query{Text: query, Lane: *lane, Kinds: parsed, Limit: *limit})
+		index.Query{Text: query, Lane: *lane, Kinds: parsed, Types: wanted, Limit: *limit})
 	if err != nil {
 		return err
 	}
@@ -640,8 +660,9 @@ func cmdSearch(args []string, out *printer) error {
 
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	for _, h := range hits {
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
-			laneLabel(h), h.At.Format("01-02 15:04"), kindLabel(h), oneLine(h.Snippet)); err != nil {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+			typeLabel(h), foundLabel(h), h.At.Format("01-02 15:04"),
+			kindLabel(h), oneLine(h.Snippet)); err != nil {
 			return fmt.Errorf("write results: %w", err)
 		}
 	}
@@ -1831,4 +1852,51 @@ func printMemories(sets []memory.Set, out *printer) error {
 		}
 	}
 	return out.Err()
+}
+
+// parseTypes reads the --type list: what sort of thing to look in. Empty means
+// all of them, so a plain search stays global.
+func parseTypes(s string) ([]index.Found, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	valid := map[string]index.Found{
+		string(index.FoundTurn):     index.FoundTurn,
+		string(index.FoundMemory):   index.FoundMemory,
+		string(index.FoundArtifact): index.FoundArtifact,
+	}
+	var types []index.Found
+	for _, raw := range strings.Split(s, ",") {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		t, ok := valid[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown type %q (want conversation, memory or artifact)", name)
+		}
+		types = append(types, t)
+	}
+	return types, nil
+}
+
+// typeLabel is the one-word column saying what a hit is.
+func typeLabel(h index.Hit) string {
+	switch h.Of {
+	case index.FoundMemory:
+		return "memory"
+	case index.FoundArtifact:
+		return "work"
+	default:
+		return "convo"
+	}
+}
+
+// foundLabel names the thing found: the conversation for a turn, the memory or
+// the file for the others.
+func foundLabel(h index.Hit) string {
+	if h.Of == index.FoundTurn {
+		return laneLabel(h)
+	}
+	return truncate(h.Name, 34)
 }

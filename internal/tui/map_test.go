@@ -185,7 +185,7 @@ func TestDuplicateTitlesGetTheirLaneID(t *testing.T) {
 
 func TestFilterNarrowsAndClears(t *testing.T) {
 	lanes := []index.LaneInfo{
-		laneInfo("a", "gcsfuse density", "app", 5, time.Hour),
+		laneInfo("a", "blobstore density", "app", 5, time.Hour),
 		laneInfo("b", "schema refactor", "app", 5, time.Hour),
 	}
 	m := newTestModel(t, forestOf(lanes, nil))
@@ -215,7 +215,7 @@ func TestFilterNarrowsAndClears(t *testing.T) {
 }
 
 func TestFilterWithNoMatchesExplainsItself(t *testing.T) {
-	lanes := []index.LaneInfo{laneInfo("a", "gcsfuse", "app", 5, time.Hour)}
+	lanes := []index.LaneInfo{laneInfo("a", "blobstore", "app", 5, time.Hour)}
 	m := newTestModel(t, forestOf(lanes, nil))
 	m.filter.text = "zzz"
 	m.apply()
@@ -564,7 +564,7 @@ func TestCopyResumeWorksFromTheSpineToo(t *testing.T) {
 
 func TestSlashSearchesAndFFilters(t *testing.T) {
 	lanes := []index.LaneInfo{
-		laneInfo("a", "gcsfuse density", "app", 5, time.Hour),
+		laneInfo("a", "blobstore density", "app", 5, time.Hour),
 		laneInfo("b", "schema refactor", "app", 5, time.Hour),
 	}
 	m := NewModel(forestOf(lanes, nil), Options{
@@ -597,7 +597,7 @@ func TestSlashSearchesAndFFilters(t *testing.T) {
 
 func TestPasteGoesToWhicheverFieldIsOpen(t *testing.T) {
 	lanes := []index.LaneInfo{
-		laneInfo("a", "gcsfuse density", "app", 5, time.Hour),
+		laneInfo("a", "blobstore density", "app", 5, time.Hour),
 		laneInfo("b", "schema refactor", "app", 5, time.Hour),
 	}
 	newModel := func() Model {
@@ -646,7 +646,7 @@ func TestPasteGoesToWhicheverFieldIsOpen(t *testing.T) {
 
 func TestClearingTheLaneFilterKeepsYourPlace(t *testing.T) {
 	lanes := []index.LaneInfo{
-		laneInfo("a", "gcsfuse density", "app", 5, time.Hour),
+		laneInfo("a", "blobstore density", "app", 5, time.Hour),
 		laneInfo("b", "schema refactor", "app", 5, time.Hour),
 		laneInfo("c", "halt behaviour", "app", 5, time.Hour),
 	}

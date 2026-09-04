@@ -46,13 +46,13 @@ func newFixture() *fakeSource {
 	now := time.Unix(1_700_000_000, 0)
 	return &fakeSource{
 		lanes: []model.Lane{
-			{ID: "main", Source: "fake", Project: "app", Path: "/tmp/main.jsonl", Title: "nvidia delivery", Updated: now},
+			{ID: "main", Source: "fake", Project: "app", Path: "/tmp/main.jsonl", Title: "checkout delivery", Updated: now},
 			{ID: "branch", Source: "fake", Project: "app", Path: "/tmp/branch.jsonl", Title: "try option c", Updated: now},
 		},
 		messages: map[string][]model.Message{
 			"main": {{
 				ID: "m1", LaneID: "main", Role: model.RoleUser, At: now,
-				Parts: []model.Part{{Kind: model.PartText, Text: "the gcsfuse mount is hard-coded to ten per second"}},
+				Parts: []model.Part{{Kind: model.PartText, Text: "the blobstore mount is hard-coded to ten per second"}},
 			}, {
 				ID: "m2", LaneID: "main", Role: model.RoleAssistant, At: now,
 				Parts: []model.Part{
@@ -63,7 +63,7 @@ func newFixture() *fakeSource {
 			}},
 			"branch": {{
 				ID: "b1", LaneID: "branch", Role: model.RoleUser, At: now,
-				Parts: []model.Part{{Kind: model.PartText, Text: "does gcsfuse contend on the same MDT"}},
+				Parts: []model.Part{{Kind: model.PartText, Text: "does blobstore contend on the same shard index"}},
 			}},
 		},
 	}
@@ -91,7 +91,7 @@ func TestRebuildAndSearch(t *testing.T) {
 		t.Fatalf("stats = %+v, want 2 lanes / 3 messages / 4 parts (blank part skipped)", stats)
 	}
 
-	hits, err := ix.Search(ctx, Query{Text: "gcsfuse"})
+	hits, err := ix.Search(ctx, Query{Text: "blobstore"})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestSearchFilters(t *testing.T) {
 	}
 
 	t.Run("by lane", func(t *testing.T) {
-		hits, err := ix.Search(ctx, Query{Text: "gcsfuse", Lane: "branch"})
+		hits, err := ix.Search(ctx, Query{Text: "blobstore", Lane: "branch"})
 		if err != nil {
 			t.Fatalf("Search: %v", err)
 		}
@@ -155,7 +155,7 @@ func TestRebuildIsIdempotent(t *testing.T) {
 	if first.Parts != second.Parts {
 		t.Fatalf("parts drifted: %d then %d", first.Parts, second.Parts)
 	}
-	hits, err := ix.Search(ctx, Query{Text: "gcsfuse"})
+	hits, err := ix.Search(ctx, Query{Text: "blobstore"})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -180,11 +180,11 @@ func TestBuildMatch(t *testing.T) {
 	tests := []struct {
 		name, in, want string
 	}{
-		{"plain words are quoted", "gcsfuse density", `"gcsfuse" "density"`},
+		{"plain words are quoted", "blobstore density", `"blobstore" "density"`},
 		{"punctuation cannot become syntax", "batch-of-1", `"batch-of-1"`},
 		{"quoted phrase passes through", `"NULLS LAST"`, `"NULLS LAST"`},
-		{"boolean expression passes through", "lustre AND mdt", "lustre AND mdt"},
-		{"NEAR passes through", "NEAR(delivery nvidia, 8)", "NEAR(delivery nvidia, 8)"},
+		{"boolean expression passes through", "lustre AND shard", "lustre AND shard"},
+		{"NEAR passes through", "NEAR(delivery checkout, 8)", "NEAR(delivery checkout, 8)"},
 		{"prefix search passes through", "gcsf*", "gcsf*"},
 		{"surrounding space is trimmed", "  halt  ", `"halt"`},
 	}
@@ -361,7 +361,7 @@ func TestSyncDropsVanishedLanes(t *testing.T) {
 	if len(lanes) != 1 || lanes[0].ID != "main" {
 		t.Fatalf("lanes = %+v, want only main", lanes)
 	}
-	hits, err := ix.Search(ctx, Query{Text: "gcsfuse"})
+	hits, err := ix.Search(ctx, Query{Text: "blobstore"})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -615,30 +615,30 @@ func TestSearchFindsAllThreeKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	const session = "a1b2c3d4-0000-4000-8000-000000000001"
-	transcript := `{"type":"ai-title","aiTitle":"the pods work","sessionId":"` + session + `"}` + "\n" +
+	transcript := `{"type":"ai-title","aiTitle":"the nodes work","sessionId":"` + session + `"}` + "\n" +
 		`{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-09-01T10:00:00Z",` +
-		`"message":{"role":"user","content":"the pods are stalling again"}}` + "\n"
+		`"message":{"role":"user","content":"the nodes are stalling again"}}` + "\n"
 	if err := os.WriteFile(filepath.Join(projects, session+".jsonl"), []byte(transcript), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(memories, "pod-scheduling.md"),
-		[]byte("---\nname: pod-scheduling\ndescription: how pods get placed\nmetadata:\n  type: project\n  originSessionId: "+
-			session+"\n---\n\nPods land wherever the scheduler says.\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(memories, "node-scheduling.md"),
+		[]byte("---\nname: node-scheduling\ndescription: how nodes get placed\nmetadata:\n  type: project\n  originSessionId: "+
+			session+"\n---\n\nNodes are picked by the scheduler.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(memories, memory.IndexFile),
-		[]byte("- [Pod scheduling](pod-scheduling.md) — placement\n"), 0o600); err != nil {
+		[]byte("- [Node scheduling](node-scheduling.md) — placement\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	job := filepath.Join(root, "jobs", session[:8], "tmp")
 	if err := os.MkdirAll(filepath.Join(job, "node_modules", "junk"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(job, "pods.json"), make([]byte, 128), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(job, "nodes.json"), make([]byte, 128), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// A vendored directory nobody searches their own machine for.
-	if err := os.WriteFile(filepath.Join(job, "node_modules", "junk", "pods.js"), []byte("x"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(job, "node_modules", "junk", "nodes.js"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -657,7 +657,7 @@ func TestSearchFindsAllThreeKinds(t *testing.T) {
 		t.Fatalf("SyncDocs: %v", err)
 	}
 
-	hits, err := ix.Search(ctx, Query{Text: "pods", Limit: 20})
+	hits, err := ix.Search(ctx, Query{Text: "nodes", Limit: 20})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -673,10 +673,10 @@ func TestSearchFindsAllThreeKinds(t *testing.T) {
 			t.Errorf("no %s in %v", want, found)
 		}
 	}
-	if found[FoundMemory] != "pod-scheduling" {
+	if found[FoundMemory] != "node-scheduling" {
 		t.Errorf("memory hit named %q", found[FoundMemory])
 	}
-	if found[FoundArtifact] != filepath.Join("tmp", "pods.json") {
+	if found[FoundArtifact] != filepath.Join("tmp", "nodes.json") {
 		t.Errorf("work-product hit named %q", found[FoundArtifact])
 	}
 	for _, h := range hits {
@@ -686,7 +686,7 @@ func TestSearchFindsAllThreeKinds(t *testing.T) {
 	}
 
 	// Narrowing to one kind returns only that kind.
-	only, err := ix.Search(ctx, Query{Text: "pods", Types: []Found{FoundMemory}, Limit: 20})
+	only, err := ix.Search(ctx, Query{Text: "nodes", Types: []Found{FoundMemory}, Limit: 20})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}

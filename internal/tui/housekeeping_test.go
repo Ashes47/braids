@@ -339,7 +339,7 @@ func TestNoWorkColumnWithoutWorkProducts(t *testing.T) {
 
 func TestRenameGivesAConversationYourOwnName(t *testing.T) {
 	var renamed [][2]string
-	lanes := []index.LaneInfo{laneInfo("a", "Debug annotation pipeline dataset issue", "app", 5, time.Hour)}
+	lanes := []index.LaneInfo{laneInfo("a", "Debug import pipeline dataset issue", "app", 5, time.Hour)}
 	m, _ := keepingModel(t, lanes)
 	m.renameFn = func(id, name string) error {
 		renamed = append(renamed, [2]string{id, name})
@@ -351,7 +351,7 @@ func TestRenameGivesAConversationYourOwnName(t *testing.T) {
 		t.Fatal("r should open the name field")
 	}
 	// Pre-filled with what it is called now, so a tweak is a tweak.
-	if m.naming.text != "Debug annotation pipeline dataset issue" {
+	if m.naming.text != "Debug import pipeline dataset issue" {
 		t.Errorf("field = %q, want the current name", m.naming.text)
 	}
 	if out := plain(m.render()); !strings.Contains(out, "name:") || !strings.Contains(out, "esc cancel") {
@@ -367,12 +367,12 @@ func TestRenameGivesAConversationYourOwnName(t *testing.T) {
 	}
 
 	m = press(m, "r")
-	m.naming.text = "gcsfuse density"
+	m.naming.text = "blobstore density"
 	m = m.renameKey("enter")
-	if len(renamed) != 1 || renamed[0][1] != "gcsfuse density" {
+	if len(renamed) != 1 || renamed[0][1] != "blobstore density" {
 		t.Fatalf("renamed = %v", renamed)
 	}
-	if !strings.Contains(plain(m.render()), "renamed to gcsfuse density") {
+	if !strings.Contains(plain(m.render()), "renamed to blobstore density") {
 		t.Error("expected confirmation")
 	}
 }
@@ -580,7 +580,7 @@ func TestEveryListScreenFilters(t *testing.T) {
 		lanes := []index.LaneInfo{laneInfo("a", "still here", "app", 5, time.Hour)}
 		m, h := keepingModel(t, lanes)
 		h.entries = []trash.Entry{
-			{ID: "1", Label: "gcsfuse density", At: now, Bytes: 10},
+			{ID: "1", Label: "blobstore density", At: now, Bytes: 10},
 			{ID: "2", Label: "worktree probe", At: now, Bytes: 20},
 		}
 		m = press(m, "u")
@@ -589,7 +589,7 @@ func TestEveryListScreenFilters(t *testing.T) {
 			m = m.binKey(string(r))
 		}
 		out := plain(m.renderBin())
-		if !strings.Contains(out, "worktree probe") || strings.Contains(out, "gcsfuse density") {
+		if !strings.Contains(out, "worktree probe") || strings.Contains(out, "blobstore density") {
 			t.Errorf("filtered bin:\n%s", out)
 		}
 		if !strings.Contains(out, "/worktree") {
@@ -609,16 +609,16 @@ func TestEveryListScreenFilters(t *testing.T) {
 
 	t.Run("work", func(t *testing.T) {
 		m, _ := workModel(t, nil)
-		m, _ = m.workKey("enter") // into tmp: pods.json, deep
+		m, _ = m.workKey("enter") // into tmp: nodes.json, deep
 		m, _ = m.workKey("f")
-		for _, r := range "pods" {
+		for _, r := range "nodes" {
 			m, _ = m.workKey(string(r))
 		}
 		out := plain(m.renderWork())
-		if !strings.Contains(out, "pods.json") || strings.Contains(out, "deep/") {
+		if !strings.Contains(out, "nodes.json") || strings.Contains(out, "deep/") {
 			t.Errorf("filtered work products:\n%s", out)
 		}
-		if !strings.Contains(out, "/pods") {
+		if !strings.Contains(out, "/nodes") {
 			t.Errorf("the title does not say what is filtered:\n%s", out)
 		}
 	})

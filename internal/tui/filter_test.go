@@ -72,8 +72,8 @@ func TestFilterInputPassesKeysThroughWhenInactive(t *testing.T) {
 }
 
 func TestFilterMatchesIsCaseInsensitive(t *testing.T) {
-	f := filterInput{text: "GcsFuse"}
-	if !f.matches("the gcsfuse mount") {
+	f := filterInput{text: "BlobStore"}
+	if !f.matches("the blobstore mount") {
 		t.Error("filter should ignore case")
 	}
 	if f.matches("something else") {

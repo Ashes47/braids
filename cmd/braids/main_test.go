@@ -25,9 +25,9 @@ func fixtureRoot(t *testing.T) string {
 	lines := []string{
 		`{"type":"ai-title","aiTitle":"mount density","sessionId":"s1"}`,
 		`{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-08-21T11:04:00Z",` +
-			`"message":{"role":"user","content":"the gcsfuse mount is hard-coded to ten"}}`,
+			`"message":{"role":"user","content":"the blobstore mount is hard-coded to ten"}}`,
 		`{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-08-21T11:05:00Z",` +
-			`"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"mount | grep gcsfuse"}}]}}`,
+			`"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"mount | grep blobstore"}}]}}`,
 	}
 	body := strings.Join(lines, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "s1.jsonl"), []byte(body), 0o600); err != nil {
@@ -54,8 +54,8 @@ func TestIndexSearchAndLanesEndToEnd(t *testing.T) {
 		t.Fatalf("index output = %q", out)
 	}
 
-	out = runCmd(t, "search", "--db", db, "gcsfuse")
-	if !strings.Contains(out, "[gcsfuse]") {
+	out = runCmd(t, "search", "--db", db, "blobstore")
+	if !strings.Contains(out, "[blobstore]") {
 		t.Errorf("expected a highlighted snippet, got %q", out)
 	}
 	if !strings.Contains(out, "mount density") {
@@ -65,7 +65,7 @@ func TestIndexSearchAndLanesEndToEnd(t *testing.T) {
 		t.Errorf("expected both the text and the tool call to match, got %q", out)
 	}
 
-	out = runCmd(t, "search", "--db", db, "--kind", "tool_use", "gcsfuse")
+	out = runCmd(t, "search", "--db", db, "--kind", "tool_use", "blobstore")
 	if !strings.Contains(out, "Bash") || strings.Contains(out, "2 hits") {
 		t.Errorf("kind filter should leave only the Bash call, got %q", out)
 	}
@@ -81,16 +81,16 @@ func TestSearchFlagsWorkAfterTheQuery(t *testing.T) {
 	runCmd(t, "index", "--root", fixtureRoot(t), "--db", db)
 
 	// The natural way to type it: flags trailing the query.
-	after := runCmd(t, "search", "--db", db, "gcsfuse", "--limit", "1")
+	after := runCmd(t, "search", "--db", db, "blobstore", "--limit", "1")
 	if !strings.Contains(after, "1 hits") {
 		t.Errorf("trailing --limit ignored: %q", after)
 	}
-	before := runCmd(t, "search", "--db", db, "--limit", "1", "gcsfuse")
+	before := runCmd(t, "search", "--db", db, "--limit", "1", "blobstore")
 	if !strings.Contains(before, "1 hits") {
 		t.Errorf("leading --limit ignored: %q", before)
 	}
 	// A multi-word query still reads as one query, not as stray flags.
-	multi := runCmd(t, "search", "--db", db, "gcsfuse", "mount", "--limit", "5")
+	multi := runCmd(t, "search", "--db", db, "blobstore", "mount", "--limit", "5")
 	if strings.Contains(multi, "no matches") {
 		t.Errorf("multi-word query broke: %q", multi)
 	}

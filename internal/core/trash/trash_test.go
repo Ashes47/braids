@@ -92,7 +92,7 @@ func TestTheBinSurvivesRestart(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "trash")
 
 	// Deleted by one session...
-	entry, err := New(dir).Discard("nvidia delivery", []string{transcript, side})
+	entry, err := New(dir).Discard("checkout delivery", []string{transcript, side})
 	if err != nil {
 		t.Fatalf("Discard: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestTheBinSurvivesRestart(t *testing.T) {
 	if len(listed) != 1 {
 		t.Fatalf("the bin listed %d entries, want 1", len(listed))
 	}
-	if listed[0].Label != "nvidia delivery" || listed[0].Bytes != entry.Bytes {
+	if listed[0].Label != "checkout delivery" || listed[0].Bytes != entry.Bytes {
 		t.Errorf("entry lost its details: %+v", listed[0])
 	}
 	if _, err := later.RestoreByID(listed[0].ID); err != nil {

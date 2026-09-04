@@ -134,53 +134,54 @@ workspace branches), spawned into a new window of the user's terminal.
 
 ---
 
-### 4.1 Layering — TUI now, local web later
+### 4.1 Layering — what it is, and what a web frontend would still cost
 
-Three layers, and the boundary is enforced by imports:
-
-```
-   frontends   internal/tui  (bubbletea)      internal/web  (later: http + SSE)
-                     │                                │
-                     └──────────────┬─────────────────┘
-   service                   internal/api           transport-neutral
-                                    │               queries + commands + events
-                     ┌──────────────┴─────────────────┐
-   core        store · index · graph · ops · watch · events
-```
-
-Rules that keep the web option alive at zero cost:
-
-- **Core never formats for a terminal.** No ANSI, no width math, no lipgloss
-  types below `internal/api`. Core returns data; frontends decide presentation.
-- **Every mutation is a named command** (`Branch`, `Clone`, `Promote`, `Archive`,
-  `Delete`) with an explicit result — never logic buried in a key handler.
-- **One typed event stream.** Core emits `LaneCreated`, `TurnAppended`,
-  `NeedsYou`, `LaneIdle`. The TUI subscribes over a channel; the web gets the
-  identical events over SSE. This is the decision that matters most — if
-  liveness is wired into the TUI's update loop, the web has to reimplement it.
-- **Watcher and hook listener live in core**, so `braids serve` doesn't duplicate
-  them and a future daemon can host both frontends at once.
-- **Read models are query-shaped, not screen-shaped**: `ListLanes(filter)`,
-  `GetSpine(lane, zoom)`, `Search(q, scope)`. Both UIs call the same queries.
+Two layers and an adapter. The boundary is enforced by imports, and it holds:
+nothing under `internal/core` mentions lipgloss or an escape sequence, and
+nothing in core imports `internal/tui`.
 
 ```
-github.com/Ashes47/braids            ← go module path
-├── cmd/braids/          TUI entry
-├── internal/core/
-│  ├── store/      jsonl parse, byte-offset tailing
-│  ├── index/        sqlite + fts5
-│  ├── graph/      lanes, junctions, fork detection by shared uuid
-│  ├── ops/       branch, clone, promote, archive, delete
-│  ├── watch/      fsnotify + hook http listener
-│  └── events/     typed event bus
-├── internal/api/    transport-neutral service ← the only thing UIs import
-├── internal/tui/    bubbletea + lipgloss
-└── internal/web/    later: handlers, SSE, embedded assets
+   frontend      internal/tui              bubbletea + lipgloss
+                      │
+                      │   tui.Options — 36 fields, 27 of them functions:
+                      │   the whole surface a screen is allowed to reach
+                      ▼
+   core          store · index · graph · memory · artifacts · hooks · trash · watch
+                      │
+                      │   store.Source, plus optional capability interfaces
+                      ▼
+   adapter       store/claudecode          the only package that knows a harness
 ```
 
-This also yields a third frontend for free: a plain CLI (`braids search`,
-`braids branch`) that is scriptable, useful before the TUI exists, and useful
-forever from hooks and automation.
+What this buys today:
+
+- **Core never formats for a terminal.** No ANSI, no width maths, no lipgloss
+  below `internal/tui`. Core returns data; the screens decide how it looks.
+- **A harness plugs in at `store.Source`**, and says what more it can do by
+  implementing `Enricher`, `Sidechains`, `Brancher`, `Promoter`, `Merger`,
+  `Tailer`, `Measurer` or `Rememberer`. braids hides a capability a source
+  lacks rather than offering a key that fails.
+- **A screen cannot reach past its options.** Every mutation the TUI can
+  perform is a function it was handed, so `cmd` decides what is possible and a
+  key handler cannot quietly grow a dependency on the index.
+
+What a web frontend would still cost, stated honestly because the first draft
+of this document claimed it was free:
+
+- **A service layer that does not exist.** `tui.Options` is a boundary, not a
+  transport: it hands over Go closures. Sharing it with a browser means naming
+  those operations as requests and replies, which is real work.
+- **Events that do not exist either.** Liveness today is one channel that says
+  *something moved*, followed by a re-read — deliberately, because it is cheap
+  and it cannot get out of step with the files. A browser needs to be told
+  *what* moved, which means modelling the events that the TUI currently gets
+  away with not having.
+
+Neither is hard. Both are work, and pretending otherwise is how a plan becomes
+a lie about the code: the version of this section written before any of it
+existed described an `internal/api`, an `internal/web`, named command types and
+a typed event bus, three of which were empty packages and one of which was
+never written at all.
 
 ---
 
@@ -242,31 +243,31 @@ most valuable junction in the graph, and `b` on the seam is a headline feature.
 ### 6.1 The Map — home
 
 ```
-┌ braids ─────────────────────────────────────────────────────────── microagi ──┐
-│                                                                               │
-│  ◆ 1 needs you    ● 3 running    ○ 11 idle                    392 MB on disk  │
-│                                                                               │
-│  ● nvidia-delivery                            412 turns    running     2m ago │
-│  │    Debug annotation pipeline dataset issue                                 │
-│  │                                                                            │
-│  ├─◆ try-option-c                    ← t412   38 turns    needs you    0m ago │
-│  │ │    permission · Bash(kubectl delete job dispatch-…)                      │
-│  │ │                                                                          │
-│  │ └─● cache-gate-probe              ← t31     7 turns    idle          3h ago│
-│  │                                                                            │
-│  ├─● gcsfuse-density                 ← t288   63 turns    done          2d ago│
-│  │                                                                            │
-│  └─● mdt-contention                  ← t104   21 turns    idle         14d ago│
-│                                                                               │
-│  ● schema-refactor                             89 turns    running    12m ago │
-│  │                                                                            │
-│  └─● models-ts-interfaces            ← t44    15 turns    idle          5h ago│
-│                                                                               │
-│  ○ 6 archived                                                             ▸   │
-│                                                                               │
-├───────────────────────────────────────────────────────────────────────────────┤
-│ / search   n needs-you   ↵ open   b branch   o terminal   a archive   ? help  │
-└───────────────────────────────────────────────────────────────────────────────┘
+┌ braids ─────────────────────────────────────────────────────────── storefront ──┐
+│                                                                                 │
+│  ◆ 1 needs you    ● 3 running    ○ 11 idle                    392 MB on disk    │
+│                                                                                 │
+│  ● checkout-flow                            412 turns    running     2m ago     │
+│  │    Debug import pipeline dataset issue                                       │
+│  │                                                                              │
+│  ├─◆ try-option-c                    ← t412   38 turns    needs you    0m ago   │
+│  │ │    permission · Bash(kubectl delete job dispatch-…)                        │
+│  │ │                                                                            │
+│  │ └─● cache-gate-probe              ← t31     7 turns    idle          3h ago  │
+│  │                                                                              │
+│  ├─● blobstore-density                 ← t288   63 turns    done          2d ago│
+│  │                                                                              │
+│  └─● index-contention                  ← t104   21 turns    idle         14d ago│
+│                                                                                 │
+│  ● schema-refactor                             89 turns    running    12m ago   │
+│  │                                                                              │
+│  └─● models-ts-interfaces            ← t44    15 turns    idle          5h ago  │
+│                                                                                 │
+│  ○ 6 archived                                                             ▸     │
+│                                                                                 │
+├───────────────────────────────────────────────────────────────────────────────  ┤
+│ / search   n needs-you   ↵ open   b branch   o terminal   a archive   ? help    │
+└───────────────────────────────────────────────────────────────────────────────  ┘
 ```
 
 Vertical is sequence. Indent is fork depth. `← t412` is the exact turn the branch
@@ -281,18 +282,18 @@ for. Archived lanes collapse to one line.
  Junctions: 220                                             <n/N>   next junction
  Branches:  228                                             <esc>   back to map
 
-╭─ Spine(Debug annotation pipeline dataset issue)[3015] ─────────────────────────╮
-│  TURN  WHO     WHAT HAPPENED                                           BRANCHES│
-│ ●    t1 you     This session is being continued from a previous conver…        │
-│ ⋯    t2         113 turns · 36 Bash · 2 ToolSearch · 1 AskUserQuestion         │
-│ ●  t115 you     [Request interrupted by user for tool use]                     │
-│ ●  t116 you     what's the status                                              │
-│ ⋯  t117         10 turns · 4 Bash                                              │
-│ ●  t127 you     what's the long term fix for this?                             │
-│ ●  t128 claude  Long-term, this breaks into five fixes. Ordered by lev…        │
+╭─ Spine(Debug import pipeline dataset issue)[3015] ─────────────────────────     ╮
+│  TURN  WHO     WHAT HAPPENED                                           BRANCHES │
+│ ●    t1 you     This session is being continued from a previous conver…         │
+│ ⋯    t2         113 turns · 36 Bash · 2 ToolSearch · 1 AskUserQuestion          │
+│ ●  t115 you     [Request interrupted by user for tool use]                      │
+│ ●  t116 you     what's the status                                               │
+│ ⋯  t117         10 turns · 4 Bash                                               │
+│ ●  t127 you     what's the long term fix for this?                              │
+│ ●  t128 claude  Long-term, this breaks into five fixes. Ordered by lev…         │
 │   └─● try another way  (9 turns)                                          ← t128│
-│ ●  t138 claude  Bash                                                      ├─ 2 │
-╰────────────────────────────────────────────────────────────────────────────────╯
+│ ●  t138 claude  Bash                                                      ├─ 2  │
+╰──────────────────────────────────────────────────────────────────────────────── ╯
 ```
 
 **A branch appears in both places, because they answer different questions.**
@@ -370,18 +371,18 @@ cover them all says nothing.
 ### 6.3 Search — the front door
 
 ```
- Query:    gcsfuse density                    <↵>     jump to turn <↑/↓>   move
+ Query:    blobstore density                    <↵>     jump to turn <↑/↓>   move
  Scope:    every conversation                 <tab>   change scope <esc>   back
  Hits:     130
  Took:     22.8ms
 
-╭─ Search(everywhere)[130] ──────────────────────────────────────────────────────╮
-│ CONVERSATION              TURN KIND        MATCH                               │
-│ Review annotation pip…   t2916 tool_result …Solve post [gcsfuse] [density] st…│
-│ Review annotation pip…   t3467 tool_result …memory/[gcsfuse]-[density]-arc.md …│
-│ Agent observability a…    t298 tool_result …[gcsfuse]-[density] t12 tool_use …│
-╰────────────────────────────────────────────────────────────────────────────────╯
- /gcsfuse density▏  ↵ jump · tab scope · esc back
+╭─ Search(everywhere)[130] ────────────────────────────────────────────────────── ╮
+│ CONVERSATION              TURN KIND        MATCH                                │
+│ Review import pipel…   t2916 tool_result …Solve post [blobstore] [density] st…  │
+│ Review import pipel…   t3467 tool_result …memory/[blobstore]-[density]-arc.md … │
+│ Agent observability a…    t298 tool_result …[blobstore]-[density] t12 tool_use …│
+╰──────────────────────────────────────────────────────────────────────────────── ╯
+ /blobstore density▏  ↵ jump · tab scope · esc back
 ```
 
 Full text over every message, thought and tool call — the same FTS5 index
@@ -774,10 +775,10 @@ emptying the field restores whatever the harness called it.
 ### 6.6 Subagent — in the conversation that spawned it
 
 ```
-│ ●  t633 claude  Read                                                           │
-│   ├─⊕ Explore · Verify console edit points                            42 turns │
-│   ├─⊕ Explore · Verify job-watcher extension points                   49 turns │
-│   ├─⊕ microagi:code-reviewer · Harsh pre-PR review of pipeline fix    31 turns │
+│ ●  t633 claude  Read                                                             │
+│   ├─⊕ Explore · Verify console edit points                            42 turns   │
+│   ├─⊕ Explore · Verify job-watcher extension points                   49 turns   │
+│   ├─⊕ storefront:code-reviewer · Harsh pre-PR review of pipeline fix    31 turns │
 ```
 
 A subagent is a whole conversation the harness collapses into one `tool_use` and
@@ -827,12 +828,12 @@ directory beside it holding its subagents and tool output — into
  Kept for:   14 days
  Next to go: in 1h
 
-╭─ Deleted[3] ───────────────────────────────────────────────────────────────────╮
+╭─ Deleted[3] ─────────────────────────────────────────────────────────────────── ╮
 │ CONVERSATION                              DELETED       SIZE       EXPIRES      │
 │ deleted an hour ago                         1h ago     4.0 kB       in 13d      │
 │ the one you want back                       2d ago     2.0 kB       in 12d      │
 │ nearly expired                             13d ago     1.0 kB        in 1h      │
-╰────────────────────────────────────────────────────────────────────────────────╯
+╰──────────────────────────────────────────────────────────────────────────────── ╯
 ```
 
 `u` opens it. A one-step undo was the wrong shape: it reached one deletion back,

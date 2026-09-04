@@ -25,21 +25,19 @@ millisecond, and turns any message into the start of a new branch.
 It never talks to Claude. It arranges the conversations you have with Claude.
 
 ```
- Source:         claudecode                            <j/k>   down / up
- Index:          ~/.braids/index.db                    <↵>     open spine
- Lanes:          6                                     </>     search
- Waiting on you: 5                                     <f>     filter list
- Hooks:          reporting                             <a>     toggle archive
-                                                       <r>     rename
-                                                       <q>     quit
+ Source:         claudecode
+ Index:          ~/.braids/index.db
+ Lanes:          6
+ Waiting on you: 4
+ Hooks:          reporting
 ╭─ Conversations(all)[6] ──────────────────────────────────────────────────────────╮
-│  CONVERSATION                                  TURNS      SIZE    AGE      STATUS│
-│ ● try-option-c                                    75     16 kB    39m  unanswered│
-│ ● nvidia-delivery                                824    178 kB    41m   your turn│
-│ ● cache-gate-probe                                14      3 kB     3h   your turn│
-│ ● gcsfuse-density                                125     27 kB     2d  unanswered│
-│ ● annotation-pipeline                            368     79 kB     5d   your turn│
-│ ● mdt-contention                                  41      9 kB    14d  unanswered│
+│  CONVERSATION                          FORK    TURNS      SIZE    AGE      STATUS│
+│ ● checkout-flow                                  824    174 kB     2m   your turn│
+│ ├─● try-option-c                     ← t412       75     16 kB    now    thinking│
+│ │  └─● cache-gate-probe               ← t31       14      3 kB     3h   your turn│
+│ ├─● blobstore-density                ← t288      125     26 kB     2d  unanswered│
+│ └─● index-contention                 ← t104       41      9 kB    14d  unanswered│
+│ ● import-pipeline                                368     78 kB     5d   your turn│
 │                                                                                  │
 │                                                                                  │
 │                                                                                  │
@@ -47,7 +45,6 @@ It never talks to Claude. It arranges the conversations you have with Claude.
 │                                                                                  │
 │                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────╯
- b2c3d4e5-0000-4000-8000-000000000002
 ```
 
 ## Why
@@ -74,12 +71,32 @@ git clone https://github.com/Ashes47/braids && cd braids
 make install          # -> $(go env GOPATH)/bin/braids
 ```
 
-Then:
+## First run
 
 ```sh
-braids index          # read ~/.claude/projects (once; a few seconds)
+braids index          # read every transcript under ~/.claude (a few seconds)
 braids                # open the map
 ```
+
+Then, on the map:
+
+| | |
+|---|---|
+| `j` `k` | move |
+| `↵` | open a conversation's spine — its landmarks, not every line |
+| `b` | branch from the turn under the cursor |
+| `y` | copy the `claude --resume` command for it |
+| `/` | search every conversation, memory and work product |
+| `w` | browse what a session wrote to disk |
+| `M` | what the project remembers |
+
+Nothing here is a command you have to remember: the header lists every binding
+the screen has, and a mistyped one names the key you meant.
+
+Optionally, `braids hooks --install` asks Claude Code to report when a session
+is blocked on you — the one thing the files cannot say. It is opt-in, merges
+with whatever hooks you already have, and `--remove` takes back only what
+braids added.
 
 ## What it does
 
@@ -232,16 +249,25 @@ braids does not talk to any model, proxy your session, or replace your terminal.
 It does not sync anything anywhere. It is one window next to the ones you already
 have open.
 
+## Uninstall
+
+```sh
+braids hooks --remove                     # if you installed them
+rm -rf ~/.braids                          # the index, the bin, the sidecars
+rm "$(go env GOPATH)/bin/braids"          # the binary
+```
+
+Your conversations are untouched by all three. They were never braids' to
+begin with.
+
 ## Security
 
-`BRAIDS_SPAWN` is run through a shell, so every value braids substitutes into it
-is shell-quoted first: a conversation's title and directory are data read out of
-a transcript, and a conversation called `x; rm -rf ~ #` must be a name rather
-than a command. Your template supplies the shell syntax; the values never do —
-so do not put quotes around a placeholder yourself.
-
-Found something? Open an issue for anything that is not exploitable, and email
-the address in `git log` for anything that is.
+The threat model, the permissions braids sets and how to report something are
+in [SECURITY.md](SECURITY.md). The one worth repeating here: `BRAIDS_SPAWN`
+runs through a shell, so every value braids substitutes into it is shell-quoted
+first — a conversation called `x; rm -rf ~ #` has to be a name rather than a
+command. Your template supplies the shell syntax; the values never do, so do
+not put quotes around a placeholder yourself.
 
 ## Other harnesses
 
@@ -255,8 +281,11 @@ the map and search. See [SPEC.md](SPEC.md).
 make ci     # fmt, vet, lint, test, race, cover — the same gate CI runs
 ```
 
-Issues and pull requests welcome. [SPEC.md](SPEC.md) is the design doc; every
-decision in it traces to something measured rather than assumed.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the layout, the decisions that look like
+missing features, and what a good change looks like. [SPEC.md](SPEC.md) is the
+design doc: nearly every decision in it traces to something measured on a real
+machine rather than assumed, and the ones that went wrong went wrong because
+they were assumed.
 
 ## License
 

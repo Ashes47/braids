@@ -21,13 +21,13 @@ const originSession = "fe00c207-1111-4000-8000-000000000001"
 func memoryModel(t *testing.T, load func() ([]memory.Set, error)) Model {
 	t.Helper()
 	lanes := []index.LaneInfo{
-		laneInfo(originSession, "annotation pipeline", "microagi", 100, time.Hour),
-		laneInfo("other000-2222-4000-8000-000000000002", "something else", "microagi", 5, time.Hour),
+		laneInfo(originSession, "import pipeline", "storefront", 100, time.Hour),
+		laneInfo("other000-2222-4000-8000-000000000002", "something else", "storefront", 5, time.Hour),
 	}
 	if load == nil {
 		load = func() ([]memory.Set, error) {
 			return []memory.Set{{
-				Location: memory.Location{Project: "microagi", Dir: "/m"},
+				Location: memory.Location{Project: "storefront", Dir: "/m"},
 				Memories: []memory.Memory{
 					{Name: "shard-manifest", Description: "why twice", Kind: "project",
 						Origin: originSession, Modified: now, Links: []string{"reader-contract"}, Listed: true},
@@ -61,7 +61,7 @@ func TestMemoryScreenLandsOnAMemory(t *testing.T) {
 		t.Errorf("landed on %q", entry.Name)
 	}
 	out := plain(m.renderMemories())
-	for _, want := range []string{"microagi · 3", "shard-manifest", "alerting-inventory", "why twice"} {
+	for _, want := range []string{"storefront · 3", "shard-manifest", "alerting-inventory", "why twice"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("screen is missing %q:\n%s", want, out)
 		}
@@ -384,7 +384,7 @@ func curationModel(t *testing.T, lanes []index.LaneInfo, log *curated) Model {
 	t.Helper()
 	sets := func() ([]memory.Set, error) {
 		return []memory.Set{{
-			Location: memory.Location{Project: "microagi", Dir: "/m"},
+			Location: memory.Location{Project: "storefront", Dir: "/m"},
 			Memories: []memory.Memory{
 				{Name: "shard-manifest", Kind: "project", Modified: now, Listed: true},
 				{Name: "alerting-inventory", Kind: "project", Modified: now, Listed: false},
@@ -423,7 +423,7 @@ func curationModel(t *testing.T, lanes []index.LaneInfo, log *curated) Model {
 
 // An idle project can be curated: delete, repair, rename.
 func TestMemoryCurationActs(t *testing.T) {
-	idle := []index.LaneInfo{laneInfo("a", "finished long ago", "microagi", 10, 72*time.Hour)}
+	idle := []index.LaneInfo{laneInfo("a", "finished long ago", "storefront", 10, 72*time.Hour)}
 
 	log := &curated{}
 	m := curationModel(t, idle, log)
@@ -487,13 +487,13 @@ func TestMemoryCurationActs(t *testing.T) {
 // may also be writing is how something a person asked to be remembered gets
 // lost.
 func TestMemoryCurationRefusesWhileASessionIsLive(t *testing.T) {
-	live := []index.LaneInfo{laneInfo("a", "still working", "microagi", 10, time.Minute)}
+	live := []index.LaneInfo{laneInfo("a", "still working", "storefront", 10, time.Minute)}
 	live[0].Activity = model.Activity{LastRole: model.RoleUser}
 
 	for _, key := range []string{"d", "i"} {
 		log := &curated{}
 		m := curationModel(t, live, log)
-		if _, running := m.liveIn("microagi"); !running {
+		if _, running := m.liveIn("storefront"); !running {
 			t.Fatalf("the fixture is not live, so %q proves nothing", key)
 		}
 		m = m.memoryKey(key)
@@ -541,7 +541,7 @@ func TestMemoryCurationRefusesWhileASessionIsLive(t *testing.T) {
 
 // A failure is reported rather than leaving the screen looking as if it worked.
 func TestMemoryCurationReportsFailure(t *testing.T) {
-	idle := []index.LaneInfo{laneInfo("a", "finished", "microagi", 10, 72*time.Hour)}
+	idle := []index.LaneInfo{laneInfo("a", "finished", "storefront", 10, 72*time.Hour)}
 	log := &curated{fail: errors.New("read-only file system")}
 	m := curationModel(t, idle, log)
 	m = m.memoryKey("d")
@@ -557,7 +557,7 @@ func TestHeaderIsSizedFromTheScreenItDraws(t *testing.T) {
 	long := strings.Repeat("release-", 4) + "hashes" // longer than any list value
 	m := memoryModel(t, func() ([]memory.Set, error) {
 		return []memory.Set{{
-			Location: memory.Location{Project: "SpinAds", Dir: "/m"},
+			Location: memory.Location{Project: "Mailer", Dir: "/m"},
 			Memories: []memory.Memory{{
 				Name: long, Kind: "project", Modified: now, Origin: originSession,
 				Links: []string{"one-link", "another-link"}, Listed: true, Path: "/nope.md",
@@ -599,13 +599,13 @@ func TestHeaderIsSizedFromTheScreenItDraws(t *testing.T) {
 // alone. "The index already agrees with the files" is true and unhelpful while
 // the row under the cursor is visibly marked.
 func TestRepairExplainsALooseLink(t *testing.T) {
-	idle := []index.LaneInfo{laneInfo("a", "finished", "SpinAds", 10, 72*time.Hour)}
+	idle := []index.LaneInfo{laneInfo("a", "finished", "Mailer", 10, 72*time.Hour)}
 	sets := func() ([]memory.Set, error) {
 		return []memory.Set{{
-			Location: memory.Location{Project: "SpinAds", Dir: "/m"},
+			Location: memory.Location{Project: "Mailer", Dir: "/m"},
 			Memories: []memory.Memory{{
-				Name: "dodo-payments-liver", Kind: "project", Modified: now, Listed: true,
-				Links: []string{"spinads-billing-model"},
+				Name: "payments-live", Kind: "project", Modified: now, Listed: true,
+				Links: []string{"mailer-billing-model"},
 			}},
 		}}, nil
 	}
@@ -630,7 +630,7 @@ func TestRepairExplainsALooseLink(t *testing.T) {
 	m = m.repairMemoryIndex()
 	notice := m.memories.notice
 	for _, want := range []string{
-		"already agrees", "dodo-payments-liver", "[[spinads-billing-model]]", "note rather than a fault",
+		"already agrees", "payments-live", "[[mailer-billing-model]]", "note rather than a fault",
 	} {
 		if !strings.Contains(notice, want) {
 			t.Errorf("notice %q is missing %q", notice, want)

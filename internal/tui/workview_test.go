@@ -19,7 +19,7 @@ import (
 func workModel(t *testing.T, discard func(string, []string) (int64, error)) (Model, *[][]string) {
 	t.Helper()
 	var discarded [][]string
-	lanes := []index.LaneInfo{laneInfo("lane1234abcd", "annotation pipeline", "microagi", 100, time.Hour)}
+	lanes := []index.LaneInfo{laneInfo("lane1234abcd", "import pipeline", "storefront", 100, time.Hour)}
 	f := forestOf(lanes, nil)
 
 	top := []artifacts.Entry{
@@ -27,7 +27,7 @@ func workModel(t *testing.T, discard func(string, []string) (int64, error)) (Mod
 		{Name: "state.json", Path: "/j/lane1234/state.json", Bytes: 10, Files: 1, Reserved: true},
 	}
 	inner := []artifacts.Entry{
-		{Name: "pods.json", Path: "/j/lane1234/tmp/pods.json", Bytes: 800, Files: 1},
+		{Name: "nodes.json", Path: "/j/lane1234/tmp/nodes.json", Bytes: 800, Files: 1},
 		{Name: "deep", Path: "/j/lane1234/tmp/deep", Dir: true, Bytes: 100, Files: 2},
 	}
 	if discard == nil {
@@ -69,8 +69,8 @@ func TestWorkBrowserDescendsAndComesBack(t *testing.T) {
 	if got := m.workWhere(); got != "tmp" {
 		t.Fatalf("after enter, here = %q, want tmp", got)
 	}
-	if got := plain(m.renderWork()); !strings.Contains(got, "pods.json") {
-		t.Errorf("tmp does not list pods.json:\n%s", got)
+	if got := plain(m.renderWork()); !strings.Contains(got, "nodes.json") {
+		t.Errorf("tmp does not list nodes.json:\n%s", got)
 	}
 	// A new level is a new question: the cursor starts on the heaviest row.
 	if m.work.cursor != 0 {
@@ -97,7 +97,7 @@ func TestWorkBrowserDoesNotOpenAFile(t *testing.T) {
 	m, _ := workModel(t, nil)
 	m, _ = m.workKey("enter") // into tmp
 	m, _ = m.workKey("j")     // onto deep
-	m, _ = m.workKey("k")     // back onto pods.json, a file
+	m, _ = m.workKey("k")     // back onto nodes.json, a file
 	before := m.workWhere()
 	if m, _ = m.workKey("enter"); m.workWhere() != before {
 		t.Errorf("entering a file moved to %q", m.workWhere())
@@ -106,11 +106,11 @@ func TestWorkBrowserDoesNotOpenAFile(t *testing.T) {
 
 func TestWorkBrowserBinsTheSelectedEntry(t *testing.T) {
 	m, discarded := workModel(t, nil)
-	m, _ = m.workKey("enter") // into tmp, cursor on pods.json
+	m, _ = m.workKey("enter") // into tmp, cursor on nodes.json
 	m, _ = m.workKey("d")
 
-	if len(*discarded) != 1 || (*discarded)[0][0] != "/j/lane1234/tmp/pods.json" {
-		t.Fatalf("discarded %v, want just pods.json", *discarded)
+	if len(*discarded) != 1 || (*discarded)[0][0] != "/j/lane1234/tmp/nodes.json" {
+		t.Fatalf("discarded %v, want just nodes.json", *discarded)
 	}
 	// The notice has to say the room is not back yet: the bin still holds it.
 	if got := m.work.notice; !strings.Contains(got, "bin") || !strings.Contains(got, "800 B") {

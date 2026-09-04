@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Go modules and the actions the workflows pin. Weekly, because a security
+  # release is worth a prompt and a patch bump is not worth a daily one.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

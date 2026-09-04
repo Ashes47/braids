@@ -18,7 +18,7 @@ import (
 func searchModel(t *testing.T, hits []index.Hit, err error) (Model, *[]string) {
 	t.Helper()
 	lanes := []index.LaneInfo{
-		laneInfo("main00000001", "nvidia delivery", "app", 400, time.Hour),
+		laneInfo("main00000001", "checkout delivery", "app", 400, time.Hour),
 		laneInfo("side00000002", "schema refactor", "app", 20, time.Hour),
 	}
 	queries := &[]string{}
@@ -44,10 +44,10 @@ func searchModel(t *testing.T, hits []index.Hit, err error) (Model, *[]string) {
 
 func demoHits() []index.Hit {
 	return []index.Hit{
-		{LaneID: "main00000001", LaneTitle: "nvidia delivery", Seq: 12, Kind: model.PartText,
-			Snippet: "the [gcsfuse] mount is hard-coded"},
+		{LaneID: "main00000001", LaneTitle: "checkout delivery", Seq: 12, Kind: model.PartText,
+			Snippet: "the [blobstore] mount is hard-coded"},
 		{LaneID: "side00000002", LaneTitle: "schema refactor", Seq: 4, Kind: model.PartToolUse,
-			Tool: "Bash", Snippet: "mount | grep [gcsfuse]"},
+			Tool: "Bash", Snippet: "mount | grep [blobstore]"},
 	}
 }
 
@@ -73,7 +73,7 @@ func TestSlashOpensSearchAndTypingQueries(t *testing.T) {
 	out := plain(m.renderSearch())
 	for _, want := range []string{
 		"Query:", "gcs", "Scope:", "every conversation", "Hits:", "Search(everywhere)[2]",
-		"nvidia delivery", "t12", "the [gcsfuse] mount", "Bash", "open the result",
+		"checkout delivery", "t12", "the [blobstore] mount", "Bash", "open the result",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("search screen missing %q:\n%s", want, out)
@@ -109,7 +109,7 @@ func TestSearchScopeTogglesToTheOpenConversation(t *testing.T) {
 func TestEnterJumpsToTheTurnAndShowsItsThread(t *testing.T) {
 	m, _ := searchModel(t, demoHits(), nil)
 	m = m.openSearch()
-	m = typeSearch(m, "g")
+	m = typeSearch(m, "b")
 	m = typeSearch(m, "enter")
 
 	if m.mode != spineMode || m.spine == nil {
@@ -128,7 +128,7 @@ func TestEnterJumpsToTheTurnAndShowsItsThread(t *testing.T) {
 }
 
 func TestJumpLandsOnTheRunThatSwallowedTheTurn(t *testing.T) {
-	hits := []index.Hit{{LaneID: "main00000001", LaneTitle: "nvidia delivery", Seq: 7, Kind: model.PartText}}
+	hits := []index.Hit{{LaneID: "main00000001", LaneTitle: "checkout delivery", Seq: 7, Kind: model.PartText}}
 	m, _ := searchModel(t, hits, nil)
 	m = m.openSearch()
 	m = typeSearch(m, "g", "enter")
@@ -197,16 +197,16 @@ func TestTypingQIntoSearchDoesNotQuit(t *testing.T) {
 func TestPasteIntoSearch(t *testing.T) {
 	m, queries := searchModel(t, demoHits(), nil)
 	m = m.openSearch()
-	m = typeSearch(m, "g")
+	m = typeSearch(m, "b")
 
-	updated, _ := m.Update(tea.PasteMsg{Content: "csfuse\ndensity  "})
+	updated, _ := m.Update(tea.PasteMsg{Content: "lobstore\ndensity  "})
 	m = updated.(Model)
 
 	// A pasted newline must not become part of the query.
-	if got := m.search.input.text; got != "gcsfuse density" {
-		t.Errorf("query = %q, want %q", got, "gcsfuse density")
+	if got := m.search.input.text; got != "blobstore density" {
+		t.Errorf("query = %q, want %q", got, "blobstore density")
 	}
-	if len(*queries) == 0 || !strings.HasPrefix((*queries)[len(*queries)-1], "gcsfuse density|") {
+	if len(*queries) == 0 || !strings.HasPrefix((*queries)[len(*queries)-1], "blobstore density|") {
 		t.Errorf("paste did not re-run the search: %v", *queries)
 	}
 }
@@ -214,7 +214,7 @@ func TestPasteIntoSearch(t *testing.T) {
 func TestSearchResultsWrapAround(t *testing.T) {
 	m, _ := searchModel(t, demoHits(), nil)
 	m = m.openSearch()
-	m = typeSearch(m, "g")
+	m = typeSearch(m, "b")
 
 	m = typeSearch(m, "up")
 	if m.search.cursor != len(m.search.hits)-1 {
@@ -231,22 +231,22 @@ func TestSearchResultsWrapAround(t *testing.T) {
 func TestSearchNamesTheKindAndOpensItsScreen(t *testing.T) {
 	laneID := "9419fd9c-f899-4812-8ced-96a9e9890413"
 	hits := []index.Hit{
-		{Of: index.FoundTurn, LaneID: laneID, LaneTitle: "annotation pipeline", Seq: 12,
+		{Of: index.FoundTurn, LaneID: laneID, LaneTitle: "import pipeline", Seq: 12,
 			Kind: "text", Snippet: "the [pods] stall", At: now},
 		{Of: index.FoundMemory, Name: "pod-scheduling", LaneID: laneID,
 			Snippet: "how [pods] are placed", At: now},
-		{Of: index.FoundArtifact, Name: "tmp/pods.json", LaneID: laneID,
+		{Of: index.FoundArtifact, Name: "tmp/nodes.json", LaneID: laneID,
 			Snippet: "tmp/[pods].json", At: now},
 	}
 	build := func() Model {
-		lanes := []index.LaneInfo{laneInfo(laneID, "annotation pipeline", "microagi", 100, time.Hour)}
+		lanes := []index.LaneInfo{laneInfo(laneID, "import pipeline", "storefront", 100, time.Hour)}
 		m := NewModel(forestOf(lanes, nil), Options{
 			ASCII: true, Source: "claudecode",
 			Search:    func(string, string) ([]index.Hit, error) { return hits, nil },
 			LoadSpine: func(string) ([]graph.Segment, error) { return demoSegments(), nil },
 			LoadMemories: func() ([]memory.Set, error) {
 				return []memory.Set{{
-					Location: memory.Location{Project: "microagi", Dir: "/m"},
+					Location: memory.Location{Project: "storefront", Dir: "/m"},
 					Memories: []memory.Memory{
 						{Name: "pod-scheduling", Kind: "project", Modified: now, Listed: true},
 						{Name: "something-else", Kind: "project", Modified: now, Listed: true},
@@ -261,7 +261,7 @@ func TestSearchNamesTheKindAndOpensItsScreen(t *testing.T) {
 				}
 				return WorkLevel{Root: "/j", Dir: "/j/tmp", Entries: []artifacts.Entry{
 					{Name: "other.json", Path: "/j/tmp/other.json", Bytes: 10, Files: 1},
-					{Name: "pods.json", Path: "/j/tmp/pods.json", Bytes: 90, Files: 1},
+					{Name: "nodes.json", Path: "/j/tmp/nodes.json", Bytes: 90, Files: 1},
 				}}, nil
 			},
 		})
@@ -275,7 +275,7 @@ func TestSearchNamesTheKindAndOpensItsScreen(t *testing.T) {
 	}
 
 	out := plain(build().renderSearch())
-	for _, want := range []string{"TYPE", "convo", "memory", "work", "tmp/pods.json", "pod-scheduling", "t12"} {
+	for _, want := range []string{"TYPE", "convo", "memory", "work", "tmp/nodes.json", "pod-scheduling", "t12"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("search screen is missing %q:\n%s", want, out)
 		}
@@ -310,7 +310,7 @@ func TestSearchNamesTheKindAndOpensItsScreen(t *testing.T) {
 	if got := m.workWhere(); got != "tmp" {
 		t.Errorf("opened at %q, want tmp", got)
 	}
-	if entry, ok := m.workCursor(); !ok || entry.Name != "pods.json" {
-		t.Errorf("cursor is on %+v, want pods.json", entry)
+	if entry, ok := m.workCursor(); !ok || entry.Name != "nodes.json" {
+		t.Errorf("cursor is on %+v, want nodes.json", entry)
 	}
 }

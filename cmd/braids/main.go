@@ -639,7 +639,7 @@ func cmdSearch(args []string, out *printer) error {
 	}
 	query := strings.Join(words, " ")
 	if strings.TrimSpace(query) == "" {
-		return errors.New("search needs a query (try: braids search gcsfuse)")
+		return errors.New("search needs a query (try: braids search blobstore)")
 	}
 	parsed, err := parseKinds(*kinds)
 	if err != nil {
@@ -1829,7 +1829,7 @@ func memorySets(src store.Source, project string) ([]memory.Set, error) {
 	for _, location := range locations {
 		// Match the name braids shows, or anything in the directory it came
 		// from. The shown name is the last dash-separated part of a slug that
-		// encodes a path with dashes, so a directory called GPU-Cluster shows
+		// encodes a path with dashes, so a directory called cluster-lab shows
 		// as "Cluster" — consistent with the map, and surprising to type.
 		if project != "" && !strings.EqualFold(location.Project, project) &&
 			!strings.Contains(strings.ToLower(location.Dir), strings.ToLower(project)) {

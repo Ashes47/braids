@@ -39,6 +39,18 @@ type Part struct {
 	// Text is the searchable rendering of the block. For PartToolUse it is the
 	// serialised tool input.
 	Text string
+	// IsError marks a tool call that came back a failure.
+	IsError bool
+}
+
+// Failed reports whether any tool call in a turn came back a failure.
+func (m Message) Failed() bool {
+	for _, p := range m.Parts {
+		if p.IsError {
+			return true
+		}
+	}
+	return false
 }
 
 // Compaction is what a context compaction discarded.

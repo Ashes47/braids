@@ -562,7 +562,7 @@ func TestSpineGlyphKeyNamesTheMarks(t *testing.T) {
 	m = m.openSpine()
 	m.width = 132
 	out := plain(m.renderSpine())
-	for _, want := range []string{"your turn", "claude's turn", "turns collapsed", "agent it spawned", "next / prev branch/agent"} {
+	for _, want := range []string{"your turn", "claude's turn", "turns collapsed", "agent it spawned", "a tool call failed"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("spine legend missing %q:\n%s", want, out)
 		}
@@ -869,5 +869,31 @@ func TestMergeIsRefusedWhenTheBranchAlreadyHasEverything(t *testing.T) {
 		if strings.HasPrefix(d, "merge:") {
 			t.Error("nothing should have been merged")
 		}
+	}
+}
+
+func TestFailedTurnsAreDrawnAndStoppedAt(t *testing.T) {
+	segs := []graph.Segment{
+		{Kind: graph.SegTurn, Seq: 1, Role: model.RoleUser, Preview: "run the tests"},
+		{Kind: graph.SegRun, Seq: 2, Count: 8, Failures: 2,
+			Tally: []graph.ToolCount{{Tool: "Bash", Count: 8}}},
+		{Kind: graph.SegTurn, Seq: 10, Role: model.RoleUser, Preview: "Exit code 1", Failed: true},
+	}
+	m := spineModel(t, segs, nil)
+	m = m.openSpine()
+
+	out := plain(m.renderSpine())
+	if !strings.Contains(out, "failed") || !strings.Contains(out, "Exit code 1") {
+		t.Errorf("a failure should be drawn with what came back:\n%s", out)
+	}
+	// A run says how many it swallowed, so a collapsed stretch is not silent
+	// about having gone wrong.
+	if !strings.Contains(out, "8 turns · 2 failed") {
+		t.Errorf("the run should count its failures:\n%s", out)
+	}
+	// And n stops at it.
+	m, _ = m.spineKey("n")
+	if got := m.spine.current().seg.Seq; got != 10 {
+		t.Errorf("n stopped at t%d, want the failure at t10", got)
 	}
 }

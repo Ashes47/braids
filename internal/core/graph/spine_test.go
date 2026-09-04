@@ -111,3 +111,56 @@ func TestSpineHandlesEmptyAndBrokenInput(t *testing.T) {
 		t.Errorf("cyclic input produced %d segments, want 1", len(segs))
 	}
 }
+
+func failed(seq int, id, parent, preview string) index.MessageRow {
+	m := msg(seq, id, parent, model.RoleUser, preview, "")
+	m.Failed = true
+	return m
+}
+
+func TestSpineStopsAtAFailedCall(t *testing.T) {
+	// The failure sits among turns that would otherwise collapse. Where
+	// something went wrong is the question a long conversation is reopened to
+	// answer, so it must not disappear into a run.
+	segs := Spine([]index.MessageRow{
+		msg(1, "u1", "", model.RoleUser, "do the thing", ""),
+		msg(2, "a1", "u1", model.RoleAssistant, "", "Bash"),
+		failed(3, "r1", "a1", "Exit code 1"),
+		msg(4, "a2", "r1", model.RoleAssistant, "", "Bash"),
+		msg(5, "a3", "a2", model.RoleAssistant, "recovered", ""),
+	})
+
+	var failure *Segment
+	for i := range segs {
+		if segs[i].Failed {
+			failure = &segs[i]
+		}
+	}
+	if failure == nil {
+		t.Fatalf("no failure surfaced in %v", kinds(segs))
+	}
+	if failure.Seq != 3 || failure.Preview != "Exit code 1" {
+		t.Errorf("failure = %+v, want t3 carrying what came back", *failure)
+	}
+}
+
+func TestRunsCountTheFailuresTheySwallow(t *testing.T) {
+	// Two failures inside a stretch that is otherwise unremarkable, with no
+	// human turn to break it up: the run has to say they happened.
+	rows := []index.MessageRow{msg(1, "u1", "", model.RoleUser, "go", "")}
+	prev := "u1"
+	for i := 2; i <= 7; i++ {
+		id := string(rune('a' + i))
+		m := msg(i, id, prev, model.RoleAssistant, "", "Bash")
+		rows = append(rows, m)
+		prev = id
+	}
+	segs := Spine(rows)
+	run := segs[len(segs)-1]
+	if run.Kind != SegRun {
+		t.Fatalf("last segment = %v, want a run", run.Kind)
+	}
+	if run.Failures != 0 {
+		t.Errorf("Failures = %d with nothing failing, want 0", run.Failures)
+	}
+}

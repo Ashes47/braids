@@ -25,11 +25,14 @@ type Segment struct {
 	Role    model.Role
 	Preview string
 	Tools   []string
+	// Failed marks a turn whose tool call came back an error.
+	Failed bool
 
 	// Count and Tally describe a SegRun: how many turns it swallowed and which
-	// tools ran inside it.
-	Count int
-	Tally []ToolCount
+	// tools ran inside it. Failures counts the calls that came back errors.
+	Count    int
+	Tally    []ToolCount
+	Failures int
 
 	// Alternates lists the branches that leave the active path at this turn,
 	// largest first. A conversation with none is a straight line.
@@ -76,7 +79,7 @@ func Spine(msgs []index.MessageRow) []Segment {
 			m := run[0]
 			out = append(out, Segment{
 				Kind: SegTurn, Seq: m.Seq, Role: m.Role,
-				Preview: m.Preview, Tools: splitTools(m.Tools),
+				Preview: m.Preview, Tools: splitTools(m.Tools), Failed: m.Failed,
 			})
 		default:
 			out = append(out, runSegment(run))
@@ -96,6 +99,7 @@ func Spine(msgs []index.MessageRow) []Segment {
 			Role:       m.Role,
 			Preview:    m.Preview,
 			Tools:      splitTools(m.Tools),
+			Failed:     m.Failed,
 			Alternates: alternates,
 		})
 	}
@@ -105,11 +109,18 @@ func Spine(msgs []index.MessageRow) []Segment {
 
 // landmark reports whether a turn is one a reader navigates by.
 //
-// Only a human turn qualifies, and only one that actually said something: a
-// tool result is recorded with the user role but is the harness returning
-// output, not a person speaking, so treating it as a landmark would leave a
-// long conversation almost entirely uncollapsed.
+// A human turn qualifies, and only one that actually said something: a tool
+// result is recorded with the user role but is the harness returning output,
+// not a person speaking, so treating it as a landmark would leave a long
+// conversation almost entirely uncollapsed.
+//
+// A failed call qualifies too. Where something went wrong is the question a
+// long conversation is most often reopened to answer, and a failure buried in
+// a collapsed run cannot be found at all.
 func landmark(m index.MessageRow) bool {
+	if m.Failed {
+		return true
+	}
 	return m.Role == model.RoleUser && m.Preview != ""
 }
 
@@ -168,7 +179,11 @@ func subtreeSizes(msgs []index.MessageRow, children map[string][]string) map[str
 // runSegment collapses a stretch of turns into one line with a tool tally.
 func runSegment(run []index.MessageRow) Segment {
 	counts := make(map[string]int)
+	failures := 0
 	for _, m := range run {
+		if m.Failed {
+			failures++
+		}
 		for _, tool := range splitTools(m.Tools) {
 			counts[tool]++
 		}
@@ -184,10 +199,11 @@ func runSegment(run []index.MessageRow) Segment {
 		return tally[i].Tool < tally[j].Tool
 	})
 	return Segment{
-		Kind:  SegRun,
-		Seq:   run[0].Seq,
-		Count: len(run),
-		Tally: tally,
+		Kind:     SegRun,
+		Seq:      run[0].Seq,
+		Count:    len(run),
+		Tally:    tally,
+		Failures: failures,
 	}
 }
 

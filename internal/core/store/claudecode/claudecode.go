@@ -322,6 +322,7 @@ type block struct {
 	Type      string          `json:"type"`
 	ID        string          `json:"id"`
 	ToolUseID string          `json:"tool_use_id"`
+	IsError   bool            `json:"is_error"`
 	Text      string          `json:"text"`
 	Thinking  string          `json:"thinking"`
 	Name      string          `json:"name"`
@@ -433,7 +434,7 @@ func (b block) toPart() (model.Part, bool) {
 		if text == "" {
 			return model.Part{}, false
 		}
-		return model.Part{Kind: model.PartToolResult, ID: b.ToolUseID, Text: text}, true
+		return model.Part{Kind: model.PartToolResult, ID: b.ToolUseID, Text: text, IsError: b.IsError}, true
 	default:
 		return model.Part{}, false
 	}

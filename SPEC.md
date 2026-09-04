@@ -348,7 +348,23 @@ behind a seam are still in the file. Branching there recovers context the
 running conversation has permanently lost — one real seam here dropped 986,370
 tokens, and the largest 15.5 million.
 
-Still not drawn: error marks on failed tool calls.
+**A failed tool call is a landmark.** Where something went wrong is the question
+a long conversation is most often reopened to answer, and a failure buried in a
+collapsed run cannot be found at all — so it is drawn on its own line, carrying
+what came back:
+
+```
+│ ⚠   t24 failed  Exit code 143 Command timed out after 2m 0s                  │
+│ ⚠   t80 failed  Permission for this action was denied by the auto mode clas… │
+```
+
+There are **790 of them** across this history, 301 in one conversation. A run
+that swallows failures says so — `8 turns · 2 failed` — so a collapsed stretch
+is never silent about having gone wrong.
+
+`n` / `N` takes its label from the marks it stops at rather than naming them in
+prose: it stops at four different things now, and any word general enough to
+cover them all says nothing.
 
 ### 6.3 Search — the front door
 
@@ -755,7 +771,7 @@ needs-you — are declared as optional `Capabilities`, never assumed.
 1. ~~**Index + search.**~~ **Done.** Parse, FTS5, `braids search`.
 2. ~~**The Map.**~~ **Done.** Lanes, fork detection by shared uuid, statuses
    from mtime, k9s-style chrome.
-3. ~~**The Spine.**~~ **Done** for runs and junctions; compaction seams,
+3. ~~**The Spine.**~~ **Done**: runs, junctions, compaction seams,
    subagent lanes and error marks still to come.
 4. ~~**Branch.**~~ **Done**: file synthesis, naming, renaming, the `b` key,
    thought-versus-workspace, navigating into a branch from its parent, recorded

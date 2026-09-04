@@ -34,13 +34,14 @@ type Glyphs struct {
 	Run      string
 	Agent    string
 	Seam     string
+	Failed   string
 }
 
 func glyphsFor(ascii bool) Glyphs {
 	if ascii {
-		return Glyphs{Lane: "*", Archived: "o", Branch: "|-", Last: "`-", Pipe: "|  ", Blank: "   ", Fork: "<", Run: "~", Agent: "@", Seam: "="}
+		return Glyphs{Lane: "*", Archived: "o", Branch: "|-", Last: "`-", Pipe: "|  ", Blank: "   ", Fork: "<", Run: "~", Agent: "@", Seam: "=", Failed: "!"}
 	}
-	return Glyphs{Lane: "●", Archived: "○", Branch: "├─", Last: "└─", Pipe: "│  ", Blank: "   ", Fork: "←", Run: "⋯", Agent: "⊕", Seam: "═"}
+	return Glyphs{Lane: "●", Archived: "○", Branch: "├─", Last: "└─", Pipe: "│  ", Blank: "   ", Fork: "←", Run: "⋯", Agent: "⊕", Seam: "═", Failed: "⚠"}
 }
 
 // Theme holds every style the map draws with.

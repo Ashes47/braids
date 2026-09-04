@@ -18,7 +18,7 @@ import (
 // schemaVersion is bumped whenever the tables change. The index holds no unique
 // state — it rebuilds from the transcripts in seconds — so an old schema is
 // dropped and recreated rather than migrated.
-const schemaVersion = 8
+const schemaVersion = 9
 
 const dropAll = `
 DROP TABLE IF EXISTS parts;
@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	at        INTEGER NOT NULL,
 	preview   TEXT    NOT NULL DEFAULT '',
 	tools     TEXT    NOT NULL DEFAULT '',
+	failed    INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (lane_id, seq)
 );
 CREATE INDEX IF NOT EXISTS messages_by_msg_id ON messages(msg_id);
@@ -337,8 +338,8 @@ func replaceLane(ctx context.Context, tx *sql.Tx, src store.Source, lane model.L
 	}
 	defer insertPart.Close() //nolint:errcheck // tx-scoped
 	insertMsg, err := tx.PrepareContext(ctx,
-		`INSERT INTO messages (lane_id,seq,msg_id,parent_id,role,at,preview,tools) `+
-			`VALUES (?,?,?,?,?,?,?,?)`)
+		`INSERT INTO messages (lane_id,seq,msg_id,parent_id,role,at,preview,tools,failed) `+
+			`VALUES (?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return 0, 0, fmt.Errorf("prepare message insert: %w", err)
 	}
@@ -369,7 +370,8 @@ func replaceLane(ctx context.Context, tx *sql.Tx, src store.Source, lane model.L
 			}
 		}
 		if _, err := insertMsg.ExecContext(ctx, m.LaneID, msgs, m.ID,
-			m.ParentID, string(m.Role), m.At.Unix(), previewOf(m), toolsOf(m)); err != nil {
+			m.ParentID, string(m.Role), m.At.Unix(), previewOf(m), toolsOf(m),
+			boolToInt(m.Failed())); err != nil {
 			return fmt.Errorf("insert message: %w", err)
 		}
 		for _, p := range m.Parts {
@@ -487,6 +489,7 @@ func RowsFrom(ctx context.Context, src store.Source, lane model.Lane) ([]Message
 			At:       m.At,
 			Preview:  previewOf(m),
 			Tools:    toolsOf(m),
+			Failed:   m.Failed(),
 		})
 		return nil
 	})
@@ -595,12 +598,14 @@ type MessageRow struct {
 	At       time.Time
 	Preview  string
 	Tools    string
+	// Failed marks a turn whose tool call came back an error.
+	Failed bool
 }
 
 // LaneMessages returns one lane's turns in file order.
 func (ix *Index) LaneMessages(ctx context.Context, laneID string) ([]MessageRow, error) {
 	rows, err := ix.db.QueryContext(ctx,
-		`SELECT seq, msg_id, parent_id, role, at, preview, tools
+		`SELECT seq, msg_id, parent_id, role, at, preview, tools, failed
 		 FROM messages WHERE lane_id = ? ORDER BY seq`, laneID)
 	if err != nil {
 		return nil, fmt.Errorf("read lane messages: %w", err)
@@ -612,11 +617,13 @@ func (ix *Index) LaneMessages(ctx context.Context, laneID string) ([]MessageRow,
 		var r MessageRow
 		var role string
 		var at int64
-		if err := rows.Scan(&r.Seq, &r.ID, &r.ParentID, &role, &at, &r.Preview, &r.Tools); err != nil {
+		var failed int
+		if err := rows.Scan(&r.Seq, &r.ID, &r.ParentID, &role, &at, &r.Preview, &r.Tools, &failed); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		r.Role = model.Role(role)
 		r.At = time.Unix(at, 0)
+		r.Failed = failed == 1
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -636,11 +643,26 @@ func previewOf(m model.Message) string {
 	if strings.TrimSpace(text) == "" {
 		text = m.Text(model.PartThinking)
 	}
+	// A failed call says more through what came back than through anything the
+	// turn said, which is usually nothing.
+	if strings.TrimSpace(text) == "" && m.Failed() {
+		text = failureOf(m)
+	}
 	text = strings.Join(strings.Fields(text), " ")
 	if len(text) > previewMax {
 		text = text[:previewMax]
 	}
 	return text
+}
+
+// failureOf is what a failed tool call came back with.
+func failureOf(m model.Message) string {
+	for _, p := range m.Parts {
+		if p.IsError {
+			return p.Text
+		}
+	}
+	return ""
 }
 
 // toolsOf lists the tools a turn invoked, in order, without repeats.

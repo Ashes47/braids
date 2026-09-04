@@ -182,7 +182,7 @@ func (m Model) headerContent() ([]fact, []hint, []glyph) {
 	case m.mode == binMode && m.bin != nil:
 		return m.binFacts(), binHints(), nil
 	case m.mode == spineMode && m.spine != nil:
-		return m.spineFacts(), spineHints(), m.spineGlyphs()
+		return m.spineFacts(), m.spineHints(), m.spineGlyphs()
 	default:
 		return m.facts(), hints(), m.mapGlyphs()
 	}

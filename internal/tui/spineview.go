@@ -442,7 +442,7 @@ func (m Model) spineTitle() string {
 
 // spineInfo swaps the map's facts for the ones that matter inside a lane.
 func (m Model) spineInfo() string {
-	return m.factsBlock(m.spineFacts(), spineHints(), m.spineGlyphs())
+	return m.factsBlock(m.spineFacts(), m.spineHints(), m.spineGlyphs())
 }
 
 func (m Model) spineFacts() []fact {
@@ -469,13 +469,19 @@ func (m Model) spineFacts() []fact {
 }
 
 // spineHints are every binding the spine has.
-func spineHints() []hint {
+//
+// n/N takes its label from the marks it stops at rather than naming them in
+// prose: it now stops at four different things, and any word general enough to
+// cover them all says nothing.
+func (m Model) spineHints() []hint {
+	g := m.theme.Glyphs
+	marks := strings.Join([]string{g.Failed, g.Agent, g.Fork, g.Seam}, " ")
 	return []hint{
 		{"j/k", "down / up"}, {"↵", "open branch/agent"},
 		{"b", "branch here"}, {"/", "search"},
 		{"m", "merge branch back"}, {"esc", "back"},
 		{"q", "quit"},
-		{"n / N", "next / prev branch/agent"}, {"p", "promote agent"},
+		{"n / N", "next / prev " + marks}, {"p", "promote agent"},
 		{"f", "filter turns"}, {"a", "toggle archive"},
 		{"y", "copy resume"}, {"o", "open terminal"},
 	}
@@ -490,6 +496,7 @@ func (m Model) spineGlyphs() []glyph {
 		{g.Lane, m.theme.Faint, "claude's turn"},
 		{g.Run, m.theme.Faint, "turns collapsed"},
 		{g.Agent, m.theme.Accent, "agent it spawned"},
+		{g.Failed, m.theme.Column, "a tool call failed"},
 		{g.Seam + g.Seam, m.theme.Accent, "context compacted"},
 	}
 }
@@ -654,6 +661,9 @@ func (m Model) segmentParts(seg graph.Segment) (plain, styled string) {
 		who, bodyStyle = "claude", m.theme.Dim
 		if seg.Role == model.RoleUser {
 			who, markStyle, bodyStyle = "you", m.theme.Alive, m.theme.Value
+		}
+		if seg.Failed {
+			mark, markStyle, who = g.Failed, m.theme.Column, "failed"
 		}
 		body = seg.Preview
 		if strings.TrimSpace(body) == "" && len(seg.Tools) > 0 {
@@ -1000,12 +1010,16 @@ func nextMarker(rows []spineRow, from, step int) int {
 }
 
 func marker(r spineRow) bool {
-	return r.fork != nil || r.agent != nil || r.seam != nil || len(r.seg.Alternates) > 0
+	return r.fork != nil || r.agent != nil || r.seam != nil ||
+		r.seg.Failed || len(r.seg.Alternates) > 0
 }
 
 // summarise describes a collapsed run: how many turns, and what ran inside it.
 func summarise(seg graph.Segment) string {
 	parts := []string{fmt.Sprintf("%d turns", seg.Count)}
+	if seg.Failures > 0 {
+		parts = append(parts, fmt.Sprintf("%d failed", seg.Failures))
+	}
 	for _, t := range seg.Tally {
 		if len(parts) == 4 {
 			break

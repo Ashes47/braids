@@ -131,6 +131,10 @@ func (s *Source) Messages(ctx context.Context, lane model.Lane, visit store.Visi
 	// the closest *conversational* ancestor, which is what ParentID must be for
 	// the chain to reconstruct.
 	nearest := make(map[string]string)
+	// A compaction is announced by a system record just before the summary that
+	// replaces what it dropped, so it is carried forward one record rather than
+	// costing a second pass over the transcript.
+	var pending *model.Compaction
 
 	sc := newScanner(f)
 	for sc.Scan() {
@@ -140,6 +144,9 @@ func (s *Source) Messages(ctx context.Context, lane model.Lane, visit store.Visi
 		var r record
 		if err := json.Unmarshal(sc.Bytes(), &r); err != nil {
 			continue // a malformed line must not abort an otherwise good lane
+		}
+		if c := r.compaction(); c != nil {
+			pending = c
 		}
 		if r.UUID == "" {
 			continue
@@ -152,6 +159,7 @@ func (s *Source) Messages(ctx context.Context, lane model.Lane, visit store.Visi
 		}
 		nearest[r.UUID] = r.UUID
 		msg.ParentID = ancestor
+		msg.Compaction, pending = pending, nil
 		if err := visit(msg); err != nil {
 			return err
 		}
@@ -248,14 +256,24 @@ type titleRecord struct {
 	AgentName   string `json:"agentName"`
 }
 
+type compactMetadata struct {
+	Trigger                 string `json:"trigger"`
+	PreTokens               int    `json:"preTokens"`
+	PostTokens              int    `json:"postTokens"`
+	CumulativeDroppedTokens int    `json:"cumulativeDroppedTokens"`
+	DurationMs              int    `json:"durationMs"`
+}
+
 type record struct {
-	Type              string      `json:"type"`
-	UUID              string      `json:"uuid"`
-	ParentUUID        *string     `json:"parentUuid"`
-	LogicalParentUUID *string     `json:"logicalParentUuid"`
-	Timestamp         string      `json:"timestamp"`
-	IsMeta            bool        `json:"isMeta"`
-	Message           *rawMessage `json:"message"`
+	Type              string           `json:"type"`
+	Subtype           string           `json:"subtype"`
+	CompactMetadata   *compactMetadata `json:"compactMetadata"`
+	UUID              string           `json:"uuid"`
+	ParentUUID        *string          `json:"parentUuid"`
+	LogicalParentUUID *string          `json:"logicalParentUuid"`
+	Timestamp         string           `json:"timestamp"`
+	IsMeta            bool             `json:"isMeta"`
+	Message           *rawMessage      `json:"message"`
 }
 
 type rawMessage struct {
@@ -301,6 +319,22 @@ func (r record) toMessage(laneID string) (model.Message, bool) {
 		At:     at,
 		Parts:  parts,
 	}, true
+}
+
+// compaction reads a compact boundary, which is a system record rather than a
+// turn and so never becomes a message of its own.
+func (r record) compaction() *model.Compaction {
+	if r.Subtype != "compact_boundary" || r.CompactMetadata == nil {
+		return nil
+	}
+	m := r.CompactMetadata
+	return &model.Compaction{
+		Trigger:    m.Trigger,
+		PreTokens:  m.PreTokens,
+		PostTokens: m.PostTokens,
+		Dropped:    m.CumulativeDroppedTokens,
+		Duration:   time.Duration(m.DurationMs) * time.Millisecond,
+	}
 }
 
 // parentID is the raw predecessor of a record, stitched over compaction: a

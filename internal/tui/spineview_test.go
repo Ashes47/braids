@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -564,6 +565,112 @@ func TestSpineGlyphKeyNamesTheMarks(t *testing.T) {
 	for _, want := range []string{"your turn", "claude's turn", "turns collapsed", "agent it spawned", "next / prev branch/agent"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("spine legend missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func seamModel(t *testing.T) (Model, *[]string) {
+	t.Helper()
+	branched := &[]string{}
+	lanes := []index.LaneInfo{laneInfo("lane1234abcd", "long running", "app", 400, time.Hour)}
+	m := NewModel(forestOf(lanes, nil), Options{
+		ASCII: true,
+		LoadSpine: func(string) ([]graph.Segment, error) {
+			return []graph.Segment{
+				{Kind: graph.SegTurn, Seq: 1, Role: model.RoleUser, Preview: "the early work"},
+				{Kind: graph.SegRun, Seq: 2, Count: 40},
+				{Kind: graph.SegTurn, Seq: 42, Role: model.RoleUser, Preview: "the last turn before"},
+				{Kind: graph.SegTurn, Seq: 44, Role: model.RoleUser, Preview: "continued from a summary"},
+			}, nil
+		},
+		LoadCompactions: func(string) ([]index.CompactionRow, error) {
+			return []index.CompactionRow{{
+				Seq: 43,
+				Compaction: model.Compaction{
+					Trigger: "auto", PreTokens: 1000939, PostTokens: 14569,
+					Dropped: 986370, Duration: 165 * time.Second,
+				},
+			}}, nil
+		},
+		Branch: func(lane string, turn int, name string) (string, error) {
+			*branched = append(*branched, fmt.Sprintf("%s@t%d:%s", lane, turn, name))
+			return "newlane0001", nil
+		},
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 110, 20
+	return m, branched
+}
+
+func TestSpineDrawsACompactionSeam(t *testing.T) {
+	m, _ := seamModel(t)
+	m = m.openSpine()
+
+	out := plain(m.renderSpine())
+	for _, want := range []string{
+		"compacted", "auto", "1,000,939", "14,569", "986,370 dropped", "2m45s",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("seam missing %q:\n%s", want, out)
+		}
+	}
+	// It belongs between the turn before it and the summary that follows.
+	seamAt := -1
+	for i, r := range m.spine.rows {
+		if r.seam != nil {
+			seamAt = i
+		}
+	}
+	if seamAt < 0 {
+		t.Fatal("no seam row was built")
+	}
+	if m.spine.rows[seamAt-1].seg.Seq != 42 || m.spine.rows[seamAt+1].seg.Seq != 44 {
+		t.Error("the seam is not sitting where the compaction happened")
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if w := len([]rune(line)); w > m.width {
+			t.Errorf("seam line ran to %d, past a width of %d: %q", w, m.width, line)
+		}
+	}
+}
+
+func TestBranchingOnASeamCutsFromTheTurnBeforeIt(t *testing.T) {
+	m, branched := seamModel(t)
+	m = m.openSpine()
+
+	// Land on the seam and branch: the useful cut is the last turn the
+	// compaction dropped context after, not the summary that replaced it.
+	m, _ = m.spineKey("n")
+	if m.spine.current().seam == nil {
+		t.Fatal("n should stop at the seam")
+	}
+	m, _ = m.spineKey("b")
+	if !m.spine.naming.active {
+		t.Fatal("b on a seam should offer a branch")
+	}
+	if got := m.spine.naming.text; got != "before-compaction-t42" {
+		t.Errorf("suggested name = %q", got)
+	}
+	if _, _ = m.spineKey("enter"); len(*branched) != 1 || !strings.Contains((*branched)[0], "@t42:") {
+		t.Fatalf("branched = %v, want a cut at t42", *branched)
+	}
+}
+
+func TestSeamsCountAsSomethingToStopAt(t *testing.T) {
+	rows := []spineRow{
+		{seg: graph.Segment{Kind: graph.SegTurn, Seq: 1}},
+		{seam: &index.CompactionRow{Seq: 2}},
+		{seg: graph.Segment{Kind: graph.SegTurn, Seq: 3}},
+	}
+	if got := nextMarker(rows, 0, 1); got != 1 {
+		t.Errorf("next marker = %d, want the seam at 1", got)
+	}
+}
+
+func TestCommas(t *testing.T) {
+	for in, want := range map[int]string{0: "0", 42: "42", 999: "999", 1000: "1,000", 986370: "986,370", 15566692: "15,566,692"} {
+		if got := commas(in); got != want {
+			t.Errorf("commas(%d) = %q, want %q", in, got, want)
 		}
 	}
 }

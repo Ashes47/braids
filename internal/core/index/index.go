@@ -18,13 +18,14 @@ import (
 // schemaVersion is bumped whenever the tables change. The index holds no unique
 // state — it rebuilds from the transcripts in seconds — so an old schema is
 // dropped and recreated rather than migrated.
-const schemaVersion = 6
+const schemaVersion = 7
 
 const dropAll = `
 DROP TABLE IF EXISTS parts;
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS lanes;
-DROP TABLE IF EXISTS subagents;`
+DROP TABLE IF EXISTS subagents;
+DROP TABLE IF EXISTS compactions;`
 
 const schema = `
 CREATE TABLE IF NOT EXISTS lanes (
@@ -54,6 +55,16 @@ CREATE TABLE IF NOT EXISTS messages (
 	PRIMARY KEY (lane_id, seq)
 );
 CREATE INDEX IF NOT EXISTS messages_by_msg_id ON messages(msg_id);
+CREATE TABLE IF NOT EXISTS compactions (
+	lane_id     TEXT    NOT NULL,
+	seq         INTEGER NOT NULL,
+	trigger     TEXT    NOT NULL DEFAULT '',
+	pre_tokens  INTEGER NOT NULL DEFAULT 0,
+	post_tokens INTEGER NOT NULL DEFAULT 0,
+	dropped     INTEGER NOT NULL DEFAULT 0,
+	duration_ms INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (lane_id, seq)
+);
 CREATE TABLE IF NOT EXISTS subagents (
 	lane_id     TEXT    NOT NULL,
 	agent_id    TEXT    NOT NULL,
@@ -199,7 +210,7 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 
 	for _, stmt := range []string{
 		`DELETE FROM parts`, `DELETE FROM messages`,
-		`DELETE FROM subagents`, `DELETE FROM lanes`,
+		`DELETE FROM subagents`, `DELETE FROM compactions`, `DELETE FROM lanes`,
 	} {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return Stats{}, fmt.Errorf("clear index: %w", err)
@@ -300,6 +311,7 @@ func deleteLane(ctx context.Context, tx *sql.Tx, laneID string) error {
 		`DELETE FROM parts WHERE lane_id = ?`,
 		`DELETE FROM messages WHERE lane_id = ?`,
 		`DELETE FROM subagents WHERE lane_id = ?`,
+		`DELETE FROM compactions WHERE lane_id = ?`,
 		`DELETE FROM lanes WHERE id = ?`,
 	} {
 		if _, err := tx.ExecContext(ctx, stmt, laneID); err != nil {
@@ -329,6 +341,13 @@ func replaceLane(ctx context.Context, tx *sql.Tx, src store.Source, lane model.L
 		return 0, 0, fmt.Errorf("prepare message insert: %w", err)
 	}
 	defer insertMsg.Close() //nolint:errcheck // tx-scoped
+	insertCompaction, err := tx.PrepareContext(ctx,
+		`INSERT INTO compactions (lane_id,seq,trigger,pre_tokens,post_tokens,dropped,duration_ms) `+
+			`VALUES (?,?,?,?,?,?,?)`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("prepare compaction insert: %w", err)
+	}
+	defer insertCompaction.Close() //nolint:errcheck // tx-scoped
 
 	// Subagents name the tool call they answer, so the turn each one attaches
 	// to is learned while streaming rather than by a second pass.
@@ -339,6 +358,12 @@ func replaceLane(ctx context.Context, tx *sql.Tx, src store.Source, lane model.L
 		for _, p := range m.Parts {
 			if p.Kind == model.PartToolUse && p.ID != "" {
 				spawnedAt[p.ID] = msgs
+			}
+		}
+		if c := m.Compaction; c != nil {
+			if _, err := insertCompaction.ExecContext(ctx, lane.ID, msgs, c.Trigger,
+				c.PreTokens, c.PostTokens, c.Dropped, c.Duration.Milliseconds()); err != nil {
+				return fmt.Errorf("insert compaction: %w", err)
 			}
 		}
 		if _, err := insertMsg.ExecContext(ctx, m.LaneID, msgs, m.ID,
@@ -405,6 +430,38 @@ func readSubagents(ctx context.Context, sides store.Sidechains, lane model.Lane)
 		return nil, false
 	}
 	return agents, true
+}
+
+// CompactionRow is a compaction together with the turn it happened at.
+type CompactionRow struct {
+	model.Compaction
+	Seq int
+}
+
+// LaneCompactions returns where a conversation was compacted, in turn order.
+func (ix *Index) LaneCompactions(ctx context.Context, laneID string) ([]CompactionRow, error) {
+	rows, err := ix.db.QueryContext(ctx,
+		`SELECT seq,trigger,pre_tokens,post_tokens,dropped,duration_ms
+		 FROM compactions WHERE lane_id = ? ORDER BY seq`, laneID)
+	if err != nil {
+		return nil, fmt.Errorf("read compactions: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only
+
+	var out []CompactionRow
+	for rows.Next() {
+		var r CompactionRow
+		var ms int64
+		if err := rows.Scan(&r.Seq, &r.Trigger, &r.PreTokens, &r.PostTokens, &r.Dropped, &ms); err != nil {
+			return nil, fmt.Errorf("scan compaction: %w", err)
+		}
+		r.Duration = time.Duration(ms) * time.Millisecond
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate compactions: %w", err)
+	}
+	return out, nil
 }
 
 // SubagentRow is a subagent together with the turn it hangs from.

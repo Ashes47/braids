@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -21,6 +22,7 @@ type spineRow struct {
 	seg   graph.Segment
 	fork  *graph.Node
 	agent *index.SubagentRow
+	seam  *index.CompactionRow
 }
 
 // spineState is one conversation opened for reading.
@@ -29,6 +31,7 @@ type spineState struct {
 	node    *graph.Node
 	segs    []graph.Segment
 	agents  []index.SubagentRow
+	seams   []index.CompactionRow
 	rows    []spineRow
 	visible []spineRow
 	filter  filterInput
@@ -53,8 +56,22 @@ func (s *spineState) build() {
 	agents := append([]index.SubagentRow(nil), s.agents...)
 	sort.SliceStable(agents, func(i, j int) bool { return agents[i].ParentSeq < agents[j].ParentSeq })
 
+	seams := append([]index.CompactionRow(nil), s.seams...)
+	sort.SliceStable(seams, func(i, j int) bool { return seams[i].Seq < seams[j].Seq })
+
 	s.rows = nil
-	fork, agent := 0, 0
+	fork, agent, seam := 0, 0, 0
+	// A seam sits between two turns, so it is emitted before the next one
+	// rather than after the last: a collapsed run can swallow the turn it
+	// nominally follows, and the hole belongs where the conversation resumed.
+	emitSeamsBefore := func(seq int) {
+		for seam < len(seams) && seams[seam].Seq < seq {
+			c := seams[seam]
+			s.rows = append(s.rows, spineRow{seam: &c})
+			seam++
+		}
+	}
+	// A fork or an agent hangs from a turn, so both follow it.
 	emitUpTo := func(seq int) {
 		for agent < len(agents) && agents[agent].ParentSeq <= seq {
 			a := agents[agent]
@@ -67,10 +84,13 @@ func (s *spineState) build() {
 		}
 	}
 	for _, seg := range s.segs {
+		emitSeamsBefore(seg.Seq)
 		s.rows = append(s.rows, spineRow{seg: seg})
 		emitUpTo(seg.Seq)
 	}
-	emitUpTo(int(^uint(0) >> 1))
+	const endOfLane = int(^uint(0) >> 1)
+	emitSeamsBefore(endOfLane)
+	emitUpTo(endOfLane)
 	s.apply()
 }
 
@@ -135,6 +155,9 @@ func (s *spineState) restore(key string) {
 }
 
 func rowKey(r spineRow) string {
+	if r.seam != nil {
+		return fmt.Sprintf("seam:%d", r.seam.Seq)
+	}
 	if r.agent != nil {
 		return "agent:" + r.agent.ID
 	}
@@ -145,6 +168,9 @@ func rowKey(r spineRow) string {
 }
 
 func (r spineRow) haystack() string {
+	if r.seam != nil {
+		return "compacted " + r.seam.Trigger
+	}
 	if r.agent != nil {
 		return r.agent.Type + " " + r.agent.Task + " " + r.agent.ID
 	}
@@ -175,6 +201,11 @@ func (m Model) openNode(n *graph.Node, push bool) Model {
 	if m.loadAgents != nil {
 		if agents, agentErr := m.loadAgents(n.Lane.ID); agentErr == nil {
 			next.agents = agents
+		}
+	}
+	if m.loadSeams != nil {
+		if seams, seamErr := m.loadSeams(n.Lane.ID); seamErr == nil {
+			next.seams = seams
 		}
 	}
 	next.build()
@@ -435,6 +466,7 @@ func (m Model) spineGlyphs() []glyph {
 		{g.Lane, m.theme.Faint, "claude's turn"},
 		{g.Run, m.theme.Faint, "turns collapsed"},
 		{g.Agent, m.theme.Accent, "agent it spawned"},
+		{g.Seam + g.Seam, m.theme.Accent, "context compacted"},
 	}
 }
 
@@ -475,6 +507,8 @@ const (
 func (m Model) renderRowLine(row spineRow, selected bool) string {
 	var plain, styled string
 	switch {
+	case row.seam != nil:
+		plain, styled = m.seamParts(row.seam)
 	case row.agent != nil:
 		plain, styled = m.agentParts(row.agent)
 	case row.fork != nil:
@@ -486,6 +520,42 @@ func (m Model) renderRowLine(row spineRow, selected bool) string {
 		return m.theme.Selected.Width(m.contentWidth()).Render(plain)
 	}
 	return styled
+}
+
+// seamParts draws a compaction: a hole in the conversation where turns used to
+// be sent. The transcript still holds every one of them, so the turn above the
+// seam is the most valuable place in the lane to branch from — b on the seam
+// does exactly that.
+func (m Model) seamParts(c *index.CompactionRow) (plain, styled string) {
+	g := m.theme.Glyphs
+	label := fmt.Sprintf(" compacted · %s · %s → %s tokens · %s dropped · %s ",
+		c.Trigger, commas(c.PreTokens), commas(c.PostTokens), commas(c.Dropped),
+		c.Duration.Round(time.Second))
+	rule := m.contentWidth() - 2 - lipgloss.Width(label) - 2
+	if rule < 0 {
+		rule = 0
+	}
+	plain = " " + strings.Repeat(g.Seam, 2) + label + strings.Repeat(g.Seam, rule) + " "
+	styled = " " + m.theme.Faint.Render(strings.Repeat(g.Seam, 2)) +
+		m.theme.Accent.Render(label) +
+		m.theme.Faint.Render(strings.Repeat(g.Seam, rule)) + " "
+	return plain, styled
+}
+
+// commas groups a token count so its size is legible at a glance.
+func commas(n int) string {
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	var out []byte
+	for i, c := range []byte(s) {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, c)
+	}
+	return string(out)
 }
 
 // agentParts draws a conversation the lane spawned and then showed as a single
@@ -594,6 +664,18 @@ func (m Model) startBranch() Model {
 		return m
 	}
 	row := s.current()
+	if row.seam != nil {
+		// Branching here means branching from the turn before the compaction,
+		// which is what recovers the context it dropped.
+		if before, ok := s.turnBefore(row.seam.Seq); ok {
+			s.naming = filterInput{active: true, text: fmt.Sprintf("before-compaction-t%d", before.Seq)}
+			s.notice, s.failed = "", false
+			s.cursor = s.indexOfTurn(before.Seq)
+			return m
+		}
+		s.notice, s.failed = "nothing to branch from before this compaction", true
+		return m
+	}
 	if row.fork != nil {
 		s.notice, s.failed = "press enter to open that branch, or branch from a turn instead", true
 		return m
@@ -748,6 +830,30 @@ func (m Model) promoteAgent() Model {
 	return m
 }
 
+// turnBefore is the last real turn ahead of a compaction — the point a branch
+// must be cut from to keep what the compaction let go.
+func (s *spineState) turnBefore(seq int) (graph.Segment, bool) {
+	var best graph.Segment
+	found := false
+	for _, r := range s.rows {
+		if r.seam != nil || r.fork != nil || r.agent != nil || r.seg.Seq >= seq {
+			continue
+		}
+		best, found = r.seg, true
+	}
+	return best, found
+}
+
+// indexOfTurn locates a turn among the visible rows.
+func (s *spineState) indexOfTurn(seq int) int {
+	for i, r := range s.visible {
+		if r.seam == nil && r.fork == nil && r.agent == nil && r.seg.Seq == seq {
+			return i
+		}
+	}
+	return s.cursor
+}
+
 // nextMarker finds the next place the conversation did something other than
 // carry on, wrapping around: a branch kept inside the transcript, a branch that
 // left for its own file, or an agent it spawned. Three things, one key —
@@ -763,7 +869,7 @@ func nextMarker(rows []spineRow, from, step int) int {
 }
 
 func marker(r spineRow) bool {
-	return r.fork != nil || r.agent != nil || len(r.seg.Alternates) > 0
+	return r.fork != nil || r.agent != nil || r.seam != nil || len(r.seg.Alternates) > 0
 }
 
 // summarise describes a collapsed run: how many turns, and what ran inside it.

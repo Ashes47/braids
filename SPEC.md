@@ -57,6 +57,7 @@ Every design decision below rests on something measured on this machine
 | …but not fork *direction* | A fork rewrites `sessionId` throughout and records no origin; timestamps are copied too, so nothing in the file says which came first |
 | File birth time does say | Demo tree: root 23:21:00 → fork 23:21:20 → fork 23:21:39 → fork 23:21:49, all correct. APFS reports it; Linux may not |
 | `parentUuid` names bookkeeping, not turns | A message's parent is usually an `attachment`; resolving through them is what makes a chain reconstruct at all |
+| 35 compactions across this history | Parsed for free: a boundary is announced one record before the summary that replaces what it dropped, so it rides the existing pass |
 | In-file branching is the common case | One real 25,571-turn lane: **220 junctions, 228 departing branches** — none of them visible in Claude Code |
 | A tool result wears the user role | Treating every user record as a landmark left a long spine 85% uncollapsed; requiring text cut 20,506 segments to 3,015 |
 | A conversation's state is in its last turn | Assistant text ⇒ owed a reply; an assistant tool call with no result ⇒ outstanding, since the harness appends the result as a later turn |
@@ -324,7 +325,26 @@ that used it. The field is the same one the map uses, so `/` behaves identically
 on both screens, and `esc` peels one layer at a time: leave the field, clear the
 text, then leave the screen.
 
-Not yet drawn: compaction seams (§5.1), subagent lanes (§6.6), and error marks.
+**A compaction is drawn as a seam across the conversation**, naming what it let
+go:
+
+```
+│ ●    t1 you     This session is being continued from a previous conversation…│
+│ ══ compacted · auto · 1,000,939 → 14,569 tokens · 986,370 dropped · 2m45s ═══│
+│ ⋯    t2         113 turns · 36 Bash · 2 ToolSearch                           │
+```
+
+It sits before the turn the conversation resumed at, not after the last one it
+kept, because a collapsed run can swallow the turn a seam nominally follows and
+the hole belongs where the thread picks up.
+
+**`b` on a seam branches from the turn above it.** That is the point of drawing
+them: compaction changes what is *sent*, never what is *stored*, so the turns
+behind a seam are still in the file. Branching there recovers context the
+running conversation has permanently lost — one real seam here dropped 986,370
+tokens, and the largest 15.5 million.
+
+Still not drawn: error marks on failed tool calls.
 
 ### 6.3 Search — the front door
 

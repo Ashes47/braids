@@ -41,6 +41,21 @@ type Part struct {
 	Text string
 }
 
+// Compaction is what a context compaction discarded.
+//
+// It is not a turn but a hole where turns used to be: the conversation carries
+// on from a summary, and everything behind it stops being sent to the model.
+// The transcript still holds all of it, which is what makes branching from
+// before a compaction worth offering.
+type Compaction struct {
+	// Trigger is "auto" when the harness ran out of room, or "manual".
+	Trigger string
+	// PreTokens and PostTokens bracket the compaction; Dropped is what was let
+	// go across the whole conversation.
+	PreTokens, PostTokens, Dropped int
+	Duration                       time.Duration
+}
+
 // Message is one record in a Lane. ParentID is the *logical* parent: a Source
 // is responsible for stitching over any boundary its harness introduces, so
 // walking ParentID always yields the true conversation.
@@ -51,6 +66,9 @@ type Message struct {
 	Role     Role
 	At       time.Time
 	Parts    []Part
+	// Compaction is set on the summary that opens a compacted stretch, naming
+	// what the compaction let go.
+	Compaction *Compaction
 }
 
 // Text concatenates the text of every part matching kinds. With no kinds given

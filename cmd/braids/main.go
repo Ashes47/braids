@@ -208,6 +208,9 @@ func cmdMap(args []string, out *printer) error {
 		Source:    "claudecode",
 		IndexPath: dbPath,
 		LoadSpine: tui.SpineLoader(ctx, ix),
+		LoadCompactions: func(laneID string) ([]index.CompactionRow, error) {
+			return ix.LaneCompactions(ctx, laneID)
+		},
 		LoadSubagents: func(laneID string) ([]index.SubagentRow, error) {
 			return ix.LaneSubagents(ctx, laneID)
 		},

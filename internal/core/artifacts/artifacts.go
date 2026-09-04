@@ -11,7 +11,10 @@
 package artifacts
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -215,4 +218,80 @@ func Files(dir string) ([]File, error) {
 		return nil, fmt.Errorf("walk %s: %w", dir, err)
 	}
 	return files, nil
+}
+
+// PeekLimit is how much of a work product braids reads to show it.
+//
+// These files reach hundreds of megabytes — the largest on one machine is 242
+// MB of JSON — so a viewer that reads the file is a viewer that stalls the
+// program and exhausts memory. The head is enough to tell what something is,
+// which is the question being asked.
+const PeekLimit = 128 << 10
+
+// Peek is the head of a work product, and what could be told about it without
+// reading the rest.
+type Peek struct {
+	Text string
+	// Read is how many bytes the sample holds; Total is the whole file.
+	Read, Total int64
+	// Binary is whether the sample looks like data rather than text. A
+	// database or a compiled object rendered as characters is noise that
+	// scrolls for a thousand screens, so it is named instead of drawn.
+	Binary bool
+}
+
+// Truncated reports whether there is more file than braids read.
+func (p Peek) Truncated() bool { return p.Read < p.Total }
+
+// Head reads the beginning of a work product.
+func Head(path string, limit int64) (Peek, error) {
+	if limit <= 0 {
+		limit = PeekLimit
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return Peek{}, fmt.Errorf("stat %s: %w", path, err)
+	}
+	if info.IsDir() {
+		return Peek{}, fmt.Errorf("%s is a directory", filepath.Base(path))
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return Peek{}, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer file.Close() //nolint:errcheck // read-only
+
+	buf := make([]byte, min(limit, info.Size()))
+	n, err := io.ReadFull(file, buf)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return Peek{}, fmt.Errorf("read %s: %w", path, err)
+	}
+	buf = buf[:n]
+	peek := Peek{Read: int64(n), Total: info.Size(), Binary: looksBinary(buf)}
+	if !peek.Binary {
+		peek.Text = string(buf)
+	}
+	return peek, nil
+}
+
+// looksBinary reports whether a sample is data rather than text.
+//
+// A NUL byte settles it: no text format contains one, and every binary one
+// braids meets here — databases, compiled Python, images — does. Beyond that a
+// sample that is mostly unprintable is data whatever it calls itself.
+func looksBinary(sample []byte) bool {
+	if len(sample) == 0 {
+		return false
+	}
+	if bytes.IndexByte(sample, 0) >= 0 {
+		return true
+	}
+	printable := 0
+	for _, b := range sample {
+		if b >= 0x20 && b < 0x7f || b == '\t' || b == '\n' || b == '\r' {
+			printable++
+		}
+	}
+	// UTF-8 text pushes some bytes above 0x7f, so the bar is not 100%.
+	return printable*100/len(sample) < 70
 }

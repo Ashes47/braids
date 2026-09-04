@@ -55,14 +55,38 @@ func (m Model) prose(text string, width int) []string {
 
 // clipCode lays out a line of a fenced block, breaking rather than reflowing.
 func (m Model) clipCode(line string, width int) []string {
+	out := breakLine(line, width)
+	for i, part := range out {
+		out[i] = m.theme.Code.Render(part)
+	}
+	return out
+}
+
+// breakLine splits one line to fit a width without reflowing it. Data is not
+// prose: a line of JSON or a directory listing means what its columns say, and
+// rewrapping it on word boundaries would rearrange the meaning.
+func breakLine(line string, width int) []string {
+	line = strings.ReplaceAll(line, "\t", "    ")
 	if line == "" {
 		return []string{""}
 	}
+	if width < 1 {
+		width = 1
+	}
 	var out []string
-	for rest := line; rest != ""; {
-		take := min(len([]rune(rest)), width)
-		out = append(out, m.theme.Code.Render(string([]rune(rest)[:take])))
-		rest = string([]rune(rest)[take:])
+	for rest := []rune(line); len(rest) > 0; {
+		take := min(len(rest), width)
+		out = append(out, string(rest[:take]))
+		rest = rest[take:]
+	}
+	return out
+}
+
+// hardWrap lays out text that is not prose, one line at a time.
+func hardWrap(text string, width int) []string {
+	var out []string
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		out = append(out, breakLine(strings.TrimRight(line, "\r"), width)...)
 	}
 	return out
 }

@@ -262,6 +262,8 @@ func (m Model) headerContent() ([]fact, []hint, []glyph) {
 		return m.searchFacts(), searchHints(), nil
 	case m.mode == binMode && m.bin != nil:
 		return m.binFacts(), binHints(), nil
+	case m.mode == workMode && m.work != nil && m.work.reading != nil:
+		return m.readingWorkFacts(), readingWorkHints(), nil
 	case m.mode == workMode && m.work != nil:
 		return m.workFacts(), workHints(), nil
 	case m.mode == memoryMode && m.memories != nil && m.memories.reading != nil:

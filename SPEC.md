@@ -547,6 +547,27 @@ directories — tens of milliseconds against a few gigabytes — so it is too
 expensive to do on every refresh and is instead done by whatever changed them:
 deleting one file, deleting them all, or restoring any of it from the bin.
 
+`↵` on a file shows it, with two limits the data forces. **Only the head is
+read** — 128 kB — because the largest work product on this machine is 242 MB
+and a viewer that reads the file is a viewer that stalls the program and
+exhausts memory; the frame says how much of the file it holds and that the rest
+is on disk, with the amount before the path, since a path deep in a job
+directory would otherwise push it off the end of the line. **Data is named
+rather than drawn**: 3,757 of 12,819 work products here are binary, and a
+database rendered as characters is a thousand screens of noise. Detection is a
+NUL byte in the sample, which no text format contains and every binary one
+here does, backed by a printable-character ratio for the rest. `y` copies the
+path, because what you do with a file braids will not show you is open it in
+something that will.
+
+Lines are broken, never reflowed. A line of JSON or of a bucket listing means
+what its columns say, and rewrapping it on word boundaries would rearrange the
+meaning.
+
+Nothing is probed to decorate the listing. Deciding whether each of eight
+thousand files is readable would mean opening all of them, so braids opens the
+one that was asked for and reports what it found.
+
 Artifacts whose conversation is gone are found by `braids work --orphans` and
 reclaimed with `--reclaim`. Nothing will ever look at them again, and nothing
 else would ever clear them up.

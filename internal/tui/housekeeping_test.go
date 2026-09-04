@@ -609,10 +609,10 @@ func TestEveryListScreenFilters(t *testing.T) {
 
 	t.Run("work", func(t *testing.T) {
 		m, _ := workModel(t, nil)
-		m = m.workKey("enter") // into tmp: pods.json, deep
-		m = m.workKey("f")
+		m, _ = m.workKey("enter") // into tmp: pods.json, deep
+		m, _ = m.workKey("f")
 		for _, r := range "pods" {
-			m = m.workKey(string(r))
+			m, _ = m.workKey(string(r))
 		}
 		out := plain(m.renderWork())
 		if !strings.Contains(out, "pods.json") || strings.Contains(out, "deep/") {

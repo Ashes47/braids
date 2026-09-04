@@ -110,7 +110,8 @@ of its own and carry on from where it left off.
 **Work products** — a session's scratch usually dwarfs its transcript: 3.3 GB
 against 363 MB here, with nine files holding 1.3 GB of it. `w` opens it as a
 size browser — heaviest first, directories weighed by what is under them, `↵` to
-descend — so you can bin one 231 MB dump and keep the rest. The harness's own
+descend — so you can bin one 231 MB dump and keep the rest. `↵` on a file shows
+its head, `y` copies its path, and a binary is named rather than spewed. The harness's own
 record of a job is shown and refused. `braids work --orphans` finds the sets
 whose conversation is gone.
 

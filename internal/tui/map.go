@@ -528,7 +528,8 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.openBin(), nil
 	}
 	if m.mode == workMode {
-		return m.workKey(key), nil
+		next, cmd := m.workKey(key)
+		return next, cmd
 	}
 	if m.mode == memoryMode {
 		return m.memoryKey(key), nil

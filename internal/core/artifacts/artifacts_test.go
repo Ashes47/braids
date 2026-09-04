@@ -3,6 +3,7 @@ package artifacts
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -107,5 +108,85 @@ func TestJobsToleratesNoRoot(t *testing.T) {
 	jobs, err := Jobs(filepath.Join(t.TempDir(), "never-existed"))
 	if err != nil || jobs != nil {
 		t.Errorf("Jobs on a missing root = %v, %v", jobs, err)
+	}
+}
+
+// Work products reach hundreds of megabytes, so only the head is read — and a
+// database rendered as characters is a thousand screens of noise, so data is
+// named rather than returned.
+func TestHeadReadsOnlyTheHeadAndNamesData(t *testing.T) {
+	dir := t.TempDir()
+
+	big := filepath.Join(dir, "listing.txt")
+	line := strings.Repeat("a", 99) + "\n"
+	if err := os.WriteFile(big, []byte(strings.Repeat(line, 5000)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	peek, err := Head(big, 1000)
+	if err != nil {
+		t.Fatalf("Head: %v", err)
+	}
+	if peek.Read != 1000 {
+		t.Errorf("read %d bytes, want the limit", peek.Read)
+	}
+	if peek.Total != int64(len(line)*5000) {
+		t.Errorf("total = %d", peek.Total)
+	}
+	if !peek.Truncated() {
+		t.Error("a file longer than the limit is not reported as truncated")
+	}
+	if len(peek.Text) != 1000 {
+		t.Errorf("text is %d bytes, want only what was read", len(peek.Text))
+	}
+
+	// A short file comes back whole and is not called truncated.
+	small := filepath.Join(dir, "note.txt")
+	if err := os.WriteFile(small, []byte("two words\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	peek, err = Head(small, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if peek.Truncated() || peek.Text != "two words\n" {
+		t.Errorf("small file = %+v", peek)
+	}
+
+	// Data is detected and no text is handed back for it.
+	for name, body := range map[string][]byte{
+		"db.sqlite": append([]byte("SQLite format 3"), 0x00, 0x04, 0x00, 0x01),
+		"mystery":   {0xff, 0xfe, 0xfd, 0xfc, 0xfb, 0xfa, 0xf9, 0xf8},
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		peek, err := Head(path, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !peek.Binary {
+			t.Errorf("%s was not detected as data", name)
+		}
+		if peek.Text != "" {
+			t.Errorf("%s handed back text: %q", name, peek.Text)
+		}
+	}
+
+	// An empty file is text, and empty.
+	empty := filepath.Join(dir, "empty")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if peek, err := Head(empty, 1000); err != nil || peek.Binary || peek.Text != "" {
+		t.Errorf("empty file = %+v, %v", peek, err)
+	}
+
+	// A directory and a missing file are refused, not guessed at.
+	if _, err := Head(dir, 1000); err == nil {
+		t.Error("a directory was read as a file")
+	}
+	if _, err := Head(filepath.Join(dir, "nope"), 1000); err == nil {
+		t.Error("a missing file was read")
 	}
 }

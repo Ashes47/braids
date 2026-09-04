@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -15,6 +16,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/charmbracelet/x/term"
 
 	"github.com/Ashes47/braids/internal/core/graph"
 	"github.com/Ashes47/braids/internal/core/hooks"
@@ -73,7 +76,7 @@ environment:
 `
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout); err != nil {
+	if err := run(os.Args[1:], os.Stdout); err != nil && !errors.Is(err, errShown) {
 		fmt.Fprintf(os.Stderr, "braids: %v\n", err)
 		os.Exit(1)
 	}
@@ -102,28 +105,118 @@ func run(args []string, w io.Writer) error {
 	case "hooks":
 		return cmdHooks(args[1:], out)
 	case "hook":
-		return cmdHook()
+		return cmdHook(args[1:], out)
 	case "agents":
 		return cmdAgents(args[1:], out)
-	case "version":
+	case "version", "-v", "--version":
 		out.printf("braids %s (%s)\n", version, commit)
 		return out.Err()
 	case "help", "-h", "--help":
 		out.printf("%s", usage)
 		return out.Err()
 	default:
+		if guess := nearest(args[0]); guess != "" {
+			return fmt.Errorf("unknown command %q — did you mean %q?", args[0], guess)
+		}
 		return fmt.Errorf("unknown command %q (try: braids help)", args[0])
 	}
+}
+
+// known is every command name braids answers to. A test walks it against the
+// dispatch above, so a command cannot be added without being offered here.
+var known = []string{
+	"map", "index", "search", "lanes", "branch", "agents",
+	"promote", "merge", "hooks", "hook", "version", "help",
+}
+
+// nearest returns the command a mistyped name most likely meant, or an empty
+// string when nothing is close enough to be worth offering. A transposition or
+// a dropped letter is a typo worth guessing at; three edits is a different
+// word, and guessing at that wastes the reader's attention.
+func nearest(word string) string {
+	best, distance := "", 0
+	for _, name := range known {
+		if d := editDistance(word, name); best == "" || d < distance {
+			best, distance = name, d
+		}
+	}
+	if distance > 2 || distance >= len(word) {
+		return ""
+	}
+	return best
+}
+
+// editDistance is the number of single-character insertions, deletions and
+// substitutions between two words.
+func editDistance(a, b string) int {
+	previous := make([]int, len(b)+1)
+	current := make([]int, len(b)+1)
+	for j := range previous {
+		previous[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		current[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			current[j] = min(previous[j]+1, min(current[j-1]+1, previous[j-1]+cost))
+		}
+		previous, current = current, previous
+	}
+	return previous[len(b)]
+}
+
+// errShown says a command has already printed everything it had to say, so
+// main exits cleanly instead of adding an error line underneath it.
+var errShown = errors.New("nothing further to report")
+
+// newFlagSet builds a flag set that keeps quiet. Go's own output prints before
+// braids can say anything, in a voice that is not braids', under a heading
+// naming the flag set rather than the command as it was typed.
+func newFlagSet(name string) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
+	return fs
+}
+
+// parse reads a command's flags, answering a mistake with the flags that
+// command actually takes. The list is drawn from the flag set itself rather
+// than written out again in the usage text, so it cannot drift from what the
+// command accepts.
+func parse(fs *flag.FlagSet, args []string, out *printer) error {
+	err := fs.Parse(args)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, flag.ErrHelp):
+		out.printf("braids %s\n\n%s\nsee 'braids help' for every command\n", fs.Name(), flagList(fs))
+		return errShown
+	}
+	return fmt.Errorf("%v\n\nbraids %s takes:\n%s", err, fs.Name(), flagList(fs))
+}
+
+// flagList renders a flag set's own documentation, spelled the way braids
+// spells flags everywhere else. Go writes them with one dash; the usage text,
+// and every example in it, uses two.
+func flagList(fs *flag.FlagSet) string {
+	var buf bytes.Buffer
+	fs.SetOutput(&buf)
+	fs.PrintDefaults()
+	fs.SetOutput(io.Discard)
+	return strings.ReplaceAll("\n"+buf.String(), "\n  -", "\n  --")[1:]
 }
 
 // parseArgs parses flags that may appear before, after or between positional
 // arguments. Go's flag package stops at the first non-flag argument, which
 // would silently ignore "braids search foo --limit 5" — the way people
 // actually type it.
-func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
+func parseArgs(fs *flag.FlagSet, args []string, out *printer) ([]string, error) {
 	var positional []string
 	for {
-		if err := fs.Parse(args); err != nil {
+		if err := parse(fs, args, out); err != nil {
 			return nil, err
 		}
 		rest := fs.Args()
@@ -169,7 +262,7 @@ func openIndex(dbFlag string) (*index.Index, error) {
 }
 
 func cmdMap(args []string, out *printer) error {
-	fs := flag.NewFlagSet("map", flag.ContinueOnError)
+	fs := newFlagSet("map")
 	ascii := fs.Bool("ascii", os.Getenv("BRAIDS_ASCII") != "", "use narrow ASCII glyphs")
 	db := fs.String("db", "", "index location")
 	print := fs.Bool("print", false, "render one frame to stdout instead of opening the map")
@@ -177,7 +270,7 @@ func cmdMap(args []string, out *printer) error {
 	query := fs.String("query", "", "with --print, render the search screen for this query")
 	width := fs.Int("width", 92, "frame width when printing")
 	height := fs.Int("height", 24, "frame height when printing")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args, out); err != nil {
 		return err
 	}
 	dbPath, err := resolveDB(*db)
@@ -348,12 +441,12 @@ func cmdMap(args []string, out *printer) error {
 }
 
 func cmdIndex(args []string, out *printer) error {
-	fs := flag.NewFlagSet("index", flag.ContinueOnError)
+	fs := newFlagSet("index")
 	fs.SetOutput(out)
 	root := fs.String("root", "", "transcript root (default ~/.claude/projects)")
 	db := fs.String("db", "", "index location")
 	full := fs.Bool("full", false, "re-read every transcript instead of only what changed")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args, out); err != nil {
 		return err
 	}
 
@@ -385,13 +478,13 @@ func cmdIndex(args []string, out *printer) error {
 }
 
 func cmdSearch(args []string, out *printer) error {
-	fs := flag.NewFlagSet("search", flag.ContinueOnError)
+	fs := newFlagSet("search")
 	fs.SetOutput(out)
 	lane := fs.String("lane", "", "restrict to one conversation")
 	kinds := fs.String("kind", "", "comma-separated part kinds")
 	limit := fs.Int("limit", 20, "maximum hits")
 	db := fs.String("db", "", "index location")
-	words, err := parseArgs(fs, args)
+	words, err := parseArgs(fs, args, out)
 	if err != nil {
 		return err
 	}
@@ -436,13 +529,13 @@ func cmdSearch(args []string, out *printer) error {
 }
 
 func cmdBranch(args []string, out *printer) error {
-	fs := flag.NewFlagSet("branch", flag.ContinueOnError)
+	fs := newFlagSet("branch")
 	laneRef := fs.String("lane", "", "conversation to branch from (ID prefix)")
 	at := fs.Int("at", 0, "turn number to branch at")
 	name := fs.String("name", "", "name for the new conversation")
 	workspace := fs.Bool("workspace", false, "give the branch a git worktree of its own")
 	db := fs.String("db", "", "index location")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args, out); err != nil {
 		return err
 	}
 	if *laneRef == "" || *at <= 0 {
@@ -560,11 +653,11 @@ func branchKindName(workspace bool) string {
 }
 
 func cmdPromote(args []string, out *printer) error {
-	fs := flag.NewFlagSet("promote", flag.ContinueOnError)
+	fs := newFlagSet("promote")
 	laneRef := fs.String("lane", "", "conversation the subagent belongs to")
 	agentRef := fs.String("agent", "", "subagent to promote (ID prefix)")
 	db := fs.String("db", "", "index location")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args, out); err != nil {
 		return err
 	}
 	if *laneRef == "" {
@@ -634,10 +727,10 @@ func pickAgent(agents []index.SubagentRow, ref string) (index.SubagentRow, error
 }
 
 func cmdAgents(args []string, out *printer) error {
-	fs := flag.NewFlagSet("agents", flag.ContinueOnError)
+	fs := newFlagSet("agents")
 	laneRef := fs.String("lane", "", "conversation to list subagents of")
 	db := fs.String("db", "", "index location")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args, out); err != nil {
 		return err
 	}
 	if *laneRef == "" {
@@ -680,13 +773,13 @@ func cmdAgents(args []string, out *printer) error {
 }
 
 func cmdMerge(args []string, out *printer) error {
-	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
+	fs := newFlagSet("merge")
 	baseRef := fs.String("lane", "", "conversation to carry on from")
 	fromRef := fs.String("from", "", "branch whose turns are brought over")
 	name := fs.String("name", "", "name for the merged conversation")
 	dry := fs.Bool("plan", false, "report what would be carried over, and stop")
 	db := fs.String("db", "", "index location")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args, out); err != nil {
 		return err
 	}
 	if *baseRef == "" || *fromRef == "" {
@@ -772,7 +865,32 @@ func orDash(s string) string {
 // cmdHook records one hook payload. It is what the harness runs, so it must
 // never fail loudly: an error here is printed in the middle of someone's
 // session, and nothing braids observes is worth interrupting work for.
-func cmdHook() error {
+// stdinIsTerminal is a variable so the guard below can be tested without a
+// pseudo-terminal to hand.
+var stdinIsTerminal = func() bool { return term.IsTerminal(os.Stdin.Fd()) }
+
+func cmdHook(args []string, out *printer) error {
+	// hook takes no arguments; the harness passes none. Anything here is a
+	// person looking for what this is, so answer that rather than reading a
+	// payload they were never going to send.
+	if len(args) > 0 {
+		out.printf("braids hook records one hook payload, read on stdin.\n")
+		out.printf("The harness runs it — you do not.\n\n")
+		out.printf("to turn reporting on or off:  braids hooks\n")
+		return errShown
+	}
+
+	// The harness pipes a payload in. A person typing this by hand gets an
+	// explanation rather than a process that appears to have hung, waiting on
+	// a terminal that is never going to send it anything. Checked with an
+	// ioctl rather than by file mode, so a redirect from /dev/null — which is
+	// a character device too — still reads as the harness and records nothing
+	// quietly. A hook must never fail loudly: an error here would surface as a
+	// broken hook in the middle of somebody's session.
+	if stdinIsTerminal() {
+		return errors.New("hook reads a hook payload on stdin — the harness runs it, not you\n" +
+			"       to turn reporting on or off, use: braids hooks")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil //nolint:nilerr // a hook that cannot find home simply records nothing
@@ -782,11 +900,11 @@ func cmdHook() error {
 }
 
 func cmdHooks(args []string, out *printer) error {
-	fs := flag.NewFlagSet("hooks", flag.ContinueOnError)
+	fs := newFlagSet("hooks")
 	install := fs.Bool("install", false, "ask sessions to report when they block")
 	remove := fs.Bool("remove", false, "stop asking")
 	settings := fs.String("settings", "", "settings file (default ~/.claude/settings.json)")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args, out); err != nil {
 		return err
 	}
 	path := *settings
@@ -1101,10 +1219,10 @@ func findLane(ctx context.Context, ix *index.Index, ref string) (index.LaneInfo,
 }
 
 func cmdLanes(args []string, out *printer) error {
-	fs := flag.NewFlagSet("lanes", flag.ContinueOnError)
+	fs := newFlagSet("lanes")
 	fs.SetOutput(out)
 	db := fs.String("db", "", "index location")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args, out); err != nil {
 		return err
 	}
 	ix, err := openIndex(*db)

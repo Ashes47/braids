@@ -460,6 +460,23 @@ than claiming nothing is installed. Entries are edited one at a time, never by
 dropping the group they sit in, so a hook a user has placed beside braids' own
 survives.
 
+**Getting it wrong should cost one line, not a trip to the manual.** A mistyped
+command names the one that was meant, measured by edit distance and offered only
+when it is within two edits — beyond that it is a different word, and guessing at
+it wastes the reader's attention. A flag mistake answers with the flags that
+command actually takes, drawn from the flag set itself so it cannot drift from
+what the command accepts, spelled with the two dashes braids uses everywhere
+else. `braids <command> --help` prints that list on its own; `-v` and `--version`
+work as well as `version`.
+
+`braids hook` is the one command meant for the harness rather than a person. It
+reads a payload on stdin, so typed by hand it used to wait on a terminal that
+would never send it one — indistinguishable from a hang. It now checks whether
+stdin is a terminal, by ioctl rather than by file mode so a redirect from
+`/dev/null` still reads as the harness, and says who runs it. Piped, it stays
+silent whatever it is given: a hook that fails loudly breaks the session it is
+reporting on.
+
 ### 6.5 Branch — inline at the junction, never a modal
 
 ```

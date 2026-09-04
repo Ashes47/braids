@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -198,5 +200,97 @@ func TestWorktreeOKRejectsSomewhereThatIsNotARepo(t *testing.T) {
 	}
 	if err := worktreeOK(""); err == nil {
 		t.Error("a conversation with no directory cannot either")
+	}
+}
+
+// A mistyped command should name the one that was meant. Reaching for the
+// manual to find a letter you already typed correctly is a poor trade.
+func TestUnknownCommandSuggestsTheOneMeant(t *testing.T) {
+	for _, tt := range []struct{ typed, want string }{
+		{"brnach", `did you mean "branch"`},
+		{"serch", `did you mean "search"`},
+		{"hooks--install", "try: braids help"}, // too far from anything to guess
+		{"frobnicate", "try: braids help"},
+	} {
+		err := run([]string{tt.typed}, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("run(%q) = %v, want it to mention %q", tt.typed, err, tt.want)
+		}
+	}
+}
+
+// braids hook is run by the harness, which pipes a payload in. Typed by hand it
+// used to wait on a terminal that would never send one, looking like a hang.
+func TestHookRefusesATerminalInsteadOfWaitingOnIt(t *testing.T) {
+	restore := stdinIsTerminal
+	t.Cleanup(func() { stdinIsTerminal = restore })
+
+	stdinIsTerminal = func() bool { return true }
+	err := run([]string{"hook"}, io.Discard)
+	if err == nil {
+		t.Fatal("want an error explaining who runs hook")
+	}
+	for _, want := range []string{"the harness runs it", "braids hooks"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+
+	// Piped, it stays silent: a hook that fails loudly breaks the session it
+	// is reporting on.
+	stdinIsTerminal = func() bool { return false }
+	t.Setenv("HOME", t.TempDir())
+	if err := run([]string{"hook"}, io.Discard); err != nil {
+		t.Errorf("piped hook = %v, want it to record quietly", err)
+	}
+}
+
+// A flag mistake should answer with the flags the command actually takes,
+// spelled the way braids spells them everywhere else.
+func TestFlagMistakeListsTheRealFlags(t *testing.T) {
+	err := run([]string{"hooks", "--instal"}, io.Discard)
+	if err == nil {
+		t.Fatal("want an error for an undefined flag")
+	}
+	for _, want := range []string{"not defined", "--install", "--remove", "--settings"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "Usage of") {
+		t.Errorf("err = %v, want braids' own voice, not the flag package's", err)
+	}
+}
+
+// -h on a command prints that command's flags and exits cleanly.
+func TestCommandHelpPrintsItsOwnFlags(t *testing.T) {
+	var buf bytes.Buffer
+	if err := run([]string{"merge", "-h"}, &buf); err != nil && !errors.Is(err, errShown) {
+		t.Fatalf("merge -h = %v", err)
+	}
+	for _, want := range []string{"--lane", "--from", "braids help"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("merge -h = %q, want it to mention %q", buf.String(), want)
+		}
+	}
+}
+
+func TestVersionFlagsMatchTheVersionCommand(t *testing.T) {
+	want := runCmd(t, "version")
+	for _, args := range [][]string{{"-v"}, {"--version"}} {
+		if got := runCmd(t, args...); got != want {
+			t.Errorf("run(%v) = %q, want %q", args, got, want)
+		}
+	}
+}
+
+// Every command braids offers as a suggestion has to be one it answers to.
+func TestKnownCommandsAllDispatch(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, name := range known {
+		err := run([]string{name, "--help"}, io.Discard)
+		if err != nil && strings.Contains(err.Error(), "unknown command") {
+			t.Errorf("%q is offered as a suggestion but does not dispatch", name)
+		}
 	}
 }

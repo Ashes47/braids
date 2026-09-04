@@ -65,13 +65,15 @@ usage:
   braids hooks [--install|--remove]      let sessions report when they block
   braids version
 
-map keys (a selection; the screen lists them all):
-  w                open the work products a session left behind, as a size
-                   browser: heaviest first, ↵ to descend, d to bin one
-
-map keys (the screen lists them all; this one is new):
-  w                browse the work products a session left behind — heaviest
-                   first, ↵ to descend, d to move one to the bin
+map keys (the keys that open another screen; each screen lists its own):
+  ↵                the conversation's spine, turn by turn; there b branches
+                   at the turn under the cursor and m merges one back
+  /                search every conversation, memory and work product
+  w                the work products a session left behind — heaviest first,
+                   ↵ to descend, d to move one to the bin
+  M                what the project remembers, and whether the index still
+                   agrees with the files on disk
+  u                what braids has binned, to restore or delete for good
 
 map flags:
   --ascii          use narrow ASCII glyphs (for terminals that draw

@@ -261,4 +261,10 @@ into = HERE / "assets"
 into.mkdir(exist_ok=True)
 for name in NEEDED:
     shutil.copyfile(HERE.parent / "assets" / name, into / name)
-print(f"copied {len(NEEDED)} assets into site/assets")
+# The screenshots too, which the pages show as images and the README shares.
+frames = into / "frames"
+frames.mkdir(exist_ok=True)
+shots = sorted((HERE.parent / "assets" / "frames").glob("*.png"))
+for shot in shots:
+    shutil.copyfile(shot, frames / shot.name)
+print(f"copied {len(NEEDED)} assets and {len(shots)} frames into site/assets")

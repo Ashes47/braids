@@ -236,8 +236,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True, help="where to build the fake ~/.claude")
     ap.add_argument("--frames", help="write the screenshots here as .ans and .txt")
-    ap.add_argument("--width", type=int, default=138,
-                    help="the width at which no screen elides anything")
+    ap.add_argument("--width", type=int, default=183,
+                    help="the width at which every screen draws the full mark")
     ap.add_argument("--braids", default="braids", help="the binary to run")
     ap.add_argument("--shots", default="go run ./scripts/shots",
                     help="the screenshot tool, for the screens --print cannot reach")
@@ -265,29 +265,33 @@ def main() -> None:
 
     lane = LANES[0][0][:8]
     # name -> (height, arguments). Every frame comes from scripts/shots, which
-    # can reach the screens you get to with keys and can leave the ASCII mark
-    # out. That matters more than it sounds: the map needs 108 columns for its
-    # facts, its glyph key and all fourteen bindings, and 195 for those plus
-    # the mark. Captured at 195 the frames were mostly decoration and the text
-    # came out tiny wherever they were shown. The mark lives on the page now.
+    # can reach the screens you get to with keys.
+    #
+    # 183 columns is where every screen draws the full ASCII mark: the map
+    # needs 181 and the memory list 183, while search and the readers manage it
+    # by 120. That is wider than any page column, which is exactly why the
+    # frames are shown as images: drawn at 26px a character and resampled down,
+    # they stay legible at a size where live text of the same width would be an
+    # 8px font. The website does not have to pick between the mark and the
+    # words any more.
     #
     # The bin comes last: filling it moves a file out of the work products,
     # and the work frames are taken before that happens.
     shots = {
         "map": (18, []),
-        "spine": (24, ["--screen", "spine", "--lane", lane]),
-        "search": (18, ["--query", "lock"]),
-        "work": (11, ["--screen", "work", "--lane", lane]),
+        "spine": (25, ["--screen", "spine", "--lane", lane]),
+        "search": (20, ["--query", "lock"]),
+        "work": (13, ["--screen", "work", "--lane", lane]),
         "file": (18, ["--screen", "file", "--lane", lane]),
-        "memories": (15, ["--screen", "memories"]),
-        "memory": (20, ["--screen", "memory"]),
+        "memories": (16, ["--screen", "memories"]),
+        "memory": (21, ["--screen", "memory"]),
         "bin": (9, ["--screen", "bin", "--discard",
                     str(out / "jobs" / lane / "tmp" / "row-ids-out.txt")]),
     }
     for name, (height, extra) in shots.items():
         frame = subprocess.run(
             args.shots.split() + ["--db", str(db), "--root", str(out / "projects"),
-                                  "--no-mark", "--width", str(args.width),
+                                  "--width", str(args.width),
                                   "--height", str(height)] + extra,
             check=True, capture_output=True, text=True).stdout
         frame = sanitize(frame, str(db))

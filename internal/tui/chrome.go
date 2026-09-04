@@ -190,9 +190,6 @@ func (m Model) headerPlan() plan {
 	// of widths the header decided the mark fitted and drew no mark at all --
 	// so widening the terminal by two columns lost the logo.
 	for _, art := range logoSizes() {
-		if m.hideMark {
-			break
-		}
 		cost := factsGap + logoGap + brand.Width(art)
 		if minimum+cost <= m.width-3 {
 			p.logo, reserved = art, cost

@@ -18,90 +18,6 @@ HERE = pathlib.Path(__file__).parent
 FRAMES = HERE / "frames"
 
 
-SGR = re.compile(r"\x1b\[([0-9;]*)m")
-
-
-def _xterm(n: int) -> str:
-    """One of the 256 palette colours, as a hex string."""
-    if n < 16:
-        base = [(0, 0, 0), (205, 0, 0), (0, 205, 0), (205, 205, 0), (0, 0, 238),
-                (205, 0, 205), (0, 205, 205), (229, 229, 229), (127, 127, 127),
-                (255, 0, 0), (0, 255, 0), (255, 255, 0), (92, 92, 255),
-                (255, 0, 255), (0, 255, 255), (255, 255, 255)][n]
-        return "#%02x%02x%02x" % base
-    if n < 232:
-        n -= 16
-        steps = [0, 95, 135, 175, 215, 255]
-        return "#%02x%02x%02x" % (steps[n // 36], steps[n % 36 // 6], steps[n % 6])
-    grey = 8 + 10 * (n - 232)
-    return "#%02x%02x%02x" % (grey, grey, grey)
-
-
-def ansi_to_html(text: str) -> str:
-    """Turn a captured terminal frame into HTML, colours and all.
-
-    braids writes truecolor even into a pipe, so a screenshot keeps the exact
-    palette the program chose. Rendering those bytes rather than a stripped
-    copy is the difference between showing the product and describing it.
-
-    Only the sequences braids emits are handled: reset, bold, faint, and
-    24-bit or 256-colour foreground and background. Anything else is dropped
-    rather than guessed at, so an unrecognised sequence loses a colour instead
-    of leaking escape codes into the page.
-    """
-    out, style, pos = [], {}, 0
-
-    def push(chunk: str) -> None:
-        if not chunk:
-            return
-        css = ""
-        if "fg" in style:
-            css += f"color:{style['fg']};"
-        if "bg" in style:
-            css += f"background:{style['bg']};"
-        if style.get("bold"):
-            css += "font-weight:600;"
-        if style.get("faint"):
-            css += "opacity:.62;"
-        if css:
-            out.append(f'<span style="{css}">{html.escape(chunk)}</span>')
-        else:
-            out.append(html.escape(chunk))
-
-    for m in SGR.finditer(text):
-        push(text[pos:m.start()])
-        pos = m.end()
-        params = [int(p) for p in m.group(1).split(";") if p != ""] or [0]
-        i = 0
-        while i < len(params):
-            p = params[i]
-            if p == 0:
-                style = {}
-            elif p == 1:
-                style["bold"] = True
-            elif p == 2:
-                style["faint"] = True
-            elif p == 22:
-                style.pop("bold", None)
-                style.pop("faint", None)
-            elif p == 39:
-                style.pop("fg", None)
-            elif p == 49:
-                style.pop("bg", None)
-            elif p in (38, 48) and i + 1 < len(params):
-                where = "fg" if p == 38 else "bg"
-                if params[i + 1] == 2 and i + 4 < len(params):
-                    r, g, b = params[i + 2:i + 5]
-                    style[where] = "#%02x%02x%02x" % (r, g, b)
-                    i += 4
-                elif params[i + 1] == 5 and i + 2 < len(params):
-                    style[where] = _xterm(params[i + 2])
-                    i += 2
-            i += 1
-    push(text[pos:])
-    return "".join(out)
-
-
 def mark() -> str:
     """The ASCII mark for the page header, as `braids help` prints it.
 
@@ -115,18 +31,15 @@ def mark() -> str:
 
 
 def frame(name: str, caption: str = "", cmd: str = "", then: str = "") -> str:
-    """A verbatim braids screenshot, as produced by scripts/demo.py.
+    """One captured braids screen, as an image.
 
-    The .ans capture keeps braids' colours; .txt is the same frame with the
-    escapes removed, for anywhere they would show up as noise. `cmd` and `then`
-    label how you reach the screen, which is the first thing a reader wants to
-    know and the one thing a screenshot cannot show.
+    The picture is produced by `make frames`: real output against a fake
+    ~/.claude, drawn from the capture by scripts/ansi2png.py. `cmd` and `then`
+    label how you reach the screen, which is the first thing a reader wants and
+    the one thing a screenshot cannot show, and they stay real text above the
+    picture rather than being drawn into it.
     """
-    coloured = FRAMES / f"{name}.ans"
-    if coloured.exists():
-        body = ansi_to_html(coloured.read_text().rstrip("\n"))
-    else:
-        body = html.escape((FRAMES / f"{name}.txt").read_text().rstrip("\n"))
+    alt = html.escape(caption or f"braids: the {name} screen")
     bar = ""
     if cmd:
         bar = (f'<div class="cmdbar"><span class="prompt">$</span> <b>{cmd}</b>'
@@ -134,7 +47,8 @@ def frame(name: str, caption: str = "", cmd: str = "", then: str = "") -> str:
                + "</div>")
     cap = f'<figcaption>{caption}</figcaption>' if caption else ""
     return (f'<figure class="frame"><div class="shell">{bar}'
-            f'<pre>{body}</pre></div>{cap}</figure>')
+            f'<img src="/assets/frames/{name}.png" alt="{alt}" loading="lazy">'
+            f'</div>{cap}</figure>')
 
 
 def retarget(markup: str, home: str) -> str:
@@ -264,7 +178,7 @@ def _frame_columns() -> int:
     return widest or 138
 
 
-CSS = """
+CSS = r"""
 :root {
   --bg:#0b0d10; --panel:#11141a; --line:#232833; --ink:#e6edf3; --dim:#8b949e;
   --faint:#6e7681; --accent:#f0883e; --blue:#3b93f7; --ok:#3fb950;
@@ -357,22 +271,20 @@ p { max-width:72ch; }
 p.sub { color:var(--dim); margin-top:0; }
 
 /* ---- terminal frames ----
-   A frame is 195 columns of real terminal, which is wider than the prose
-   column. It breaks out to the width of the window and takes a font size that
-   fits those columns on a desktop, because a screenshot you have to scroll
-   sideways is a screenshot nobody reads. Narrow windows still scroll, at a
-   size you can actually see. */
-figure.frame {
-  /* Wider than the prose column, but only just: a frame is FRAME_COLS columns
-     and at this width the text lands at the size cap rather than being shrunk
-     to fit. It used to be 195 columns, 87 of which were the ASCII mark, and
-     the frame had to take the whole window to show them. The mark is in the
-     page header now. */
-  margin:26px 0 0; width:min(1120px, calc(100vw - 40px));
-  margin-left:50%; transform:translateX(-50%);
-  /* So the size below is worked out from this box rather than the window. */
-  container-type:inline-size;
-}
+   A frame is a picture of a terminal, not a block of text pretending to be
+   one. It is captured at 183 columns, which is where every screen draws its
+   facts, its glyph key, all its bindings and the full mark, and then drawn at
+   whatever width the column gives it. Rendered at 26px a character and
+   resampled down, it stays readable at a width where live text would be an 8px
+   font, and it lines up with the prose because it is simply in the column.
+
+   This replaced a font-size derived from the frame's own width through a
+   container query, with a viewport fallback, a cap and a mobile override. That
+   arithmetic produced three separate bugs: a floor that pushed the panel
+   border out of view, a fallback that disagreed with the container inside the
+   docs layout, and a placeholder left in a comment. None of it is needed to
+   put a picture in a column. */
+figure.frame { margin:26px 0 0; }
 figure.frame .shell {
   background:var(--panel); border:1px solid var(--line); border-radius:11px;
   overflow:hidden;
@@ -387,31 +299,7 @@ figure.frame .cmdbar .prompt { color:var(--faint); }
 figure.frame .cmdbar b { color:var(--ink); font-weight:600; }
 figure.frame .cmdbar .then { color:var(--faint); }
 figure.frame .cmdbar kbd { font-size:11px; padding:0 5px; }
-figure.frame pre {
-  font-family:var(--mono); margin:0;
-  padding:15px 16px; overflow-x:auto; color:var(--ink);
-  -webkit-overflow-scrolling:touch;
-  /* A terminal has no gap between its rows, and braids draws boxes. At 1.5
-     the vertical rules stop touching and every panel border reads as a dashed
-     line, which is what "the screens look misaligned" turned out to mean.
-     The box glyphs are 1.269em tall, measured, so 1.26 is the ceiling and
-     anything above it dashes the rules. Sitting just under it gives the ASCII
-     mark as much air as it can have while the borders still join. */
-  line-height:1.25;
-  /* A frame is FRAME_COLS columns and has to fit its box, or the panel border
-     scrolls off the right. One column is 0.6em in every face in --mono, so
-     the size comes from the width the figure actually gets. The first value
-     is the fallback for browsers without container queries; the second is
-     exact, because 100cqw is this figure, which inside the docs layout is not
-     the window. */
-  font-size:min(12px, calc((min(1120px, 100vw - 40px) - 34px) / FRAME_DIV));
-  font-size:min(12px, calc((100cqw - 34px) / FRAME_DIV));
-}
-@media (max-width:700px) {
-  /* On a phone 195 columns cannot both fit and be legible. Pick legible and
-     let it scroll sideways. */
-  figure.frame pre { font-size:8px; }
-}
+figure.frame img { display:block; width:100%; height:auto; }
 figure.frame figcaption { color:var(--faint); font-size:13px; margin-top:10px; text-align:center; }
 
 pre.sh {
@@ -450,7 +338,7 @@ td code { background:none; border:none; padding:0; }
 ul.plain { list-style:none; padding:0; margin:22px 0 0; max-width:74ch; }
 ul.plain li { padding:9px 0 9px 26px; position:relative; color:var(--dim); border-bottom:1px solid var(--line); }
 ul.plain li:last-child { border-bottom:none; }
-ul.plain li::before { content:"\\203A"; position:absolute; left:2px; color:var(--accent);
+ul.plain li::before { content:"\203A"; position:absolute; left:2px; color:var(--accent);
                       font-weight:600; }
 ul.plain li strong { color:var(--ink); font-weight:600; }
 
@@ -478,11 +366,3 @@ footer .icons a:hover { color:var(--ink); text-decoration:none; }
   header { padding:44px 0 0; }
 }
 """
-
-# One column is 0.6em in every face in --mono; the divisor carries a little
-# slack for one that runs wider. Substituted rather than written out so a
-# recapture at a different width cannot leave this behind.
-_COLS = _frame_columns()
-CSS = (CSS.replace("FRAME_COLS", str(_COLS))
-          .replace("FRAME_DIV", str(round(_COLS * 0.62))))
-assert "FRAME_COLS" not in CSS and "FRAME_DIV" not in CSS, "placeholder left in the stylesheet"

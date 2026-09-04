@@ -29,10 +29,7 @@ DOCS_CSS = CSS + """
    takes 224 of the window before the article gets any. */
 .wrap.wide { max-width:1440px; }
 .docs { display:grid; grid-template-columns:224px minmax(0,1fr); gap:48px; padding:38px 0 72px; }
-/* A frame breaks out of the prose column on the landing page. Here that would
-   put it on top of the sidebar, so inside the docs it stays in its column and
-   sizes itself from that instead. */
-.docs figure.frame { width:auto; margin-left:0; transform:none; }
+
 .side { position:sticky; top:78px; align-self:start; max-height:calc(100vh - 100px); overflow-y:auto; }
 .side h6 {
   margin:0 0 10px; font-family:var(--mono); font-size:11px; font-weight:500;

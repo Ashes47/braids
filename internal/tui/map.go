@@ -127,14 +127,6 @@ type Options struct {
 	// either way — but a missing capability should be visible rather than
 	// silent, so the map says which of the two it is looking at.
 	Reporting bool
-	// HideMark leaves the ASCII mark out of every header.
-	//
-	// It is decoration, and on a wide screen it is expensive decoration: the
-	// map needs 108 columns to show its facts, its glyph key and all fourteen
-	// bindings, and 195 to show those and the mark. Something drawing a frame
-	// to be looked at somewhere else, where the mark is already on the page,
-	// would rather have the 87 columns.
-	HideMark bool
 	// Changes signals that transcripts moved on disk. With it the map follows
 	// live sessions; without it the map is a snapshot.
 	Changes <-chan struct{}
@@ -187,7 +179,6 @@ type Model struct {
 	changes        <-chan struct{}
 	liveFn         func() (map[string]hooks.Event, error)
 	reporting      bool
-	hideMark       bool
 	live           map[string]hooks.Event
 	resumeCmd      func(string) (string, error)
 	spawn          func(string) error
@@ -274,7 +265,6 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		changes:          opts.Changes,
 		liveFn:           opts.LiveEvents,
 		reporting:        opts.Reporting,
-		hideMark:         opts.HideMark,
 		resumeCmd:        opts.ResumeCommand,
 		spawn:            opts.Spawn,
 		terminal:         opts.Terminal,

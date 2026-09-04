@@ -229,7 +229,18 @@ func cmdMap(args []string, out *printer) error {
 		Delete: func(laneID string) (int64, error) {
 			return discardLane(ctx, ix, bin, laneID)
 		},
-		Undo: func() (int64, error) { return restoreLast(bin) },
+		LoadBin: func() ([]trash.Entry, error) {
+			// Expire on open, so the count and the deadlines shown are true.
+			if _, _, err := bin.Expire(time.Now()); err != nil {
+				return nil, err
+			}
+			return bin.List()
+		},
+		Restore: func(id string) error {
+			_, err := bin.RestoreByID(id)
+			return err
+		},
+		Purge: bin.Purge,
 		ResumeCommand: func(laneID string) (string, error) {
 			return resumeCommand(ctx, ix, laneID)
 		},
@@ -607,11 +618,6 @@ func promoteAgent(ctx context.Context, ix *index.Index, provenance *sidecar.Stor
 	return "", fmt.Errorf("no subagent %s in %s", shortID(agentID), shortID(laneID))
 }
 
-// lastDiscarded remembers the most recent deletion so it can be undone. One
-// step is enough: an undo the user did not take immediately is a decision, and
-// the bin keeps the files either way.
-var lastDiscarded *trash.Entry
-
 // discardLane moves a conversation's files into the bin, returning how much was
 // reclaimed. Everything a conversation owns goes together: the transcript and
 // the directory beside it holding its subagents and tool output.
@@ -620,7 +626,11 @@ func discardLane(ctx context.Context, ix *index.Index, bin *trash.Bin, laneID st
 	if err != nil {
 		return 0, err
 	}
-	entry, err := bin.Discard([]string{
+	label := lane.Title
+	if label == "" {
+		label = shortID(lane.ID)
+	}
+	entry, err := bin.Discard(label, []string{
 		lane.Path,
 		strings.TrimSuffix(lane.Path, ".jsonl"),
 	})
@@ -630,20 +640,6 @@ func discardLane(ctx context.Context, ix *index.Index, bin *trash.Bin, laneID st
 	if len(entry.Items) == 0 {
 		return 0, fmt.Errorf("nothing to delete for %s", shortID(lane.ID))
 	}
-	lastDiscarded = &entry
-	return entry.Bytes, nil
-}
-
-// restoreLast undoes the most recent deletion.
-func restoreLast(bin *trash.Bin) (int64, error) {
-	if lastDiscarded == nil {
-		return 0, errors.New("nothing to undo")
-	}
-	entry := *lastDiscarded
-	if err := bin.Restore(entry); err != nil {
-		return 0, err
-	}
-	lastDiscarded = nil
 	return entry.Bytes, nil
 }
 

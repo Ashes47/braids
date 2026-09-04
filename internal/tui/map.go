@@ -12,6 +12,7 @@ import (
 	"github.com/Ashes47/braids/internal/core/graph"
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/model"
+	"github.com/Ashes47/braids/internal/core/trash"
 )
 
 // Column widths for the right-hand block. Everything left of it flexes.
@@ -65,8 +66,12 @@ type Options struct {
 	// Delete moves a conversation's files to the bin, returning how much was
 	// reclaimed. Nil disables deleting.
 	Delete func(laneID string) (int64, error)
-	// Undo restores the most recent deletion.
-	Undo func() (int64, error)
+	// LoadBin lists what has been deleted and not yet expired.
+	LoadBin func() ([]trash.Entry, error)
+	// Restore brings a deleted conversation back.
+	Restore func(entryID string) error
+	// Purge removes a deleted conversation for good.
+	Purge func(entryID string) error
 	// Changes signals that transcripts moved on disk. With it the map follows
 	// live sessions; without it the map is a snapshot.
 	Changes <-chan struct{}
@@ -94,6 +99,7 @@ const (
 	mapMode mode = iota
 	spineMode
 	searchMode
+	binMode
 )
 
 // Model is the Map: every conversation and every branch as a single forest.
@@ -117,7 +123,9 @@ type Model struct {
 	archived       map[string]bool
 	archiveFn      func(string, bool) error
 	deleteFn       func(string) (int64, error)
-	undoFn         func() (int64, error)
+	loadBin        func() ([]trash.Entry, error)
+	restoreFn      func(string) error
+	purgeFn        func(string) error
 	// showArchived reveals what has been put away, so it can be brought back.
 	showArchived bool
 
@@ -130,6 +138,7 @@ type Model struct {
 	spine    *spineState
 	stack    []*spineState
 	search   *searchState
+	bin      *binState
 
 	all     []row
 	visible []row
@@ -174,7 +183,9 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		archived:       opts.Archived,
 		archiveFn:      opts.Archive,
 		deleteFn:       opts.Delete,
-		undoFn:         opts.Undo,
+		loadBin:        opts.LoadBin,
+		restoreFn:      opts.Restore,
+		purgeFn:        opts.Purge,
 		now:            time.Now,
 		width:          80,
 		height:         24,
@@ -269,6 +280,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.clamp()
 		m.clampSpine()
+		m.clampBin()
 	case tea.PasteMsg:
 		return m.pasted(msg.Content), nil
 	case changedMsg:
@@ -318,6 +330,8 @@ func (m Model) catchUp() Model {
 // View renders whichever screen is active, full-screen.
 func (m Model) View() tea.View {
 	switch {
+	case m.mode == binMode && m.bin != nil:
+		return tea.View{Content: m.renderBin(), AltScreen: true}
 	case m.mode == searchMode && m.search != nil:
 		return tea.View{Content: m.renderSearch(), AltScreen: true}
 	case m.mode == spineMode && m.spine != nil:
@@ -348,6 +362,12 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode == searchMode {
 		return m.searchKey(key), nil
 	}
+	if m.mode == binMode {
+		return m.binKey(key), nil
+	}
+	if key == "u" && m.loadBin != nil {
+		return m.openBin(), nil
+	}
 	if key == "/" && m.searchFn != nil {
 		return m.openSearch(), nil
 	}
@@ -372,8 +392,6 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.clamp()
 	case "d":
 		return m.deleteLane(), nil
-	case "u":
-		return m.undoDelete(), nil
 	case "n":
 		m.cursor = m.nextWaiting(m.cursor, 1)
 	case "N":
@@ -448,20 +466,8 @@ func (m Model) deleteLane() Model {
 		return m.withNotice(err.Error(), true)
 	}
 	m = m.catchUp()
-	return m.withNotice(fmt.Sprintf("deleted %s · %s reclaimed · u to undo · children unaffected",
+	return m.withNotice(fmt.Sprintf("deleted %s · %s reclaimed · u to recover · children unaffected",
 		shortID(lane), humanBytes(bytes)), false)
-}
-
-func (m Model) undoDelete() Model {
-	if m.undoFn == nil {
-		return m.withNotice("nothing to undo", true)
-	}
-	bytes, err := m.undoFn()
-	if err != nil {
-		return m.withNotice(err.Error(), true)
-	}
-	m = m.catchUp()
-	return m.withNotice(fmt.Sprintf("restored %s", humanBytes(bytes)), false)
 }
 
 // selectedLane is the conversation under the cursor on whichever screen is up.
@@ -527,6 +533,8 @@ func (m Model) editing() bool {
 	switch {
 	case m.mode == searchMode:
 		return true
+	case m.mode == binMode:
+		return false
 	case m.mode == spineMode && m.spine != nil:
 		return m.spine.filter.active || m.spine.naming.active
 	default:

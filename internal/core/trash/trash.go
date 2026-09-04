@@ -7,11 +7,13 @@
 package trash
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -21,13 +23,26 @@ type Item struct {
 	To   string
 }
 
-// Entry is everything moved by a single deletion, so one undo restores it all.
+// Entry is everything moved by a single deletion, so one restore brings it all
+// back. It is written beside the files it describes, because recovering a
+// conversation days later cannot depend on the session that deleted it.
 type Entry struct {
-	ID    string
-	At    time.Time
-	Items []Item
-	Bytes int64
+	ID    string    `json:"id"`
+	Label string    `json:"label"`
+	At    time.Time `json:"at"`
+	Items []Item    `json:"items"`
+	Bytes int64     `json:"bytes"`
 }
+
+// Retention is how long a deleted conversation is kept. Long enough that
+// noticing the mistake a week later is still soon enough.
+const Retention = 14 * 24 * time.Hour
+
+// manifest is the file recording what an entry holds.
+const manifest = "braids-deleted.json"
+
+// Expires reports when an entry will be removed for good.
+func (e Entry) Expires() time.Time { return e.At.Add(Retention) }
 
 // Bin is a directory holding deleted files.
 type Bin struct{ dir string }
@@ -37,8 +52,12 @@ func New(dir string) *Bin { return &Bin{dir: dir} }
 
 // Discard moves paths into the bin. Paths that do not exist are skipped, so a
 // caller may offer everything a conversation might own without checking first.
-func (b *Bin) Discard(paths []string) (Entry, error) {
-	entry := Entry{ID: time.Now().UTC().Format("20060102-150405.000000"), At: time.Now()}
+func (b *Bin) Discard(label string, paths []string) (Entry, error) {
+	entry := Entry{
+		ID:    time.Now().UTC().Format("20060102-150405.000000"),
+		Label: label,
+		At:    time.Now(),
+	}
 	dest := filepath.Join(b.dir, entry.ID)
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return Entry{}, fmt.Errorf("create bin: %w", err)
@@ -64,6 +83,86 @@ func (b *Bin) Discard(paths []string) (Entry, error) {
 	if len(entry.Items) == 0 {
 		return entry, os.Remove(dest)
 	}
+	if err := writeManifest(dest, entry); err != nil {
+		return entry, err
+	}
+	return entry, nil
+}
+
+// List returns what the bin holds, most recently deleted first.
+func (b *Bin) List() ([]Entry, error) {
+	dirs, err := os.ReadDir(b.dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read bin: %w", err)
+	}
+	var out []Entry
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		entry, err := readManifest(filepath.Join(b.dir, d.Name()))
+		if err != nil {
+			continue // an unreadable entry must not hide the rest
+		}
+		out = append(out, entry)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
+	return out, nil
+}
+
+// Purge removes an entry for good.
+func (b *Bin) Purge(id string) error {
+	if err := os.RemoveAll(filepath.Join(b.dir, id)); err != nil {
+		return fmt.Errorf("purge %s: %w", id, err)
+	}
+	return nil
+}
+
+// Expire removes entries past their retention, returning how many went and how
+// much they held. Called when the bin is opened, so the count shown is true.
+func (b *Bin) Expire(now time.Time) (int, int64, error) {
+	entries, err := b.List()
+	if err != nil {
+		return 0, 0, err
+	}
+	var gone int
+	var bytes int64
+	for _, e := range entries {
+		if now.Before(e.Expires()) {
+			continue
+		}
+		if err := b.Purge(e.ID); err != nil {
+			return gone, bytes, err
+		}
+		gone++
+		bytes += e.Bytes
+	}
+	return gone, bytes, nil
+}
+
+func writeManifest(dir string, entry Entry) error {
+	body, err := json.MarshalIndent(entry, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode manifest: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, manifest), body, 0o600); err != nil {
+		return fmt.Errorf("write manifest: %w", err)
+	}
+	return nil
+}
+
+func readManifest(dir string) (Entry, error) {
+	body, err := os.ReadFile(filepath.Join(dir, manifest))
+	if err != nil {
+		return Entry{}, fmt.Errorf("read manifest: %w", err)
+	}
+	var entry Entry
+	if err := json.Unmarshal(body, &entry); err != nil {
+		return Entry{}, fmt.Errorf("parse manifest: %w", err)
+	}
 	return entry, nil
 }
 
@@ -82,7 +181,16 @@ func (b *Bin) Restore(entry Entry) error {
 	if len(failures) > 0 {
 		return errors.Join(failures...)
 	}
-	return os.Remove(filepath.Join(b.dir, entry.ID))
+	return os.RemoveAll(filepath.Join(b.dir, entry.ID))
+}
+
+// RestoreByID brings back an entry the bin already holds.
+func (b *Bin) RestoreByID(id string) (Entry, error) {
+	entry, err := readManifest(filepath.Join(b.dir, id))
+	if err != nil {
+		return Entry{}, err
+	}
+	return entry, b.Restore(entry)
 }
 
 // sizeOf measures a path, walking a directory to total what it holds.

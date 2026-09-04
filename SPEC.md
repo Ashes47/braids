@@ -443,7 +443,35 @@ trusting.
 
 `d` deletes, moving everything a conversation owns — the transcript and the
 directory beside it holding its subagents and tool output — into
-`~/.braids/trash/`, and reporting what was reclaimed. `u` restores it.
+`~/.braids/trash/`, and reporting what was reclaimed.
+
+### 6.8 The bin — recovering something deleted days ago
+
+```
+ Deleted:    3                    <j/k>   down / up     <d>     delete for good
+ Holding:    7 kB                 <↵ / r> restore       <esc>   back
+ Kept for:   14 days
+ Next to go: in 1h
+
+╭─ Deleted[3] ───────────────────────────────────────────────────────────────────╮
+│ CONVERSATION                              DELETED       SIZE       EXPIRES      │
+│ deleted an hour ago                         1h ago     4.0 kB       in 13d      │
+│ the one you want back                       2d ago     2.0 kB       in 12d      │
+│ nearly expired                             13d ago     1.0 kB        in 1h      │
+╰────────────────────────────────────────────────────────────────────────────────╯
+```
+
+`u` opens it. A one-step undo was the wrong shape: it reached one deletion back,
+and only for as long as the session lived — no help at all for wanting the
+eighth of ten conversations back two days later. Recovering something means
+seeing what was deleted, which is a screen rather than a keystroke.
+
+Each entry carries its own manifest beside the files it holds, so the bin is
+readable by a session that did not do the deleting. `↵` restores, `d` removes
+for good, and every row says how long is left before it goes on its own —
+**turning amber inside the last two days**, so nothing quietly passes the point
+of recovery. Retention is 14 days, and expiry runs when the bin is opened so the
+deadlines shown are true.
 
 Two rules the notice states outright:
 
@@ -657,8 +685,9 @@ needs-you — are declared as optional `Capabilities`, never assumed.
    would add the running-versus-blocked distinction.
 8. ~~**Subagents.**~~ **Done**: discovered, indexed against the turn that
    spawned them, drawn in the spine, and promotable with `p`.
-9. ~~**Housekeeping.**~~ **Done** for archive, delete to a bin, and undo.
-   Multi-select, the filtered sweep and reclaiming job artifacts remain.
+9. ~~**Housekeeping.**~~ **Done**: archive, delete to a bin, and a bin you can
+   browse and recover from. Multi-select, the filtered sweep and reclaiming job
+   artifacts remain.
 10. **Merge.** Splice with preview.
 
 Steps 1–2 are already a tool worth opening.

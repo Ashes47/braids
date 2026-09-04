@@ -57,9 +57,9 @@ func hints() []hint {
 		// narrow terminal: moving, opening, searching and quitting.
 		{"j/k", "down / up"}, {"↵", "open spine"},
 		{"/", "search"}, {"f", "filter list"},
-		{"a", "archive"}, {"q", "quit"},
+		{"a", "toggle archive"}, {"q", "quit"},
 		{"n / N", "next / prev waiting"}, {"d", "delete"},
-		{"u", "undo delete"}, {"A", "show archived"},
+		{"u", "deleted / recover"}, {"A", "show archived"},
 		{"y", "copy resume"}, {"o", "open terminal"},
 	}
 }
@@ -177,6 +177,8 @@ func (m Model) headerContent() ([]fact, []hint, []glyph) {
 	switch {
 	case m.mode == searchMode && m.search != nil:
 		return m.searchFacts(), searchHints(), nil
+	case m.mode == binMode && m.bin != nil:
+		return m.binFacts(), binHints(), nil
 	case m.mode == spineMode && m.spine != nil:
 		return m.spineFacts(), spineHints(), m.spineGlyphs()
 	default:

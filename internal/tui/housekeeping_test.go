@@ -10,12 +10,15 @@ import (
 
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/model"
+	"github.com/Ashes47/braids/internal/core/trash"
 )
 
 type housekeeping struct {
 	archived map[string]bool
 	deleted  []string
-	undone   int
+	restored []string
+	purged   []string
+	entries  []trash.Entry
 	failDel  error
 }
 
@@ -40,7 +43,9 @@ func keepingModel(t *testing.T, lanes []index.LaneInfo) (Model, *housekeeping) {
 			h.deleted = append(h.deleted, id)
 			return 2048, nil
 		},
-		Undo: func() (int64, error) { h.undone++; return 2048, nil },
+		LoadBin: func() ([]trash.Entry, error) { return h.entries, nil },
+		Restore: func(id string) error { h.restored = append(h.restored, id); return nil },
+		Purge:   func(id string) error { h.purged = append(h.purged, id); return nil },
 	})
 	m.now = func() time.Time { return now }
 	m.width, m.height = 100, 20
@@ -105,19 +110,12 @@ func TestDeleteIsReportedAndUndoable(t *testing.T) {
 		t.Fatalf("deleted = %v", h.deleted)
 	}
 	out := plain(m.render())
-	for _, want := range []string{"deleted a", "2 kB reclaimed", "u to undo", "children unaffected"} {
+	for _, want := range []string{"deleted a", "2 kB reclaimed", "u to recover", "children unaffected"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("delete notice missing %q:\n%s", want, out)
 		}
 	}
 
-	m = press(m, "u")
-	if h.undone != 1 {
-		t.Error("u should undo the deletion")
-	}
-	if !strings.Contains(plain(m.render()), "restored") {
-		t.Error("expected confirmation of the restore")
-	}
 }
 
 func TestDeleteRefusesARunningConversation(t *testing.T) {
@@ -198,5 +196,90 @@ func TestArchivingKeepsTheTree(t *testing.T) {
 	}
 	if !strings.Contains(plain(m.render()), "1 archived hidden") {
 		t.Error("the title should say something is held back")
+	}
+}
+
+func binEntries(now time.Time) []trash.Entry {
+	return []trash.Entry{
+		{ID: "e3", Label: "deleted an hour ago", At: now.Add(-time.Hour), Bytes: 4096},
+		{ID: "e2", Label: "the one you want back", At: now.Add(-48 * time.Hour), Bytes: 2048},
+		{ID: "e1", Label: "nearly expired", At: now.Add(-(trash.Retention - time.Hour)), Bytes: 1024},
+	}
+}
+
+func TestTheBinLetsYouRecoverSomethingDeletedDaysAgo(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("a", "still here", "app", 5, time.Hour)}
+	m, h := keepingModel(t, lanes)
+	h.entries = binEntries(now)
+
+	m = press(m, "u")
+	if m.mode != binMode {
+		t.Fatal("u should open the bin")
+	}
+	out := plain(m.renderBin())
+	for _, want := range []string{
+		"Deleted:", "Holding:", "Kept for:", "14 days",
+		"Deleted[3]", "the one you want back", "2d ago", "restore",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the bin is missing %q:\n%s", want, out)
+		}
+	}
+
+	// Pick the eighth-of-ten problem: move down and bring it back.
+	m = m.binKey("j")
+	m = m.binKey("enter")
+	if len(h.restored) != 1 || h.restored[0] != "e2" {
+		t.Fatalf("restored = %v, want the selected entry", h.restored)
+	}
+	if len(m.bin.entries) != 2 {
+		t.Errorf("a restored entry should leave the bin, %d remain", len(m.bin.entries))
+	}
+	if !strings.Contains(plain(m.renderBin()), "back on the map") {
+		t.Error("expected confirmation")
+	}
+}
+
+func TestTheBinShowsHowLongIsLeft(t *testing.T) {
+	m, h := keepingModel(t, []index.LaneInfo{laneInfo("a", "x", "app", 1, time.Hour)})
+	h.entries = binEntries(now)
+	m = press(m, "u")
+
+	out := plain(m.renderBin())
+	if !strings.Contains(out, "in 13d") {
+		t.Errorf("a fresh deletion should show its full retention:\n%s", out)
+	}
+	if !strings.Contains(out, "in 1h") {
+		t.Errorf("one about to go should say so:\n%s", out)
+	}
+	// The one nearest expiry is warned about in the facts.
+	if !strings.Contains(out, "Next to go") {
+		t.Error("the facts should name the deadline")
+	}
+}
+
+func TestPurgingFromTheBinIsFinal(t *testing.T) {
+	m, h := keepingModel(t, []index.LaneInfo{laneInfo("a", "x", "app", 1, time.Hour)})
+	h.entries = binEntries(now)
+	m = press(m, "u")
+
+	m = m.binKey("d")
+	if len(h.purged) != 1 || h.purged[0] != "e3" {
+		t.Fatalf("purged = %v", h.purged)
+	}
+	if !strings.Contains(plain(m.renderBin()), "gone for good") {
+		t.Error("expected the finality to be stated")
+	}
+}
+
+func TestAnEmptyBinSaysSo(t *testing.T) {
+	m, _ := keepingModel(t, []index.LaneInfo{laneInfo("a", "x", "app", 1, time.Hour)})
+	m = press(m, "u")
+	if !strings.Contains(plain(m.renderBin()), "nothing has been deleted") {
+		t.Error("expected an empty-state message")
+	}
+	m = m.binKey("esc")
+	if m.mode != mapMode {
+		t.Error("esc should return to the map")
 	}
 }

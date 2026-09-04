@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // conversation writes a transcript plus the directory beside it.
@@ -28,7 +29,7 @@ func TestDiscardAndRestore(t *testing.T) {
 	transcript, side := conversation(t, project, "abc")
 	bin := New(filepath.Join(t.TempDir(), "trash"))
 
-	entry, err := bin.Discard([]string{transcript, side})
+	entry, err := bin.Discard("a conversation", []string{transcript, side})
 	if err != nil {
 		t.Fatalf("Discard: %v", err)
 	}
@@ -61,7 +62,7 @@ func TestDiscardSkipsWhatIsNotThere(t *testing.T) {
 
 	// A conversation with no subagent directory: the caller offers both paths
 	// without having to check which exist.
-	entry, err := bin.Discard([]string{transcript, filepath.Join(project, "nothing-here")})
+	entry, err := bin.Discard("a conversation", []string{transcript, filepath.Join(project, "nothing-here")})
 	if err != nil {
 		t.Fatalf("Discard: %v", err)
 	}
@@ -73,7 +74,7 @@ func TestDiscardSkipsWhatIsNotThere(t *testing.T) {
 func TestDiscardNothingLeavesNoTrace(t *testing.T) {
 	binDir := filepath.Join(t.TempDir(), "trash")
 	bin := New(binDir)
-	entry, err := bin.Discard([]string{filepath.Join(t.TempDir(), "absent")})
+	entry, err := bin.Discard("a conversation", []string{filepath.Join(t.TempDir(), "absent")})
 	if err != nil {
 		t.Fatalf("Discard: %v", err)
 	}
@@ -82,5 +83,104 @@ func TestDiscardNothingLeavesNoTrace(t *testing.T) {
 	}
 	if entries, err := os.ReadDir(binDir); err == nil && len(entries) != 0 {
 		t.Errorf("an empty deletion left %d directories behind", len(entries))
+	}
+}
+
+func TestTheBinSurvivesRestart(t *testing.T) {
+	project := t.TempDir()
+	transcript, side := conversation(t, project, "abc")
+	dir := filepath.Join(t.TempDir(), "trash")
+
+	// Deleted by one session...
+	entry, err := New(dir).Discard("nvidia delivery", []string{transcript, side})
+	if err != nil {
+		t.Fatalf("Discard: %v", err)
+	}
+
+	// ...and recovered by another, days later, with nothing held in memory.
+	later := New(dir)
+	listed, err := later.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("the bin listed %d entries, want 1", len(listed))
+	}
+	if listed[0].Label != "nvidia delivery" || listed[0].Bytes != entry.Bytes {
+		t.Errorf("entry lost its details: %+v", listed[0])
+	}
+	if _, err := later.RestoreByID(listed[0].ID); err != nil {
+		t.Fatalf("RestoreByID: %v", err)
+	}
+	if _, err := os.Stat(transcript); err != nil {
+		t.Errorf("restore did not put the transcript back: %v", err)
+	}
+	if left, _ := later.List(); len(left) != 0 {
+		t.Errorf("a restored entry should leave the bin, %d remain", len(left))
+	}
+}
+
+func TestListIsNewestFirstAndExpiryIsReported(t *testing.T) {
+	project := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "trash")
+	bin := New(dir)
+	for _, id := range []string{"one", "two"} {
+		transcript, _ := conversation(t, project, id)
+		if _, err := bin.Discard(id, []string{transcript}); err != nil {
+			t.Fatalf("Discard %s: %v", id, err)
+		}
+	}
+	entries, err := bin.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 2 || entries[0].Label != "two" {
+		t.Fatalf("want the most recent first, got %+v", entries)
+	}
+	if got := entries[0].Expires().Sub(entries[0].At); got != Retention {
+		t.Errorf("expiry = %v after deletion, want %v", got, Retention)
+	}
+}
+
+func TestExpireRemovesOnlyWhatIsPastRetention(t *testing.T) {
+	project := t.TempDir()
+	bin := New(filepath.Join(t.TempDir(), "trash"))
+	transcript, _ := conversation(t, project, "abc")
+	if _, err := bin.Discard("recent", []string{transcript}); err != nil {
+		t.Fatalf("Discard: %v", err)
+	}
+
+	gone, _, err := bin.Expire(time.Now())
+	if err != nil || gone != 0 {
+		t.Fatalf("a fresh deletion must not expire: %d, %v", gone, err)
+	}
+	gone, bytes, err := bin.Expire(time.Now().Add(Retention + time.Hour))
+	if err != nil {
+		t.Fatalf("Expire: %v", err)
+	}
+	if gone != 1 || bytes == 0 {
+		t.Errorf("expired %d entries holding %d bytes, want 1 and non-zero", gone, bytes)
+	}
+	if entries, _ := bin.List(); len(entries) != 0 {
+		t.Errorf("the bin should be empty, %d remain", len(entries))
+	}
+}
+
+func TestPurgeIsFinal(t *testing.T) {
+	project := t.TempDir()
+	bin := New(filepath.Join(t.TempDir(), "trash"))
+	transcript, _ := conversation(t, project, "abc")
+	entry, err := bin.Discard("scratch", []string{transcript})
+	if err != nil {
+		t.Fatalf("Discard: %v", err)
+	}
+	if err := bin.Purge(entry.ID); err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	if entries, _ := bin.List(); len(entries) != 0 {
+		t.Error("a purged entry should be gone")
+	}
+	if _, err := bin.RestoreByID(entry.ID); err == nil {
+		t.Error("a purged entry must not be recoverable")
 	}
 }

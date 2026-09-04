@@ -221,9 +221,9 @@ func (m Model) spineKey(key string) (Model, tea.Cmd) {
 		}
 		return m.openNode(row.fork, true), nil
 	case "j", "down":
-		s.cursor++
+		s.cursor = wrap(s.cursor, 1, len(s.visible))
 	case "k", "up":
-		s.cursor--
+		s.cursor = wrap(s.cursor, -1, len(s.visible))
 	case "g", "home":
 		s.cursor = 0
 	case "G", "end":
@@ -243,9 +243,9 @@ func (m Model) spineKey(key string) (Model, tea.Cmd) {
 		updated, cmd := m.openTerminal()
 		return updated.(Model), cmd
 	case "n":
-		s.cursor = nextJunction(s.visible, s.cursor, 1)
+		s.cursor = nextMarker(s.visible, s.cursor, 1)
 	case "N":
-		s.cursor = nextJunction(s.visible, s.cursor, -1)
+		s.cursor = nextMarker(s.visible, s.cursor, -1)
 	}
 	m.clampSpine()
 	return m, nil
@@ -398,7 +398,7 @@ func (m Model) spineInfo() string {
 	keys := []hint{
 		{"j/k", "move"}, {"b", "branch here"},
 		{"p", "promote agent"}, {"/", "search"},
-		{"↵", "open branch"}, {"n/N", "next split"},
+		{"↵", "open branch"}, {"n/N", "next marker"},
 		{"y/o", "copy / open"}, {"esc", "back"},
 	}
 	return m.factsBlock(facts, keys)
@@ -669,17 +669,22 @@ func (m Model) promoteAgent() Model {
 	return m
 }
 
-// nextJunction finds the next place the thread splits, wrapping around. Both an
-// in-file branch point and a lane that forked away count: they are the same
-// event, one kept inside the transcript and one given its own file.
-func nextJunction(rows []spineRow, from, step int) int {
+// nextMarker finds the next place the conversation did something other than
+// carry on, wrapping around: a branch kept inside the transcript, a branch that
+// left for its own file, or an agent it spawned. Three things, one key —
+// scrolling a 320-row spine to find any of them is not navigation.
+func nextMarker(rows []spineRow, from, step int) int {
 	for i := 1; i <= len(rows); i++ {
-		at := (from + i*step + len(rows)*i) % len(rows)
-		if rows[at].fork != nil || len(rows[at].seg.Alternates) > 0 {
+		at := wrap(from, i*step, len(rows))
+		if marker(rows[at]) {
 			return at
 		}
 	}
 	return from
+}
+
+func marker(r spineRow) bool {
+	return r.fork != nil || r.agent != nil || len(r.seg.Alternates) > 0
 }
 
 // summarise describes a collapsed run: how many turns, and what ran inside it.

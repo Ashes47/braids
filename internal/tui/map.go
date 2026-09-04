@@ -337,9 +337,9 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "o":
 		return m.openTerminal()
 	case "j", "down":
-		m.cursor++
+		m.cursor = wrap(m.cursor, 1, len(m.visible))
 	case "k", "up":
-		m.cursor--
+		m.cursor = wrap(m.cursor, -1, len(m.visible))
 	case "g", "home":
 		m.cursor = 0
 	case "G", "end":
@@ -464,6 +464,16 @@ func (m *Model) clamp() {
 	if m.offset < 0 {
 		m.offset = 0
 	}
+}
+
+// wrap moves a cursor by delta through n rows, running off either end into the
+// other. Only single-step moves wrap: a half-page jump that silently landed at
+// the far end of a long conversation would lose the reader entirely.
+func wrap(cursor, delta, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return ((cursor+delta)%n + n) % n
 }
 
 // bodyHeight is the terminal height minus the chrome.

@@ -633,3 +633,44 @@ func TestNextWaitingSkipsWhatIsNotOwed(t *testing.T) {
 		t.Error("the status column should name the state")
 	}
 }
+
+func TestSingleStepMovesWrapAround(t *testing.T) {
+	lanes := []index.LaneInfo{
+		laneInfo("a", "first", "app", 5, time.Hour),
+		laneInfo("b", "second", "app", 5, time.Hour),
+		laneInfo("c", "third", "app", 5, time.Hour),
+	}
+	m := newTestModel(t, forestOf(lanes, nil))
+	press := func(m Model, key string) Model {
+		updated, _ := m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+		return updated.(Model)
+	}
+
+	// Up from the top lands at the bottom.
+	m = press(m, "k")
+	if m.cursor != 2 {
+		t.Errorf("k from the top = %d, want the last row", m.cursor)
+	}
+	// Down from the bottom lands at the top.
+	m = press(m, "j")
+	if m.cursor != 0 {
+		t.Errorf("j from the bottom = %d, want the first row", m.cursor)
+	}
+}
+
+func TestWrap(t *testing.T) {
+	tests := []struct {
+		cursor, delta, n, want int
+	}{
+		{0, -1, 3, 2},
+		{2, 1, 3, 0},
+		{1, 1, 3, 2},
+		{0, 1, 1, 0},
+		{0, -1, 0, 0}, // an empty list must not divide by zero
+	}
+	for _, tt := range tests {
+		if got := wrap(tt.cursor, tt.delta, tt.n); got != tt.want {
+			t.Errorf("wrap(%d,%d,%d) = %d, want %d", tt.cursor, tt.delta, tt.n, got, tt.want)
+		}
+	}
+}

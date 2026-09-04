@@ -310,8 +310,13 @@ landmark left a real 25,571-turn lane at 20,506 segments. Requiring text brought
 it to 3,015. Everything between landmarks collapses to one line with a tool
 tally, and a junction is always a landmark however dull the turn.
 
-`n` / `N` step between junctions. With 220 of them in one lane, that is the only
-practical way to find where a thread split.
+`n` / `N` step between **markers** — anywhere the conversation did something
+other than carry on: a branch kept inside the transcript, a branch that left for
+its own file, or an agent it spawned. Three things, one key, because scrolling a
+320-row spine to find any of them is not navigation.
+
+`j` / `k` and the arrows wrap: off the top is the bottom. Half-page jumps do not,
+since landing at the far end of a long conversation loses the reader.
 
 `/` filters the spine, matching a turn's text, its tools, its turn number and —
 for a collapsed run — its summary, so filtering for `bash` finds the stretches
@@ -463,7 +468,7 @@ full copy of its prefix.
 | `⇥` | switch pane | `u` | undo |
 | `esc` | zoom out one level | `f` | filter (incl. project) |
 | `r` | rename lane | `m` | mark / multi-select |
-| `n` `N` | next / previous junction | | *(spine)* |
+| `n` `N` | next / previous marker | | *(spine)* |
 | `1`–`9` | jump to lane | `?` | help |
 | `q` | quit | `r` | rebuild index |
 

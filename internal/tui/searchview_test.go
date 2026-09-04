@@ -208,3 +208,18 @@ func TestPasteIntoSearch(t *testing.T) {
 		t.Errorf("paste did not re-run the search: %v", *queries)
 	}
 }
+
+func TestSearchResultsWrapAround(t *testing.T) {
+	m, _ := searchModel(t, demoHits(), nil)
+	m = m.openSearch()
+	m = typeSearch(m, "g")
+
+	m = typeSearch(m, "up")
+	if m.search.cursor != len(m.search.hits)-1 {
+		t.Errorf("up from the first hit = %d, want the last", m.search.cursor)
+	}
+	m = typeSearch(m, "down")
+	if m.search.cursor != 0 {
+		t.Errorf("down from the last hit = %d, want the first", m.search.cursor)
+	}
+}

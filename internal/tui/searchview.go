@@ -54,9 +54,9 @@ func (m Model) searchKey(key string) Model {
 	case "enter":
 		return m.jumpToHit()
 	case "down", "ctrl+n":
-		s.cursor++
+		s.cursor = wrap(s.cursor, 1, len(s.hits))
 	case "up", "ctrl+p":
-		s.cursor--
+		s.cursor = wrap(s.cursor, -1, len(s.hits))
 	case "backspace":
 		s.input.edit(key)
 		m.runSearch()

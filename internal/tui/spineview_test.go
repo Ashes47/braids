@@ -99,26 +99,26 @@ func TestSpineEmptyLane(t *testing.T) {
 	}
 }
 
-func TestNextJunctionWrapsBothWays(t *testing.T) {
+func TestNextMarkerWrapsBothWays(t *testing.T) {
 	segs := []spineRow{
 		{seg: graph.Segment{Kind: graph.SegTurn}},
 		{seg: graph.Segment{Kind: graph.SegTurn, Alternates: []int{1}}},
 		{seg: graph.Segment{Kind: graph.SegTurn}},
 		{seg: graph.Segment{Kind: graph.SegTurn, Alternates: []int{2}}},
 	}
-	if got := nextJunction(segs, 0, 1); got != 1 {
+	if got := nextMarker(segs, 0, 1); got != 1 {
 		t.Errorf("forward from 0 = %d, want 1", got)
 	}
-	if got := nextJunction(segs, 1, 1); got != 3 {
+	if got := nextMarker(segs, 1, 1); got != 3 {
 		t.Errorf("forward from 1 = %d, want 3", got)
 	}
-	if got := nextJunction(segs, 3, 1); got != 1 {
+	if got := nextMarker(segs, 3, 1); got != 1 {
 		t.Errorf("forward from the last junction should wrap to 1, got %d", got)
 	}
-	if got := nextJunction(segs, 0, -1); got != 3 {
+	if got := nextMarker(segs, 0, -1); got != 3 {
 		t.Errorf("backward from 0 should wrap to 3, got %d", got)
 	}
-	if got := nextJunction([]spineRow{{seg: graph.Segment{Kind: graph.SegTurn}}}, 0, 1); got != 0 {
+	if got := nextMarker([]spineRow{{seg: graph.Segment{Kind: graph.SegTurn}}}, 0, 1); got != 0 {
 		t.Errorf("with no junctions the cursor must not move, got %d", got)
 	}
 }
@@ -370,13 +370,13 @@ func TestBranchingFromAForkRowExplainsItself(t *testing.T) {
 	}
 }
 
-func TestNextSplitFindsForksAsWellAsJunctions(t *testing.T) {
+func TestNextMarkerFindsForksAsWellAsJunctions(t *testing.T) {
 	rows := []spineRow{
 		{seg: graph.Segment{Kind: graph.SegTurn}},
 		{fork: &graph.Node{}},
 		{seg: graph.Segment{Kind: graph.SegTurn}},
 	}
-	if got := nextJunction(rows, 0, 1); got != 1 {
+	if got := nextMarker(rows, 0, 1); got != 1 {
 		t.Errorf("next split = %d, want the fork row at 1", got)
 	}
 }
@@ -427,5 +427,38 @@ func TestFilteringThenClearingKeepsYourPlace(t *testing.T) {
 	}
 	if got := m.spine.visible[m.spine.cursor].seg.Seq; got != 284 {
 		t.Errorf("cursor on t%d after clearing, want t284", got)
+	}
+}
+
+func TestNextMarkerIncludesSubagents(t *testing.T) {
+	rows := []spineRow{
+		{seg: graph.Segment{Kind: graph.SegTurn, Seq: 1}},
+		{agent: &index.SubagentRow{}},
+		{seg: graph.Segment{Kind: graph.SegTurn, Seq: 2}},
+		{fork: &graph.Node{}},
+		{seg: graph.Segment{Kind: graph.SegTurn, Seq: 3, Alternates: []int{2}}},
+	}
+	// One key steps through all three kinds of thing worth stopping at.
+	want := []int{1, 3, 4, 1}
+	at := 0
+	for i, expect := range want {
+		at = nextMarker(rows, at, 1)
+		if at != expect {
+			t.Fatalf("step %d landed on %d, want %d", i+1, at, expect)
+		}
+	}
+}
+
+func TestSpineMovementWrapsAround(t *testing.T) {
+	m := spineModel(t, demoSegments(), nil)
+	m = m.openSpine()
+
+	m, _ = m.spineKey("k")
+	if got := m.spine.cursor; got != len(m.spine.visible)-1 {
+		t.Errorf("k from the top = %d, want the last row", got)
+	}
+	m, _ = m.spineKey("j")
+	if m.spine.cursor != 0 {
+		t.Errorf("j from the bottom = %d, want the first row", m.spine.cursor)
 	}
 }

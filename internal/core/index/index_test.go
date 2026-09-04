@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"time"
+	"unicode/utf8"
 
 	"github.com/Ashes47/braids/internal/perms"
 
@@ -1258,5 +1259,33 @@ func TestSyncStaysQuietWhenGrowthIsNormal(t *testing.T) {
 	src.lanes[0].Updated = base.Add(2 * time.Minute)
 	if got, err := ix.Sync(ctx, src); err != nil || len(got.Stalled) != 0 {
 		t.Errorf("growth under the threshold cried wolf: %v (%v)", got.Stalled, err)
+	}
+}
+
+// A preview is stored at a fixed length, and cutting a string by bytes splits
+// a multi-byte character in half. That leaves invalid UTF-8 in the index,
+// which reaches the screen as a replacement mark and JSON as one too.
+func TestPreviewIsCutOnACharacterBoundary(t *testing.T) {
+	// Box drawing is three bytes a character and is what turns quoting braids'
+	// own output are full of, which is where this was found.
+	for _, pad := range []int{0, 1, 2, 3, 4} {
+		text := strings.Repeat("a", previewMax-pad) + strings.Repeat("─", 40)
+		got := previewOf(model.Message{
+			Parts: []model.Part{{Kind: model.PartText, Text: text}},
+		})
+		if !utf8.ValidString(got) {
+			t.Errorf("pad %d: preview is not valid UTF-8: %q", pad, got)
+		}
+		if len(got) > previewMax {
+			t.Errorf("pad %d: preview is %d bytes, over the %d limit", pad, len(got), previewMax)
+		}
+	}
+
+	// Short text is untouched, multi-byte or not.
+	short := "a ─ b ─ c"
+	if got := previewOf(model.Message{
+		Parts: []model.Part{{Kind: model.PartText, Text: short}},
+	}); got != short {
+		t.Errorf("a short preview was altered: %q", got)
 	}
 }

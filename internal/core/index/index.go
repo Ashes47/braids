@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Ashes47/braids/internal/core/artifacts"
 	"github.com/Ashes47/braids/internal/core/memory"
@@ -19,10 +20,14 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// schemaVersion is bumped whenever the tables change. The index holds no unique
-// state — it rebuilds from the transcripts in seconds — so an old schema is
-// dropped and recreated rather than migrated.
-const schemaVersion = 12
+// schemaVersion is bumped whenever the tables change, and whenever what is
+// stored in them was wrong. The index holds no unique state, rebuilding from
+// the transcripts in seconds, so an old schema is dropped and recreated rather
+// than migrated.
+//
+// 13 is the second kind: the tables are unchanged, but previews written before
+// it could be cut in the middle of a character.
+const schemaVersion = 13
 
 const dropAll = `
 DROP TABLE IF EXISTS parts;
@@ -928,7 +933,17 @@ func previewOf(m model.Message) string {
 	}
 	text = strings.Join(strings.Fields(text), " ")
 	if len(text) > previewMax {
-		text = text[:previewMax]
+		// Cut on a character boundary. Slicing bytes splits a multi-byte
+		// character in half and puts invalid UTF-8 in the index, which reaches
+		// the screen as a replacement mark, JSON as one too, and any reader
+		// strict about encoding as an error. On a real history 117 of 21,353
+		// previews were cut that way, every one of them a turn that quoted
+		// box drawing.
+		cut := previewMax
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut]
 	}
 	return text
 }

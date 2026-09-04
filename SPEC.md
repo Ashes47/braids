@@ -1,150 +1,195 @@
-# braids — spec
+# braids: design notes
 
-> `github.com/Ashes47/braids` — a standalone open-source project, independent of
-> any work repo.
+> `github.com/Ashes47/braids`
 >
-> A terminal tool for managing Claude Code conversations as a graph:
-> see every session and branch, search all of it instantly, and fork a new linear
+> A terminal tool that manages Claude Code conversations as a graph: see every
+> session and branch, search all of it at once, and cut a new linear
 > conversation from any message in any of them.
+
+This document is the reasoning, not the manual. Every claim in it was measured
+on one machine against a real corpus, and where a decision looks arbitrary the
+measurement that forced it is written next to it. If you want to know how to use
+braids, read [the docs](https://braids.chat/docs/). If you want to know why it
+is shaped like this, read on.
+
+The screenshots are real output, captured by `make frames` against a fake
+`~/.claude`. They cannot drift from the program, which the hand-drawn mockups
+this document used to carry all did.
 
 ---
 
 ## 1. What it is
 
-Claude Code works best on one linear thread doing one thing. Humans don't work
-that way — a task forks, doubles back, and spawns three side quests. Today the
-only way to cope is to run N terminals and hold the map in your head.
+Claude Code works best on one linear thread doing one thing. People do not work
+that way. A task forks, doubles back, and spawns three side quests, and the only
+way to cope today is to run N terminals and hold the map in your head.
 
-**braids is that map.** One TUI window alongside your N terminals. It shows every
-conversation and every branch as a graph, lets you search all of them in
-microseconds, and turns any message into the starting point of a new branch.
+braids is that map. One window alongside the others. It draws every conversation
+and every branch as one graph, searches all of them in a few milliseconds, and
+turns any message into the start of a new conversation.
 
-It never talks to Claude. It arranges the conversations you have with Claude.
+It never talks to a model. It arranges the conversations you have with one.
 
 ---
 
 ## 2. Principles
 
-1. **Files are the truth.** braids derives everything from `~/.claude/`. Delete
+1. **Files are the truth.** braids derives everything from `~/.claude`. Delete
    braids and you lose a view, never a conversation.
 2. **One writer per file, always.** Every branch is its own session file. braids
    never appends to a session someone else is using.
-3. **The graph is for humans; each path is linear for the model.** Root-to-leaf
+3. **The graph is for people; each path is linear for the model.** Root to leaf
    is always a clean single-purpose context.
-4. **Search is the front door; the graph is the confirmation.** Nobody finds a
-   fork point by scrolling 3,400 turns.
+4. **Search is the front door and the graph is the confirmation.** Nobody finds
+   a fork point by scrolling 3,400 turns.
 5. **braids is a window you glance at, not a place you live.** Close it and six
-   sessions keep running untouched.
+   sessions carry on untouched.
 
 ---
 
-## 3. Grounded facts
+## 3. What was measured
 
-Every design decision below rests on something measured on this machine
-(Claude Code 2.1.252, macOS), not assumed.
+The corpus is one developer's real history on macOS with Claude Code 2.1.252:
+28 to 33 conversations depending on when a number was taken, about 62,000
+messages, about 360 MB of transcripts, and 3.3 GB of scratch files beside them.
+Numbers taken months apart do not agree to the digit, because the corpus was
+being worked in the whole time. Each row says what it was taken from.
+
+### The file format allows all of this
 
 | Fact | Evidence |
 |---|---|
-| Transcripts are already DAGs | `uuid` + `parentUuid`; 228 branch points, fan-out 7 in one real session |
-| Context = parent chain of the **last** record | Appending a node parented mid-file changed the model's history to `ALPHA, DELTA` |
-| `leafUuid` does **not** control resume | Repointing it replayed the whole linear history |
-| Fork from any node = one file write | Synthesized root→node path resumed as `ALPHA, BETA` |
-| Fork mid-tool-call is safe | Harness drops the dangling `tool_use`, injects "Continue from where you left off" |
-| Concurrent writers don't corrupt | Two parallel resumes produced a clean branch point |
-| …but they race | A third resume inherited `ROOT, RIGHT`; `LEFT` was silently orphaned |
-| Merge by splice works | Re-parented sibling branch → `ROOT, LEFT, RIGHT` in one context |
-| Native forks preserve uuids | `--fork-session`: 11/11 shared records ⇒ **topology is free** |
-| …but not fork *direction* | A fork rewrites `sessionId` throughout and records no origin; timestamps are copied too, so nothing in the file says which came first |
-| File birth time does say | Demo tree: root 23:21:00 → fork 23:21:20 → fork 23:21:39 → fork 23:21:49, all correct. APFS reports it; Linux may not |
-| `parentUuid` names bookkeeping, not turns | A message's parent is usually an `attachment`; resolving through them is what makes a chain reconstruct at all |
-| Merge works end to end | ROOT, STEM, TRUNK spliced with LEAFA, LEAFB resumed as one linear conversation holding all five |
-| Worktree branches work end to end | `--worktree` put a resumed branch in `.claude/worktrees/<name>` on its own git branch; two of them edited the same file with neither touching the other or the main tree |
-| Hook payloads carry what is needed | `hook_event_name`, `session_id`, `cwd`, `transcript_path`, plus per-event fields — captured from real payloads rather than assumed |
-| Work products dwarf conversations | 3.5 GB of scratch and job records against 365 MB of transcript, all of it in two conversations |
-| Job directories use the short ID | `~/.claude/jobs/9419fd9c`, not the full session UUID the transcript is filed under |
-| 35 compactions across this history | Parsed for free: a boundary is announced one record before the summary that replaces what it dropped, so it rides the existing pass |
-| In-file branching is the common case | One real 25,571-turn lane: **220 junctions, 228 departing branches** — none of them visible in Claude Code |
-| A tool result wears the user role | Treating every user record as a landmark left a long spine 85% uncollapsed; requiring text cut 20,506 segments to 3,015 |
-| A conversation's state is in its last turn | Assistant text ⇒ owed a reply; an assistant tool call with no result ⇒ outstanding, since the harness appends the result as a later turn |
-| …but files cannot see a permission prompt | A running tool and one waiting for approval are the same record. Only a hook separates them |
-| Identical prefixes make forks ambiguous | A lane cut from a fork shares the same turns with the fork *and* its parent; only a record of what braids did can tell them apart |
-| Incremental sync is worth having | 9.2 s full rebuild vs **47 ms** when only one transcript moved |
+| Transcripts are already DAGs | `uuid` plus `parentUuid`: 228 branch points and a fan-out of 7 in one real session |
+| Context is the parent chain of the **last** record | Appending a node parented mid-file changed the model's history to `ALPHA, DELTA` |
+| `leafUuid` does not control resume | Repointing it replayed the whole linear history |
+| Forking from any node is one file write | A synthesized root-to-node path resumed as `ALPHA, BETA` |
+| Forking mid-tool-call is safe | The harness drops the dangling `tool_use` and injects "Continue from where you left off" |
+| Concurrent writers do not corrupt | Two parallel resumes produced a clean branch point |
+| They do race, though | A third resume inherited `ROOT, RIGHT` and `LEFT` was silently orphaned |
+| Merging by splice works | A re-parented sibling branch resumed as `ROOT, LEFT, RIGHT` in one context |
+| Native forks preserve uuids | `--fork-session` shared 11 of 11 records, so topology is free |
+| They record no direction | A fork rewrites `sessionId` throughout and copies the timestamps, so nothing in the file says which came first |
+| File birth time does say | A demo tree at 23:21:00, :20, :39, :49 came out in the right order. APFS reports it; Linux may not |
+| Fork files are standalone | A child holds a full copy of the prefix, so deletion never cascades |
+| Stale reads are guarded | An edit after an external change is refused: "has been modified on disk since I read it" |
+| Worktree branches work end to end | `--worktree` put a resumed branch on its own git branch under `.claude/worktrees/<name>`, and two of them edited the same file without touching each other or the main tree |
+
+### Reading it is harder than it looks
+
+| Fact | Evidence |
+|---|---|
+| `parentUuid` names bookkeeping, not turns | A message's parent is usually an `attachment`. Resolving through them is what makes a chain reconstruct at all |
+| A tool result wears the user role | Treating every user record as a landmark left a long spine 85% uncollapsed. Requiring text cut 20,506 segments to 3,015 |
+| In-file branching is the common case | One 25,571-turn lane holds **220 junctions and 228 departing branches**, none of them visible in Claude Code |
+| Compaction breaks the chain | 35 compactions across this history, each announced one record before the summary that replaces what it dropped |
+| Subagents are a separate tree | `<sid>/subagents/agent-<id>.jsonl`, own root, joined by `toolUseId`. One lane hides ten of them, 409 turns in total |
+| Subagents can be promoted | Clearing `isSidechain` and rewriting `sessionId` resumed one as a top-level session |
+| Identical prefixes make forks ambiguous | A lane cut from a fork shares its turns with the fork *and* its parent. Only a record of what braids did can tell them apart |
+| A conversation's state is in its last turn | Assistant text means a reply is owed; an assistant tool call with no result means one is outstanding |
+| Files cannot see a permission prompt | A running tool and one waiting for approval are the same record. Only a hook separates them |
+
+### The costs that shaped the code
+
+| Fact | Evidence |
+|---|---|
+| Incremental sync is worth having | 9.2 s to rebuild everything against **47 ms** when one transcript moved |
 | Stored mtimes are second-precision | Comparing a raw `ModTime` marks every lane changed forever, turning an incremental sync silently into a full one |
-| Fork files are standalone | Child holds a full copy of the prefix ⇒ **deletion never cascades** |
-| Stale reads are guarded | Edit after external change: *"has been modified on disk since I read it"* |
-| Local search is trivial | 60,616 units · 1.8 s full rebuild · 74.5 MB · **0.1–0.3 ms** queries |
-| Subagents are a separate tree | `<sid>/subagents/agent-<id>.jsonl`, own root, joined by `toolUseId` |
-| Subagents can be promoted | Cleared `isSidechain`, rewrote `sessionId` → resumed as a top-level session |
-| Terminal identity is not portable | Warp exposes no session id ⇒ use `--name` for window titles, not focus APIs |
-| Worktrees are native | `-w, --worktree [name]` |
+| Tailing beats re-reading | The largest transcript here took **3,306 ms** to parse from byte zero and **43 ms** to read from the last offset |
+| Search is cheap | 1 to 6 ms across about 62,000 indexed units. The index costs about 190 MB, roughly half the transcripts, because searching text means keeping a copy of it |
+| Work products dwarf conversations | 3.3 GB of scratch against 360 MB of transcript, most of it held by two conversations out of thirty-three |
+| Job directories use the short ID | `~/.claude/jobs/9419fd9c`, not the full session UUID the transcript is filed under |
+| Most work products are not text | 3,757 of 12,819 are binary, and the largest is 242 MB |
+| Vendored directories drown a name index | Skipping them indexes 8,823 names out of 12,957 files, because a `node_modules` holds a thousand files called `index.js` |
+| Memories go stale invisibly | 62 of 76 record the session that wrote them, and the first check found one memory out of 83 missing from the index that loads it |
+| Failed tool calls are worth finding | 790 of them across this history, 301 in one conversation |
+| Terminal identity is not portable | Warp exposes no session id, so window titles come from `--name` rather than a focus API |
 
 ---
 
 ## 4. Architecture
 
 ```
-   ~/.claude/projects/**/*.jsonl ──┐
+   ~/.claude/projects/**/*.jsonl ─────────────┐
    ~/.claude/projects/*/*/subagents/*.jsonl ──┤
-   ~/.claude/jobs/<sid>/{state.json,timeline.jsonl} ──┤
-                                                      ├──▶  watcher (fsevents)
-   hooks ── PermissionRequest ─ Notification ─┐        │       tail by byte offset
-            Stop ─ SubagentStop ─ SessionStart┘        │            │
-                    POST localhost ──────────────────▶ ├────────────┘
-                                                       ▼
-                                              index (SQLite + FTS5)
-                                                       │
-                                                       ▼
-                                                   TUI render
-                                                       │
-                                        spawn ──▶ claude --resume … --name …
+   ~/.claude/projects/*/memory/*.md ──────────┤
+   ~/.claude/jobs/<short id>/** ──────────────┤
+                                              ├──▶ watcher (fsnotify)
+   ~/.braids/hooks.log ───────────────────────┘      tail by byte offset
+        ▲                                                  │
+        │ braids hook, run by the harness                   ▼
+   Claude Code                                    index (SQLite + FTS5)
+                                                           │
+                                                           ▼
+                                                      the screens
+                                                           │
+                                            spawn ──▶ claude --resume …
 ```
 
-**Watcher.** fsnotify over the transcript root and each project directory,
-adding new projects as they appear. A single turn appends many lines, so a burst
-is coalesced into one signal after 400 ms of quiet — the map only needs to know
-that *something* moved, because catching up is a 47 ms incremental sync. Watching
-is a convenience, never a requirement: if it cannot start, the map opens as a
-snapshot and says so by omitting `· live`.
+Everything flows one way: files in, index, screens. Nothing goes back out to a
+socket, and there is no HTTP client and no listener anywhere in the binary. An
+earlier draft of this document described the hook as posting to localhost, which
+was the plan for about a day before a log file turned out to be better in every
+way, and the diagram outlived the idea by rather longer.
 
-**Index.** One SQLite file, stamped with a schema version. `Sync` re-reads only
-lanes whose size or mtime moved and drops ones whose file is gone — 47 ms
-against a 9.2 s full rebuild — which is what lets a branch appear immediately
-instead of after a remembered command. Listing lanes costs a directory scan:
-titles mean reading a whole transcript, so they are fetched only for lanes being
-re-read. FTS5 over
-`text | thinking | tool_use | tool_result`, plus a `messages` table carrying the
-parent chain that the graph and the spine are derived from. Rebuildable from
-scratch at any time; a version mismatch drops and recreates it.
+**Watcher.** fsnotify over the transcript root, each project directory and each
+memory directory, adding new projects as they appear. A single turn appends many
+lines, so a burst is coalesced into one signal after 400 ms of quiet. The map
+only needs to know that *something* moved, because catching up is cheap.
+Watching is a convenience and never a requirement: if it cannot start, the map
+opens as a snapshot and says so by leaving out `· live`.
 
-**Sidecar.** Names, colors, archive flags, worktree paths, and the provenance of
-branches braids made itself (`origins.json`). Topology is still *derived* — the
-sidecar only overrides it where inference cannot win, because two lanes can hold
-byte-identical prefixes and a third cut from either is indistinguishable by
-content. Losing the sidecar costs accuracy on those ties, never data.
+`~/.claude/jobs` is deliberately not watched. It holds thousands of files that a
+running session writes constantly, weighing them again costs 39 ms, and the only
+thing that would change is a column nobody is watching while it happens. It is
+re-measured by whatever changed it instead.
 
-braids does not write into a transcript. Provenance could have been a record
-inside the new file; a sidecar keeps someone else's format untouched.
+**Index.** One SQLite file, stamped with a schema version, dropped and recreated
+on a mismatch. `Sync` re-reads only lanes whose size or mtime moved, and only
+the part that is new, and drops lanes whose file is gone. Listing lanes costs a
+directory scan; titles mean reading a transcript, so they are read only for
+lanes being re-read anyway. FTS5 covers `text | thinking | tool_use |
+tool_result` for turns and a separate table for memories and work-product names.
+A `messages` table carries the parent chain that the graph and the spine are
+derived from. It is rebuildable from scratch at any time.
 
-**Hooks.** braids installs its own hook entries (merging with existing ones, never
-replacing) that POST session id + event to localhost. This is how liveness works
-for sessions braids did not start.
+Only `braids index` may create it. A read command pointed at a database that is
+not there says so, because quietly creating an empty one answers a mistyped
+`--db` with "no matches", which is a wrong answer wearing the shape of a right
+one, and leaves a database behind where the typo pointed.
 
-**Launcher.** `claude --resume <id> --name <branch>` (+ `--worktree <branch>` for
-workspace branches), spawned into a new window of the user's terminal.
+The index holds the full text of every message it has read, so `~/.braids` is
+`0700` and the file is `0600`, tightened on every open rather than only at
+creation. An earlier version left it world readable.
 
----
+**Sidecar.** Names, archive flags, branch kinds, and the provenance of branches
+braids made itself. Topology is still derived; the sidecar only overrides it
+where inference cannot win, because two lanes can hold byte-identical prefixes
+and a third cut from either is indistinguishable by content. Losing the sidecar
+costs accuracy on those ties, never data.
 
-### 4.1 Layering — what it is, and what a web frontend would still cost
+Provenance could have been a record inside the new transcript. A sidecar keeps
+someone else's format untouched, which is worth more.
 
-Two layers and an adapter. The boundary is enforced by imports, and it holds:
+**Hooks.** `braids hooks --install` adds braids' own entries to
+`~/.claude/settings.json`, merging with whatever is already there. The hook
+appends to a log rather than talking to a socket, so it works whether or not
+braids is running: events that arrive while it is closed are still there when it
+opens.
+
+**Launcher.** `claude --resume <id> --name <title>`, plus `--worktree <name>`
+for a workspace branch, spawned into a new window of the user's terminal.
+
+### 4.1 Layering, and what a web frontend would still cost
+
+Two layers and an adapter. The boundary is enforced by imports and it holds:
 nothing under `internal/core` mentions lipgloss or an escape sequence, and
 nothing in core imports `internal/tui`.
 
 ```
    frontend      internal/tui              bubbletea + lipgloss
                       │
-                      │   tui.Options — 36 fields, 27 of them functions:
-                      │   the whole surface a screen is allowed to reach
+                      │   tui.Options: 37 fields, 27 of them functions.
+                      │   The whole surface a screen is allowed to reach.
                       ▼
    core          store · index · graph · memory · artifacts · hooks · trash · watch
                       │
@@ -155,33 +200,33 @@ nothing in core imports `internal/tui`.
 
 What this buys today:
 
-- **Core never formats for a terminal.** No ANSI, no width maths, no lipgloss
-  below `internal/tui`. Core returns data; the screens decide how it looks.
-- **A harness plugs in at `store.Source`**, and says what more it can do by
+- **Core never formats for a terminal.** No ANSI, no width arithmetic, no
+  lipgloss below `internal/tui`. Core returns data and the screens decide how it
+  looks.
+- **A harness plugs in at `store.Source`** and says what more it can do by
   implementing `Enricher`, `Sidechains`, `Brancher`, `Promoter`, `Merger`,
-  `Tailer`, `Measurer` or `Rememberer`. braids hides a capability a source
-  lacks rather than offering a key that fails.
-- **A screen cannot reach past its options.** Every mutation the TUI can
-  perform is a function it was handed, so `cmd` decides what is possible and a
-  key handler cannot quietly grow a dependency on the index.
+  `Tailer`, `Measurer` or `Rememberer`. braids hides a capability a source lacks
+  rather than offering a key that fails.
+- **A screen cannot reach past its options.** Every mutation the TUI can perform
+  is a function it was handed, so `cmd` decides what is possible and a key
+  handler cannot quietly grow a dependency on the index.
 
-What a web frontend would still cost, stated honestly because the first draft
-of this document claimed it was free:
+What a web frontend would still cost, stated plainly because the first draft of
+this document claimed it was free:
 
 - **A service layer that does not exist.** `tui.Options` is a boundary, not a
   transport: it hands over Go closures. Sharing it with a browser means naming
   those operations as requests and replies, which is real work.
-- **Events that do not exist either.** Liveness today is one channel that says
-  *something moved*, followed by a re-read — deliberately, because it is cheap
-  and it cannot get out of step with the files. A browser needs to be told
-  *what* moved, which means modelling the events that the TUI currently gets
-  away with not having.
+- **Events that do not exist either.** Liveness today is one channel saying
+  *something moved*, followed by a re-read. That is deliberate, because it is
+  cheap and it cannot get out of step with the files. A browser needs to be told
+  *what* moved, which means modelling events the TUI gets away with not having.
 
-Neither is hard. Both are work, and pretending otherwise is how a plan becomes
-a lie about the code: the version of this section written before any of it
-existed described an `internal/api`, an `internal/web`, named command types and
-a typed event bus, three of which were empty packages and one of which was
-never written at all.
+Neither is hard. Both are work, and pretending otherwise is how a plan becomes a
+lie about the code. The version of this section written before any of it existed
+described an `internal/api`, an `internal/web`, named command types and a typed
+event bus: three were empty packages and one was never written at all. They are
+deleted, and this is what stands in their place.
 
 ---
 
@@ -189,968 +234,798 @@ never written at all.
 
 ```
 project
-└── conversation            one .jsonl = one lane
-    ├── turn                user↔assistant pair, the atom of the spine
-    ├── run                 collapsed sequence of uninteresting turns
-    ├── junction            turn with >1 child, or a shared-uuid fork
-    └── subagent            separate tree, attached at its tool_use turn
+└── conversation            one .jsonl is one lane
+    ├── turn                a user and assistant pair, the atom of the spine
+    ├── run                 a collapsed sequence of uninteresting turns
+    ├── junction            a turn with more than one child, or a shared-uuid fork
+    └── subagent            a separate tree, attached at its tool_use turn
 ```
 
 **Edges**
-- `parent` — `parentUuid`, within a file, **resolved through bookkeeping
-  records**: Claude Code threads attachments and snapshots into the same chain,
+
+- `parent` is `parentUuid` within a file, **resolved through bookkeeping
+  records**. Claude Code threads attachments and snapshots into the same chain,
   so a turn's raw parent is usually not a turn. A Source must report the nearest
-  conversational ancestor or nothing downstream reconstructs
-- `fork` — derived: two conversations sharing a uuid; fork point = last shared.
-  *Direction* is decided by file birth time, because a fork copies the parent's
-  records verbatim — timestamps included — and people routinely fork and then
-  carry on in the original, so "diverged first" proves nothing. Where no birth
-  time exists, weaker evidence in order: containment, then length, then
-  last-touched
-- `spawn` — `meta.json.toolUseId` → the parent's `tool_use` block
-- `issued` — `sourceToolAssistantUUID`, tool_result → the assistant turn
+  conversational ancestor or nothing downstream reconstructs.
+- `fork` is derived: two conversations sharing a uuid, with the fork point at the
+  last shared record. Direction comes from file birth time, because a fork copies
+  the parent's records verbatim, timestamps included, and people routinely fork
+  and then carry on in the original, so "diverged first" proves nothing. Where
+  no birth time exists the weaker evidence is used in order: containment, then
+  length, then last touched.
+- `spawn` is `meta.json`'s `toolUseId` pointing at the parent's `tool_use` block.
+- `issued` is `sourceToolAssistantUUID`, from a tool result to the assistant turn.
 
-**Statuses** — `running · needs-you · idle · done · archived`
+**States**: `working · thinking · your turn · stopped · unanswered · archived`.
 
-### 5.1 Compaction breaks the chain — `logicalParentUuid` repairs it
+### 5.1 Compaction breaks the chain, and `logicalParentUuid` repairs it
 
 `/compact` writes a `system` record with `subtype: compact_boundary` and
-**`parentUuid: null`** — a new root — followed by a `user` record with
+**`parentUuid: null`**, which is a new root, followed by a `user` record with
 `isCompactSummary: true` carrying the summary text.
 
-Measured here: one session has 5 chainless roots; 4 are compact boundaries, and
+One session here has 5 chainless roots, of which 4 are compact boundaries, and
 each carries a `logicalParentUuid` pointing at a record still present in the same
-file. Across this history there are 35 compactions.
+file. There are 35 compactions across this history.
 
-> **Walk `parentUuid ?? logicalParentUuid`.** Naive parent-chain walking splits
-> one conversation into one lane per compaction — 35 phantom root lanes.
+> Walk `parentUuid ?? logicalParentUuid`. Naive parent-chain walking splits one
+> conversation into one lane per compaction, which is 35 phantom roots.
 
 `compactMetadata` is a gift: `trigger`, `preTokens`, `postTokens`,
 `cumulativeDroppedTokens`, `durationMs`, and the exact `preservedMessages.uuids`
-carried across. One real boundary: **1,000,241 → 15,033 tokens, 985,208 dropped,
-2m21s spent**. Render all of it; it is the most consequential thing that happens
-to a conversation and today it is invisible.
+carried across. One real boundary went from **1,000,241 tokens to 15,033,
+dropping 985,208, over 2m21s**. All of it is drawn, because it is the most
+consequential thing that happens to a conversation and today it is invisible.
 
 **The dropped context is still in the file.** Compaction changes what is *sent*,
-not what is *stored*. So branching from before a boundary recovers context the
-running session has permanently lost — which makes a compact boundary the single
-most valuable junction in the graph, and `b` on the seam is a headline feature.
+not what is *stored*. Branching from before a boundary therefore recovers context
+the running session has permanently lost, which makes a compact boundary the most
+valuable junction in the graph.
 
 ---
 
 ## 6. Screens
 
-### 6.1 The Map — home
+### 6.1 The map
 
-```
-┌ braids ─────────────────────────────────────────────────────────── storefront ──┐
-│                                                                                 │
-│  ◆ 1 needs you    ● 3 running    ○ 11 idle                    392 MB on disk    │
-│                                                                                 │
-│  ● checkout-flow                            412 turns    running     2m ago     │
-│  │    Debug import pipeline dataset issue                                       │
-│  │                                                                              │
-│  ├─◆ try-option-c                    ← t412   38 turns    needs you    0m ago   │
-│  │ │    permission · Bash(kubectl delete job dispatch-…)                        │
-│  │ │                                                                            │
-│  │ └─● cache-gate-probe              ← t31     7 turns    idle          3h ago  │
-│  │                                                                              │
-│  ├─● blobstore-density                 ← t288   63 turns    done          2d ago│
-│  │                                                                              │
-│  └─● index-contention                  ← t104   21 turns    idle         14d ago│
-│                                                                                 │
-│  ● schema-refactor                             89 turns    running    12m ago   │
-│  │                                                                              │
-│  └─● models-ts-interfaces            ← t44    15 turns    idle          5h ago  │
-│                                                                                 │
-│  ○ 6 archived                                                             ▸     │
-│                                                                                 │
-├───────────────────────────────────────────────────────────────────────────────  ┤
-│ / search   n needs-you   ↵ open   b branch   o terminal   a archive   ? help    │
-└───────────────────────────────────────────────────────────────────────────────  ┘
-```
+<img src="assets/frames/map.png" alt="the map: six conversations and their branches" width="100%">
 
-Vertical is sequence. Indent is fork depth. `← t412` is the exact turn the branch
-left its parent. Idle age is on the right because staleness is the thing you scan
-for. Archived lanes collapse to one line.
+One row per conversation. Vertical is sequence, indent is fork depth, and
+`← t14` is the exact turn a branch left its parent. Age is right-aligned because
+staleness is what people scan for. Archived rows collapse out of the way.
 
-### 6.2 The Spine — inside one conversation
+A branch appears here and in its parent's spine, because the two answer
+different questions: the map says what exists, the spine says where this thread
+split.
 
-```
- Lane:      9419fd9c                                        <j/k>   move
- Turns:     25571                                           <g/G>   first/last
- Junctions: 220                                             <n/N>   next junction
- Branches:  228                                             <esc>   back to map
+### 6.2 The spine
 
-╭─ Spine(Debug import pipeline dataset issue)[3015] ─────────────────────────     ╮
-│  TURN  WHO     WHAT HAPPENED                                           BRANCHES │
-│ ●    t1 you     This session is being continued from a previous conver…         │
-│ ⋯    t2         113 turns · 36 Bash · 2 ToolSearch · 1 AskUserQuestion          │
-│ ●  t115 you     [Request interrupted by user for tool use]                      │
-│ ●  t116 you     what's the status                                               │
-│ ⋯  t117         10 turns · 4 Bash                                               │
-│ ●  t127 you     what's the long term fix for this?                              │
-│ ●  t128 claude  Long-term, this breaks into five fixes. Ordered by lev…         │
-│   └─● try another way  (9 turns)                                          ← t128│
-│ ●  t138 claude  Bash                                                      ├─ 2  │
-╰──────────────────────────────────────────────────────────────────────────────── ╯
-```
+<img src="assets/frames/spine.png" alt="one conversation reduced to its landmarks" width="100%">
 
-**A branch appears in both places, because they answer different questions.**
-The map says *what exists*; the spine says *where this thread split*. A branch
-that left at turn 128 is drawn inline there, indented under the turn it left
-from — so reading a conversation shows you every point it diverged, without
-going back to the map. `↵` descends into a branch and `esc` walks back up the
-way you came, so the graph is navigable in both directions.
+A long conversation is mostly turns nobody will read again, so the spine keeps
+the landmarks and collapses the rest into a run that counts what it swallowed. A
+25,571-turn lane becomes about 3,000 rows, and reloading it is a query against
+the index rather than a parse of the file.
 
-Two kinds of split share one vocabulary: a branch kept inside the transcript
-(`├─ 2`, from a rewind) and one given its own file (`← t128`, from a fork). They
-are the same event, and `n` / `N` steps through both.
+**Landmarks are human turns that said something.** A tool result is recorded with
+the user role but is the harness returning output. Counting those as landmarks
+left that lane at 20,506 segments; requiring text brought it to 3,015. A junction
+is always a landmark however dull the turn.
 
 The active path is the parent chain walked back from the **last** record, which
-is exactly how the harness reconstructs context — so the spine shows the
-conversation the model would see, not the file in order.
+is how the harness reconstructs context, so the spine shows the conversation the
+model would see rather than the file in order.
 
-**Landmarks are human turns that said something.** A tool result is recorded
-with the user role but is the harness returning output; counting it as a
-landmark left a real 25,571-turn lane at 20,506 segments. Requiring text brought
-it to 3,015. Everything between landmarks collapses to one line with a tool
-tally, and a junction is always a landmark however dull the turn.
+Two kinds of split share one vocabulary: a branch kept inside the transcript,
+from a rewind, and one given its own file, from a fork. They are the same event.
 
-`n` / `N` step between **markers** — anywhere the conversation did something
-other than carry on: a branch kept inside the transcript, a branch that left for
-its own file, or an agent it spawned. Three things, one key, because scrolling a
-320-row spine to find any of them is not navigation.
+**A compaction is drawn as a seam** naming what it let go, placed before the turn
+the conversation resumed at rather than after the last one it kept, because a
+collapsed run can swallow the turn a seam nominally follows and the hole belongs
+where the thread picks up. `b` on a seam branches from the turn above it, which
+is the point of drawing them.
 
-`j` / `k` and the arrows wrap: off the top is the bottom. Half-page jumps do not,
-since landing at the far end of a long conversation loses the reader.
+**A failed tool call is a landmark**, on its own line, carrying what came back.
+Where something went wrong is the question a long conversation is most often
+reopened to answer, and a failure buried in a collapsed run cannot be found at
+all. A run that swallows failures says so: `8 turns · 2 failed`.
 
-`/` filters the spine, matching a turn's text, its tools, its turn number and —
-for a collapsed run — its summary, so filtering for `bash` finds the stretches
-that used it. The field is the same one the map uses, so `/` behaves identically
-on both screens, and `esc` peels one layer at a time: leave the field, clear the
-text, then leave the screen.
+`n` and `N` step between marks: a branch inside the transcript, a branch that
+left for its own file, an agent it spawned, a failure. The hint names them with
+their own glyphs rather than in prose, because any word general enough to cover
+four different things says nothing.
 
-**A compaction is drawn as a seam across the conversation**, naming what it let
-go:
+`j` and `k` wrap, so off the top is the bottom. Half-page jumps do not, since
+landing at the far end of a long conversation loses the reader.
 
-```
-│ ●    t1 you     This session is being continued from a previous conversation…│
-│ ══ compacted · auto · 1,000,939 → 14,569 tokens · 986,370 dropped · 2m45s ═══│
-│ ⋯    t2         113 turns · 36 Bash · 2 ToolSearch                           │
-```
+### 6.3 Search
 
-It sits before the turn the conversation resumed at, not after the last one it
-kept, because a collapsed run can swallow the turn a seam nominally follows and
-the hole belongs where the thread picks up.
+<img src="assets/frames/search.png" alt="one search across conversations, memories and work products" width="100%">
 
-**`b` on a seam branches from the turn above it.** That is the point of drawing
-them: compaction changes what is *sent*, never what is *stored*, so the turns
-behind a seam are still in the file. Branching there recovers context the
-running conversation has permanently lost — one real seam here dropped 986,370
-tokens, and the largest 15.5 million.
+Full text over every message, thought and tool call, plus every memory and the
+name of every work product. It runs on every keystroke because it can.
 
-**A failed tool call is a landmark.** Where something went wrong is the question
-a long conversation is most often reopened to answer, and a failure buried in a
-collapsed run cannot be found at all — so it is drawn on its own line, carrying
-what came back:
+**`↵` opens the screen that can act on the hit**: a turn in its spine with the
+cursor on it, a memory in the reader, a work product in the browser at its
+directory. Landing inside the thread is the point, since a result on its own
+says nothing about what came before it. When the turn was swallowed by a
+collapsed run, it lands on the run.
 
-```
-│ ⚠   t24 failed  Exit code 143 Command timed out after 2m 0s                  │
-│ ⚠   t80 failed  Permission for this action was denied by the auto mode clas… │
-```
-
-There are **790 of them** across this history, 301 in one conversation. A run
-that swallows failures says so — `8 turns · 2 failed` — so a collapsed stretch
-is never silent about having gone wrong.
-
-`n` / `N` takes its label from the marks it stops at rather than naming them in
-prose: it stops at four different things now, and any word general enough to
-cover them all says nothing.
-
-### 6.3 Search — the front door
-
-```
- Query:    blobstore density                    <↵>     jump to turn <↑/↓>   move
- Scope:    every conversation                 <tab>   change scope <esc>   back
- Hits:     130
- Took:     22.8ms
-
-╭─ Search(everywhere)[130] ────────────────────────────────────────────────────── ╮
-│ CONVERSATION              TURN KIND        MATCH                                │
-│ Review import pipel…   t2916 tool_result …Solve post [blobstore] [density] st…  │
-│ Review import pipel…   t3467 tool_result …memory/[blobstore]-[density]-arc.md … │
-│ Agent observability a…    t298 tool_result …[blobstore]-[density] t12 tool_use …│
-╰──────────────────────────────────────────────────────────────────────────────── ╯
- /blobstore density▏  ↵ jump · tab scope · esc back
-```
-
-Full text over every message, thought and tool call — the same FTS5 index
-`braids search` uses. It runs on every keystroke because it can: a query costs
-milliseconds even over 60,000 rows.
-
-**`↵` jumps to the turn, not to the result.** It opens the conversation with the
-cursor on the matching turn — landing inside the thread is the point, since a
-result on its own says nothing about what came before it. When the turn was
-swallowed by a collapsed run, it lands on the run.
-
-**`tab` changes scope.** Opened from a conversation, search starts inside it;
+**`tab` changes scope.** Opened from a conversation, search starts inside it and
 `tab` widens to everything and back.
 
-`/` and `f` are different jobs and deserve different keys: `/` searches every
-conversation, `f` narrows the list already in front of you.
+Three decisions the data forced:
 
-### 6.4 Needs-you — the switchboard
+- **A separate table, not a column.** A memory and a work product have no
+  message, no role and no position in a conversation. Crowding them into the
+  table of turns would make every column optional.
+- **Names, not contents, for work products.** One of them is 231 MB. Reading
+  them to index their text would cost more than everything else braids does put
+  together. Vendored directories are skipped, because a `node_modules` holds a
+  thousand files called `index.js` and indexing them buries the one dump you
+  were looking for.
+- **Each kind is ranked on its own and then merged** by taking one of each in
+  turn. bm25 rewards a match in a short document, and a filename is three words
+  against a turn's several hundred: ranked together, filenames bury every
+  conversation, which is the opposite of what a search across everything is for.
+  One shared query has the same flaw a level down, where a thousand filenames
+  starve the memories before the merge sees them. That one was visible as zero
+  memory hits for a word appearing in four of them.
 
-Partly answered already, without hooks. A conversation's state is readable from
-its last turn, so the map names it rather than guessing from file times:
+**Memories are kept live and work-product names are not.** A memory is what you
+write and then immediately want to find, so it is re-indexed on every refresh,
+behind a check costing one directory listing per project. Work-product names wait
+for `braids index`, because deciding whether they moved means walking a tree of
+thousands of files.
+
+`/` searches everything and `f` narrows the list in front of you. They are
+different jobs and they get different keys.
+
+### 6.4 State, and the one thing files cannot say
+
+A conversation's state is readable from its last turn, so the map names it rather
+than guessing from file times:
 
 | State | Meaning |
 |---|---|
 | `working` | a tool call is outstanding and the file is still moving |
 | `thinking` | the last turn is yours and a reply is in flight |
-| `your turn` | the assistant answered; nobody has replied |
-| `stopped` | a tool call is outstanding but nothing has moved since — interrupted mid-call |
+| `your turn` | the assistant answered and nobody has replied |
+| `stopped` | a tool call is outstanding but nothing has moved since, so it was interrupted mid-call |
 | `unanswered` | a prompt nobody ever answered, which is what cutting a branch at a question leaves |
 
-`n` / `N` step between the conversations owed something by a person — a recent
-`your turn`, a `stopped` call, an `unanswered` branch — and the facts block
-counts them. That is the switchboard for everything except one case.
+`n` and `N` step between the conversations owed something by a person, and the
+facts block counts them.
 
 **What files cannot say** is whether an outstanding tool call is *running* or
-*waiting for permission*: both are an assistant turn with no result yet. A hook
+*waiting for permission*. Both are an assistant turn with no result yet. A hook
 can, and `braids hooks --install` asks the harness to report it. A session that
-says it is waiting shows as `needs you`, which outranks anything inferred — until
-the transcript moves more than 30 seconds past the report, after which the file
-is the better witness again.
+says it is waiting outranks anything inferred, until the transcript moves more
+than 30 seconds past the report, after which the file is the better witness
+again.
 
-**Installing edits a settings file the user depends on**, which is the only
-thing braids does that is not purely additive. So it merges rather than writes:
-every hook already there is kept, braids' own entry is added beside it, a copy
-of the previous file is left next to it, `--remove` takes only what was added,
-and a settings file that cannot be parsed is refused rather than replaced by a
-guess. On this machine that meant adding to eight events already carrying
-another tool's hooks without disturbing any of them.
-
-The hook writes to a log rather than a socket, so it works whether or not braids
-is running: events that arrive while it is closed are still there when it opens.
-Only the fields braids acts on are modelled — the rest of a payload differs per
-event and per version, and guessing at it would age badly.
-
-**Hooks are opt-in and stay that way.** Installing braids does not install them:
-`go install` places a binary, and a binary that edits the user's settings file as
-a side effect of being installed is a binary that cannot be trusted. They are one
-explicit command — `braids hooks --install` — with `braids hooks` reporting status
-and `--remove` taking them back, and `--settings` pointing all three at a file
-other than `~/.claude/settings.json`.
-
-Everything else works without them. State falls back to what the transcript says
-(`working`, `thinking`, `your turn`, `stopped`, `unanswered`); only the one
-distinction files cannot make is missing. So the map states which of the two it is
-looking at — `Hooks: reporting`, or `off · see braids hooks` — because a
-capability that is absent should be visible rather than silently degraded.
+**Installing edits a file the user depends on**, which is the only thing braids
+does that is not purely additive. So it merges rather than writes: every hook
+already there is kept, braids' own entry is added beside it, `--remove` takes
+back only what was added, and a settings file that cannot be parsed is refused
+rather than replaced by a guess. On this machine that meant adding to eight
+events already carrying another tool's hooks without disturbing any of them.
 
 **A hook belongs to braids because it *is* braids**, not because it matches the
 path braids happens to occupy today. Matching the exact path means a second build
 in another directory reads the file as empty, installs a duplicate, and leaves an
-entry pointing at a binary that may be gone — which fails on every event, six
-times a session. So the entry is recognised by its program name and subcommand:
-`--install` from anywhere takes over whatever braids was there before, `--remove`
-takes back another build's entries too, and status names the other path rather
-than claiming nothing is installed. Entries are edited one at a time, never by
-dropping the group they sit in, so a hook a user has placed beside braids' own
-survives.
+entry pointing at a binary that may be gone, failing on every event six times a
+session. So an entry is recognised by its program name and subcommand. Entries
+are edited one at a time, never by dropping the group they sit in, so a hook a
+user placed beside braids' own survives.
 
-**Getting it wrong should cost one line, not a trip to the manual.** A mistyped
-command names the one that was meant, measured by edit distance and offered only
-when it is within two edits — beyond that it is a different word, and guessing at
-it wastes the reader's attention. A flag mistake answers with the flags that
-command actually takes, drawn from the flag set itself so it cannot drift from
-what the command accepts, spelled with the two dashes braids uses everywhere
-else. `braids <command> --help` prints that list on its own; `-v` and `--version`
-work as well as `version`.
+**Hooks are opt-in and stay that way.** Installing braids does not install them.
+A binary that edits the user's settings as a side effect of being installed is a
+binary that cannot be trusted. Everything else works without them; only the one
+distinction files cannot make is missing, and the map says which of the two it is
+looking at, because a capability that is absent should be visible rather than
+silently degraded.
 
-`braids hook` is the one command meant for the harness rather than a person. It
-reads a payload on stdin, so typed by hand it used to wait on a terminal that
-would never send it one — indistinguishable from a hang. It now checks whether
-stdin is a terminal, by ioctl rather than by file mode so a redirect from
-`/dev/null` still reads as the harness, and says who runs it. Piped, it stays
-silent whatever it is given: a hook that fails loudly breaks the session it is
-reporting on.
+### 6.5 Work products, as a size browser rather than a file list
 
-**braids should be usable by the thing it is watching.** Every command that
-reports something takes `--json`, so an agent can search its own past
-conversations, find where a decision was made and branch from that exact turn.
-Two properties make that work and neither is incidental: IDs are whole in JSON —
-the tables shorten them with an ellipsis to fit a terminal, and a caller that
-cannot hand an ID back has been given nothing — and an empty result is `[]`
-rather than a sentence, so nothing has to tell "no matches" from a parse failure.
-The JSON types are declared separately from the ones braids works with
-internally: what it prints for a program is a promise, what it holds in memory
-is not.
-
-The same ellipsis is accepted on the way back in. Copying a shortened ID off the
-screen and pasting it is the obvious thing to do with one, and refusing an ID
-braids itself printed teaches nobody anything.
-
-**Every list screen filters the same way**, with `f`, and says in its title
-what is being held back. `/` means *search everything* throughout braids and is
-claimed before any screen sees it — a filter that opened itself on `/` swallowed
-every keystroke after it, silently, because an empty field looks like no field
-at all. An open field now says so on the status line, and `editing()` lists
-every field braids has: one missing from it quits the program mid-word.
-
-**The mark is decoration, and priced accordingly.** braids sets its name in the
-angular ASCII face k9s uses, flush right in the header, in the same accent as
-everything else that is braids' own voice rather than the harness's data. It is
-the last thing to get room and the first to lose it: the facts, every key
-binding, and the glyph key all come first — a key that works and is not listed
-may as well not exist, and the glyph key names marks that are on the screen
-right now, while the mark names a tool you are plainly already running. Two
-sizes exist so a normal terminal gets one at all, and below that it simply goes.
-The gap between the two legends then absorbs whatever room nothing else wanted,
-so a wide terminal reads as separated columns rather than one long list, and a
-narrow one loses nothing to spacing.
-
-`braids help` and `braids version` carry it too — the full face and the small
-one respectively — coloured only when stdout is a terminal, because escape codes
-in a pipe are noise in somebody's grep.
-
-### 6.4b Work products — a size browser, not a file list
+<img src="assets/frames/work.png" alt="a session's work products, heaviest first" width="100%">
 
 A session's scratch outweighs its transcript by an order of magnitude: 3.3 GB
-against 363 MB on this machine, all of it under `tmp/`, and nine files account
-for 1.3 GB of it. Deleting the lot was the only option braids offered, which is
-the wrong shape for a conversation whose transcript you want and whose 231 MB
-JSON dump you do not.
+against 360 MB here, and nine files account for 1.3 GB of it. Deleting the lot
+was the only option braids first offered, which is the wrong shape for a
+conversation whose transcript you want and whose 231 MB JSON dump you do not.
 
-So `w` opens the same shape `du` and `ncdu` settled on: one level at a time,
-heaviest first, directories weighed by everything beneath them. Twelve thousand
-files at thirteen levels deep listed flat would be accurate and useless; the
-question is always which single branch is holding the room, and two keystrokes
-answer it.
+So `w` opens the shape `du` and `ncdu` settled on: one level at a time, heaviest
+first, directories weighed by everything beneath them. Twelve thousand files at
+thirteen levels deep listed flat would be accurate and useless. The question is
+always which single branch is holding the room, and two keystrokes answer it.
 
 `state.json` and `timeline.jsonl` are shown and refused. They are the harness's
-own record of a job — `state.json` says what the session is doing right now —
-and removing either would corrupt its view of a job that may still be running.
-Everything the space is actually in sits under `tmp/`.
+own record of a job, and removing either would corrupt its view of a job that may
+still be running.
 
-Deleting goes to the bin like everything else, and says so plainly: *moved to
-the bin — still holding 231 MB until it expires*. Someone reclaiming a disk is
-watching a disk, not a list, and a bin that silently keeps the bytes would make
-braids a liar.
+Deleting goes to the bin like everything else, and says so plainly, because
+someone reclaiming a disk is watching a disk rather than a list and a bin that
+silently keeps the bytes would make braids a liar.
 
 **Work products change without the transcript changing**, which the index could
 not see: `Sync` re-reads a conversation only when its transcript moved, so a
-deleted scratch file left the map's work column reporting the old size until
-something unrelated happened to that conversation. Measuring means walking the
-directories — tens of milliseconds against a few gigabytes — so it is too
-expensive to do on every refresh and is instead done by whatever changed them:
-deleting one file, deleting them all, or restoring any of it from the bin.
+deleted scratch file left the work column reporting the old size until something
+unrelated happened to that conversation. Measuring means walking directories, so
+it is done by whatever changed them rather than on every refresh.
 
-`↵` on a file shows it, with two limits the data forces. **Only the head is
-read** — 128 kB — because the largest work product on this machine is 242 MB
-and a viewer that reads the file is a viewer that stalls the program and
-exhausts memory; the frame says how much of the file it holds and that the rest
-is on disk, with the amount before the path, since a path deep in a job
-directory would otherwise push it off the end of the line. **Data is named
-rather than drawn**: 3,757 of 12,819 work products here are binary, and a
-database rendered as characters is a thousand screens of noise. Detection is a
-NUL byte in the sample, which no text format contains and every binary one
-here does, backed by a printable-character ratio for the rest. `y` copies the
+<img src="assets/frames/file.png" alt="peeking at the head of a file a session wrote" width="100%">
+
+`↵` on a file shows it, with two limits the data forces:
+
+- **Only the head is read**, 128 kB, because the largest work product here is
+  242 MB and a viewer that reads the file is a viewer that stalls the program.
+  The frame says how much it holds and that the rest is on disk, with the amount
+  before the path, since a path deep in a job directory would push it off the
+  end of the line.
+- **Data is named rather than drawn.** 3,757 of 12,819 work products here are
+  binary, and a database rendered as characters is a thousand screens of noise.
+  Detection is a NUL byte in the sample, which no text format contains and every
+  binary one here does, backed by a printable-character ratio for the rest.
+
+Lines are broken, never reflowed: a line of JSON means what its columns say, and
+rewrapping it on word boundaries would rearrange the meaning. `y` copies the
 path, because what you do with a file braids will not show you is open it in
 something that will.
-
-Lines are broken, never reflowed. A line of JSON or of a bucket listing means
-what its columns say, and rewrapping it on word boundaries would rearrange the
-meaning.
 
 Nothing is probed to decorate the listing. Deciding whether each of eight
 thousand files is readable would mean opening all of them, so braids opens the
 one that was asked for and reports what it found.
 
-Artifacts whose conversation is gone are found by `braids work --orphans` and
+Work products whose conversation is gone are found by `braids work --orphans` and
 reclaimed with `--reclaim`. Nothing will ever look at them again, and nothing
 else would ever clear them up.
 
-### 6.4c Memories — read-only, and shaped for curation
+---
+
+### 6.6 Memories
+
+<img src="assets/frames/memories.png" alt="what a project remembers, with the memory nothing loads marked" width="100%">
 
 A harness keeps memories as small markdown files beside the transcripts, with an
-index — MEMORY.md — that is what a session actually loads. Two consequences
-follow, and they are the reason this screen exists: a memory can be present and
-do nothing, by being absent from the index, and an index row can point at a file
-that is gone. Neither is visible from inside a session. On this machine the
-first check found one such memory out of 83.
+index, `MEMORY.md`, that is what a session actually loads. Two consequences
+follow, and they are why this screen exists: a memory can be present and do
+nothing, by being absent from the index, and an index row can point at a file
+that is gone. Neither is visible from inside a session.
 
-Most memories also record the session that wrote them: 62 of 76 here, and 61 of
-those conversations braids already has indexed. That is a real edge, so `↵` on a
-memory lands on the conversation where the decision was actually made — and the
-spine is already there to find the turn.
+Most memories also record the session that wrote them, 62 of 76 here, and 61 of
+those conversations are already indexed. That is a real edge, so `c` lands on the
+conversation where the decision was made, and the spine is already there to find
+the turn.
 
 Three findings are reported apart because they mean different things. A memory
 the index omits is broken. An index row with no file is a stale pointer. A link
 to a name that does not exist yet is a legitimate note to self, and braids says
 so rather than calling it a fault.
 
-That distinction has to survive into the wording, or it does not exist. Calling
-a loose link "points at a memory that is missing" invites someone to press the
-repair key on it, get told the index is already right, and reasonably conclude
-braids is broken — the mark says fix me, the message says nothing to fix, and
-both are true of different things. So the legend says "links to one not written
-yet", and repairing an index that needs nothing says which link the row is
-waiting on and that it is a note. There is no key to fix one: the only ways are
-to delete somebody's note, invent the memory it points at, or guess which
-existing memory was meant.
+That distinction has to survive into the wording or it does not exist. Calling a
+loose link "points at a memory that is missing" invites someone to press the
+repair key, get told the index is already right, and reasonably conclude braids
+is broken: the mark says fix me, the message says nothing to fix, and both are
+true of different things. So the legend says "links to one not written yet", and
+repairing an index that needs nothing says which link the row is waiting on and
+that it is a note. There is no key to fix one, because the only ways are to
+delete somebody's note, invent the memory it points at, or guess which existing
+memory was meant.
 
-`↵` reads the memory itself. The list says what braids knows *about* one — its
-kind, its links, whether the index loads it, which conversation wrote it — and
-that is not what you came to check. The text is wrapped to the frame, scrolls,
-and shows the body without the frontmatter, because the frontmatter is already
-the facts above it. `c` goes to the conversation, from the list or from the
-reader; a search hit for a memory opens it read, since searching for one means
-wanting to read it.
+<img src="assets/frames/memory.png" alt="reading a memory with its markdown rendered" width="100%">
 
-### 6.4c-2 Curation — three operations, one obligation
+`↵` reads the memory itself. The list says what braids knows *about* one, and
+that is not what you came to check. The body is rendered as markdown, wrapped to
+the frame, without the frontmatter, because the frontmatter is already the facts
+above it.
 
-Everything that changes a memory changes the index in the same breath. The
-index is what a session loads, so a memory deleted without its row leaves a
-pointer to nothing and one renamed without its row becomes invisible while
-still sitting on disk. Both are failures you cannot see from inside a session,
-and both are what braids found in a real set the first time it looked — so they
-are the normal outcome of editing these files by hand, not a hypothetical.
+The markdown subset is deliberately small: emphasis, code spans, headings, list
+bullets and fenced blocks, because that is what these files use. Three rules it
+needs to be usable on real notes:
 
-**Delete** (`d`) sends the file to the bin, like every other deletion in
-braids, and drops its row. The index is written first: a row pointing at a
-missing file is a worse state than a file with no row, because the row is the
-part that gets read.
+- **A paragraph is joined before it is styled.** Markdown reflows a paragraph, so
+  emphasis may open on one line and close on the next, and real notes wrap at 78
+  columns. Rendered line by line, `**narrow the / lock**` is two unmatched marks
+  and the reader shows the asterisks.
+- **`2 * 3` is arithmetic.** An emphasis mark followed by a space does not open a
+  span.
+- **`snake_case_names` keep their underscores.** An underscore between word
+  characters is part of the word.
 
-**Repair** (`i`) makes a project's index agree with its files — a row for every
-memory that has none, and none for a file that is gone. It is the highest value
-per keystroke, because it fixes the invisible failure and needs no judgement
-about content. Rows that were already right are written back byte for byte,
-including any shape this code does not model.
+Styling happens before wrapping, and wrapping is done here rather than by a
+general text wrapper, because a wrapper that knows nothing about styles leaves
+them open across a line break: the bold spills into the frame border and every
+line after it.
+
+### 6.7 Curating memories
+
+Everything that changes a memory changes the index in the same breath. The index
+is what a session loads, so a memory deleted without its row leaves a pointer to
+nothing, and one renamed without its row becomes invisible while still sitting on
+disk. Both are failures you cannot see from inside a session, and both are what
+braids found in a real set the first time it looked, so they are the normal
+outcome of editing these files by hand rather than a hypothetical.
+
+**Delete** (`d`) sends the file to the bin, like every other deletion, and drops
+its row. The index is written first: a row pointing at a missing file is a worse
+state than a file with no row, because the row is the part that gets read.
+
+**Repair** (`i`) makes a project's index agree with its files. It is the highest
+value per keystroke, because it fixes the invisible failure and needs no
+judgement about content. Rows that were already right are written back byte for
+byte, including any shape this code does not model.
 
 **Rename** (`r`) follows the name everywhere it was used: the file, the index
-row, the frontmatter's own `name`, and every `[[link]]` pointing at it — and
-says how many links it rewrote. That last part is why it is one operation
-rather than three: a rename that leaves fourteen memories pointing at a name
-that no longer exists has traded one tidy name for fourteen broken references.
+row, the frontmatter's own `name`, and every `[[link]]` pointing at it, and says
+how many links it rewrote. That last part is why it is one operation rather than
+three. A rename that leaves fourteen memories pointing at a name that no longer
+exists has traded one tidy name for fourteen broken references.
 
 **Retype was considered and dropped.** The type is a label braids groups and
-filters by; nothing loads or skips a memory because of it. Changing one is
-worth a keystroke only if a memory is badly filed, and a wrong label costs
-nothing but a wrong grouping.
+filters by; nothing loads or skips a memory because of it. A wrong label costs a
+wrong grouping and nothing else.
 
 **The guard.** braids editing a file a live session may also be writing breaks
 one writer per file, and what is at stake is something a person asked to be
 remembered. So an edit is refused while anything in that project is running,
-naming the conversation that is holding it up. That is stricter than it needs
-to be — a session is rarely touching memory — and cheaper than being wrong.
+naming the conversation holding it up. That is stricter than it needs to be and
+cheaper than being wrong.
 
-The index is replaced atomically and at `0600`, because a half-written index is
-a session that loads half a memory set.
+The index is replaced atomically at `0600`, because a half-written index is a
+session that loads half a memory set. Everything else **keeps the mode it
+found**: an earlier version tightened memory files from `0644` to `0600` as a
+side effect of rewriting them, which is not braids' decision to make.
 
-### 6.4d Search across everything
+### 6.8 Reading a transcript as it is written
 
-Search covers conversations, memories and the names of work products, and every
-result says which it is — a hit whose kind you cannot tell is one you have to
-open before you understand it. `↵` opens the screen that can act on it: a turn
-in the spine, a memory on the memory screen, a work product in the browser at
-its directory with the file under the cursor.
-
-Three decisions the data forced:
-
-**A separate table, not a column.** A memory and a work product have no message,
-no role and no position in a conversation. Crowding them into the table of turns
-would make every column optional.
-
-**Names, not contents, for work products.** One of them is 231 MB. Reading them
-to index their text would cost more than everything else braids does put
-together — and vendored directories are skipped, because a `node_modules` holds
-thousands of files called `index.js` and indexing them buries the one dump you
-were looking for. On this machine that is 8,823 names indexed out of 12,957
-files.
-
-**Each kind is queried for its own best results, then merged by taking one of
-each in turn.** bm25 rewards a match in a short document, and a filename is
-three words against a turn's several hundred: ranked together, filenames bury
-every conversation, which is the opposite of what a search across everything is
-for. One shared query has the same flaw one level down — a thousand filenames
-starve the memories before the merge sees them.
-
-**Memories are kept live; work-product names are not.** Memories are what you
-write and then immediately want to find, so they are re-indexed on every
-refresh — but only after a check that costs a directory listing per project,
-comparing how many there are and when one last changed. Work-product names wait
-for `braids index`, because deciding whether *they* moved means walking a tree
-of thousands of files.
-
-### 6.4e Reading a transcript that is being written
-
-Transcripts are append-only, and until this was built braids ignored that: a
-changed conversation was deleted from the index and re-read from byte zero. On
-the largest here that is **3.3 seconds of parsing for every turn** — and it ran
-on the interface thread, so the frame froze for each one. Chatting in a big
-conversation made the map unusable.
+Transcripts are append-only, and braids at first ignored that: a changed
+conversation was deleted from the index and re-read from byte zero. On the
+largest here that is **3.3 seconds of parsing for every turn**, and it ran on the
+interface thread, so the frame froze for each one. Chatting in a big conversation
+made the map unusable.
 
 Each lane now records the byte after the last complete record read, and the last
 conversational message seen. A conversation that grew is read from there:
-**3306 ms → 43 ms**, and it no longer scales with the conversation.
+**3,306 ms to 43 ms**, and it no longer scales with the conversation.
 
 Three things this had to get right, each of which failed first:
 
 - **A parent behind the offset.** A message's `parentUuid` usually names a
-  bookkeeping record, resolved by walking a map built while scanning. Starting
-  mid-file, that map is empty. A transcript is linear, so a record appended
-  after the boundary has the last conversational message as its ancestor — and
-  an *empty* parent stays empty, because that is a compaction boundary
+  bookkeeping record, resolved by walking a map built while scanning, and
+  starting mid-file that map is empty. A transcript is linear, so a record
+  appended after the boundary has the last conversational message as its
+  ancestor. An *empty* parent stays empty, because that is a compaction boundary
   deliberately having none, and giving it one grafts a new root onto the
   conversation it replaced.
 - **A compaction straddling the boundary.** A compaction is announced one record
-  before the message it belongs to. Announced at the end of one read, it
-  attached to nothing and was lost. A read that ends still holding one now stops
-  before it, so the next read sees the pair together.
+  before the message it belongs to. Announced at the end of one read it attached
+  to nothing and was lost, so a read that ends still holding one now stops before
+  it and the next read sees the pair together.
 - **A record still being written.** A line with no newline yet is left where it
-  is rather than half-parsed, so the offset only ever lands on a record
-  boundary.
+  is rather than half-parsed, so the offset only ever lands on a record boundary.
 
 Appending is refused for every shape that is not growth from a prefix already
-read — never indexed, shrunk, rewritten to the same length, an offset past the
-end, a source that cannot be tailed — and falls back to the whole file. Being
-wrong corrupts a conversation's history; re-reading is merely slow. A test
+read: never indexed, shrunk, rewritten to the same length, an offset past the
+end, or a source that cannot be tailed. All of those fall back to the whole file.
+Being wrong corrupts a conversation's history; re-reading is merely slow. A test
 grows a transcript one turn at a time and compares every row, count, title and
 compaction against reading the same file whole.
 
 **The read also moved off the interface thread**, with changes coalesced while
 one is in flight, so no conversation of any size can freeze the frame. That made
 the sidecars concurrently read while written, which for a Go map is not stale
-data but a crash, so they are now guarded.
+data but a crash, so they are guarded.
 
-**The open conversation is re-read too**, so its spine grows while you sit on
-it. Before this it was a snapshot taken when you pressed `↵` — branches
-appearing off it refreshed, the turn count beside it on the map climbed, and the
-turns themselves never arrived. Re-reading is a query against the index rather
-than a parse of the file, tens of milliseconds on the longest conversation
-here, which is why it goes with the rest of the work off the thread.
+**The open conversation is re-read too**, so its spine grows while you sit on it.
+Before that it was a snapshot taken when you pressed `↵`: branches appearing off
+it refreshed, the turn count beside it on the map climbed, and the turns
+themselves never arrived.
 
 The cursor obeys one rule: **hold your place, unless you were at the end.**
 Someone on the last turn of a live session is watching it arrive and should keep
 watching; someone reading turn 400 is not, and dragging them to the bottom would
-lose the thing they were reading. Rows are found again by identity, which the
-filter already relied on. A subagent is exempt — it is read from its own
-transcript, so reloading by conversation ID would replace it with the wrong
-spine entirely.
+lose the thing they were reading. Rows are found again by identity. A subagent is
+exempt, because it is read from its own transcript and reloading by conversation
+ID would replace it with the wrong spine entirely.
 
-### 6.5 Branch — inline at the junction, never a modal
+### 6.9 Branch
 
-```
-│ ●   t5 you     Give one command to create a worktree.                          │
-│   └─ branch from t5 as thought: create-worktree▏  tab switches kind · enter ·  │
-```
+The field opens on the turn it will cut, pre-filled from that turn's own words,
+and `tab` chooses what kind of branch it is:
 
-The field opens on the turn it will cut, pre-filled from that turn's own words
-(§8), and `tab` chooses what kind of branch it is:
-
-- **thought** — shares the working directory. Exploring, reading, planning.
-  The cheap default, because most branches never write anything.
-- **workspace** — asks the harness for a git worktree of its own, so two
-  branches that both write to the repo cannot collide.
+- **thought** shares the working directory. Exploring, reading, planning. The
+  cheap default, because most branches never write anything.
+- **workspace** asks the harness for a git worktree of its own, so two branches
+  that both write to the repo cannot collide.
 
 braids does not create the worktree. `--worktree` is the harness's own flag and
-its own job; braids records the choice and puts the flag in the resume command,
-so `y` and `o` carry it. The kind is chosen fresh each time rather than
-remembered — a workspace writes files, and that should be a decision.
+its own job; braids records the choice and puts the flag in the resume command.
+The kind is chosen fresh each time rather than remembered, because a workspace
+writes files and that should be a decision.
 
 **A workspace is refused where one could not exist.** A worktree needs a git
-repository, and a conversation run somewhere that is not one cannot have a
-branch of that kind. Discovering that when the branch is resumed — after it has
-been created and named — is far too late, so `tab` says so and stays a thought.
-For the same reason the flag is left out of a resume command whose directory
-has stopped being a repository: a flag known to fail is worse than one absent.
+repository, and a conversation run somewhere that is not one cannot have a branch
+of that kind. Discovering that when the branch is resumed, after it has been
+created and named, is far too late. For the same reason the flag is left out of a
+resume command whose directory has stopped being a repository: a flag known to
+fail is worse than one absent.
 
 `r` renames a conversation on the map, pre-filled with what it is called now.
-Names live in braids' sidecar, so renaming never touches a transcript, and
-emptying the field restores whatever the harness called it.
+Names live in the sidecar, so renaming never touches a transcript, and emptying
+the field restores whatever the harness called it.
 
-### 6.6 Subagent — in the conversation that spawned it
-
-```
-│ ●  t633 claude  Read                                                             │
-│   ├─⊕ Explore · Verify console edit points                            42 turns   │
-│   ├─⊕ Explore · Verify job-watcher extension points                   49 turns   │
-│   ├─⊕ storefront:code-reviewer · Harsh pre-PR review of pipeline fix    31 turns │
-```
+### 6.10 Subagents
 
 A subagent is a whole conversation the harness collapses into one `tool_use` and
-one `tool_result`. One real lane here hides **ten of them, 409 turns in total**,
-none of which Claude Code offers any way to read.
-
-They are drawn against the turn that spawned them, joined by the `toolUseId` in
-each agent's meta file.
+one `tool_result`. One real lane here hides ten of them, 409 turns in total, none
+of which Claude Code offers any way to read. They are drawn against the turn that
+spawned them, joined by the `toolUseId` in each agent's meta file.
 
 **`↵` reads one in place**, from its own transcript, writing nothing. Deciding
-whether an agent is worth keeping should follow reading it, not precede it — and
-promoting first would have meant a file on disk for every agent you merely
-glanced at. While reading one, the actions that assume a resumable session — `b`,
-`y`, `o` — say so rather than half-working: a subagent is not a session until it
-is promoted.
+whether an agent is worth keeping should follow reading it rather than precede
+it, and promoting first would mean a file on disk for every agent you merely
+glanced at. While reading one, the actions that assume a resumable session say so
+rather than half-working: a subagent is not a session until it is promoted.
 
-**`p` promotes it**, from the parent's spine or from inside the agent being read:
-clearing the sidechain mark and giving it a session ID is enough for the harness
-to resume it. Verified end to end — a promoted agent answered a question about
-its own earlier work.
+**`p` promotes it**, from the parent's spine or from inside the agent being read.
+Clearing the sidechain mark and giving it a session ID is enough for the harness
+to resume it, verified end to end by a promoted agent answering a question about
+its own earlier work. A promoted agent shares no message IDs with its parent, so
+nothing could infer where it came from, and its provenance is recorded, which is
+what hangs it under the conversation that spawned it.
 
-A promoted agent shares no message IDs with its parent, so nothing could infer
-where it came from. Its provenance is recorded (§4), which is what hangs it
-under the conversation that spawned it.
-
-### 6.7 Archive and delete
+### 6.11 Archive, delete, and the bin
 
 `a` archives the selected conversation and `A` reveals what is archived. That is
-the gesture for most tidying: instant, reversible, and it leaves the
-conversation searchable, so nothing has to be deleted to get a map that reflects
-what is being worked on. An archived row keeps its place in the tree when shown,
-drawn with `○` rather than `●`.
+the gesture for most tidying: instant, reversible, and it leaves the conversation
+searchable, so nothing has to be deleted to get a map that reflects what is being
+worked on. An archived row keeps its place in the tree when shown, drawn with `○`
+rather than `●`, and its status column says `archived` rather than whatever it
+was doing when it was put away.
 
-**The title always says what is being held back** — `Conversations(all)[31] · 4
-archived hidden` — because a map that silently omits things is one you stop
-trusting.
+**The title always says what is being held back**, because a map that silently
+omits things is one you stop trusting.
 
-`d` deletes, moving everything a conversation owns — the transcript and the
-directory beside it holding its subagents and tool output — into
-`~/.braids/trash/`, and reporting what was reclaimed.
+`d` deletes, moving everything a conversation owns into the bin and reporting
+what was reclaimed. `D` discards a conversation's work products and keeps the
+conversation, which is the deletion nobody regrets.
 
-### 6.8 The bin — recovering something deleted days ago
+<img src="assets/frames/bin.png" alt="the bin, holding a deleted file for 14 days" width="100%">
 
-```
- Deleted:    3                    <j/k>   down / up     <d>     delete for good
- Holding:    7 kB                 <↵ / r> restore       <esc>   back
- Kept for:   14 days
- Next to go: in 1h
-
-╭─ Deleted[3] ─────────────────────────────────────────────────────────────────── ╮
-│ CONVERSATION                              DELETED       SIZE       EXPIRES      │
-│ deleted an hour ago                         1h ago     4.0 kB       in 13d      │
-│ the one you want back                       2d ago     2.0 kB       in 12d      │
-│ nearly expired                             13d ago     1.0 kB        in 1h      │
-╰──────────────────────────────────────────────────────────────────────────────── ╯
-```
-
-`u` opens it. A one-step undo was the wrong shape: it reached one deletion back,
-and only for as long as the session lived — no help at all for wanting the
-eighth of ten conversations back two days later. Recovering something means
-seeing what was deleted, which is a screen rather than a keystroke.
+`u` opens the bin. A one-step undo was the wrong shape: it reached one deletion
+back, and only for as long as the session lived, which is no help at all for
+wanting the eighth of ten conversations back two days later.
 
 Each entry carries its own manifest beside the files it holds, so the bin is
-readable by a session that did not do the deleting. `↵` restores, `d` removes
-for good, and every row says how long is left before it goes on its own —
-**turning amber inside the last two days**, so nothing quietly passes the point
-of recovery. Retention is 14 days, and expiry runs when the bin is opened so the
-deadlines shown are true.
+readable by a session that did not do the deleting. Every row says how long is
+left before it goes on its own, **turning amber inside the last two days**, so
+nothing quietly passes the point of recovery. Retention is 14 days, and expiry
+runs when the bin is opened so the deadlines shown are true.
 
-Two rules the notice states outright:
+Binned files **keep the directories they came from**. Named by basename alone,
+two files called `data.json` collided and one was silently lost. That is data
+loss, so there is a test that bins two files of the same name and reads both
+back.
+
+Three rules the notices state outright:
 
 - **It never cascades.** A fork carries its own copy of the prefix it shares, so
   deleting a parent cannot break a child. That is the fear that makes people
   hoard, and here it is simply not true.
 - **Orphans move up, not out.** A branch whose parent was deleted is redrawn
-  under the nearest conversation that is still there, following what was
-  recorded (§4). Inference cannot do this on its own: every fork of a fork
-  shares a byte-identical prefix with the whole line above it, so the counts tie
-  and the branch lands at the shallowest ancestor. Where nothing was recorded —
-  a branch made before braids, or by `/branch` — that tie is still the best
-  available answer, and it is why provenance is recorded at all.
+  under the nearest conversation still there, following what was recorded.
+  Inference cannot do this alone: every fork of a fork shares a byte-identical
+  prefix with the whole line above it, so the counts tie and the branch lands at
+  the shallowest ancestor.
 - **A running conversation is refused.** Deleting a session mid-turn is the one
-  accident worth preventing outright; `d` from inside a conversation is
-  redirected to the map, where you can see what would go.
-
-**`D` discards a conversation's work products and keeps the conversation.** A
-harness stores scratch files and job records outside the transcript, and they
-dwarf it: **3.5 GB against 365 MB** here, held by two conversations out of
-thirty-three. Letting them go costs nothing that can be read again, which makes
-it the deletion nobody regrets — and it goes to the same bin, so even that is
-reversible.
-
-A `WORK` column appears when anything has them, blank where there are none so
-the eye lands only on what is actually holding something. Sizing costs a walk of
-a few thousand directory entries, which is milliseconds.
-
-Still to come: multi-select and the filtered sweep.
+  accident worth preventing outright, and `d` from inside a conversation is
+  redirected to the map where you can see what would go.
 
 ---
 
 ## 7. Keymap
 
+Every binding a screen has is in that screen's own header, which is the only
+copy that cannot go stale. This is the same list, for reading away from the
+program.
+
+**The map**
+
 | Key | Action | Key | Action |
 |---|---|---|---|
-| `/` | search everything | `b` | branch from here |
-| `n` | needs-you queue | `c` | clone lane / subtree |
-| `j` `k` | move | `p` | promote subagent |
-| `h` `l` | collapse / expand | `o` | open terminal for lane |
-| `↵` | open lane / read message | `y` | copy resume command |
-| `␣` | expand run or subagent | `a` | archive |
-| `g` `G` | top / bottom | `d` | delete (undoable) |
-| `⇥` | switch pane | `u` | undo |
-| `esc` | zoom out one level | `f` | filter (incl. project) |
-| `r` | rename lane | `m` | mark / multi-select |
-| `n` `N` | next / previous marker | | *(spine)* |
-| `1`–`9` | jump to lane | `?` | help |
-| `q` | quit | `r` | rebuild index |
+| `j` `k` | down, up | `n` `N` | next, previous waiting on you |
+| `↵` | open the spine | `d` | delete to the bin |
+| `/` | search everything | `w` `D` | work products, discard them all |
+| `f` | filter this list | `u` | open the bin |
+| `a` `A` | archive, show archived | `M` | memories |
+| `r` | rename | `y` `o` | copy resume, open a terminal |
+| `q` | quit | | |
 
-`esc` = go up a level, echoing Claude Code's own `esc esc` rewind.
+**The spine**
+
+| Key | Action | Key | Action |
+|---|---|---|---|
+| `j` `k` | down, up | `n` `N` | next, previous mark |
+| `↵` | open the branch or agent | `p` | promote the agent |
+| `b` | branch here | `f` | filter turns |
+| `m` | merge a branch back | `a` | archive |
+| `/` | search everything | `y` `o` | copy resume, open a terminal |
+| `esc` | back to the map | `q` | quit |
+
+**Search**: `↵` open the result · `tab` change scope · `↑` `↓` move · `esc` back
+
+**Work products**: `j` `k` · `↵` open or descend · `d` to the bin · `f` filter ·
+`esc` up a level. Reading a file: `j` `k` scroll · `y` copy the path · `esc` back
+
+**Memories**: `j` `k` · `↵` read · `c` the conversation · `n` `N` next marked ·
+`r` rename · `i` repair the index · `d` delete · `f` filter · `esc` back
+
+**The bin**: `j` `k` · `↵` or `r` restore · `d` delete for good · `f` filter ·
+`esc` back
+
+`esc` goes up a level, echoing Claude Code's own `esc esc` rewind, and it peels
+one layer at a time: leave the field, clear the text, then leave the screen.
 
 ---
 
-## 8. Core interactions
+## 8. Core operations
 
-**Branch from a message.** Walk the raw chain from the chosen turn to the root —
-bookkeeping records included, since the harness wrote them — copy those records
-into a new file with a fresh `sessionId`, prepend a `custom-title` so the branch
-is named on the map, and append a `last-prompt` pinning the leaf. The new file is
-built in a temp file and renamed into place, so an interrupted branch leaves
-either a whole lane or none. **The source is opened read-only and never written
-to**, which a test asserts by hashing it before and after.
+**Branch from a message.** Walk the raw chain from the chosen turn to the root,
+bookkeeping records included since the harness wrote them, copy those records
+into a new file with a fresh `sessionId`, prepend a title so the branch is named
+on the map, and append a record pinning the leaf. The new file is built in a temp
+file and renamed into place, so an interrupted branch leaves either a whole lane
+or none. **The source is opened read only and never written to**, which a test
+asserts by hashing it before and after.
 
-Verified end to end: a branch cut at turn 2 of a real conversation resumed under
-`claude --resume` with exactly that prefix as its context, and appeared on the
-map as a child at `← t2`.
+Verified end to end: a branch cut at turn 2 of a real conversation resumed with
+exactly that prefix as its context, and appeared on the map as a child at `← t2`.
 
-**Clone a graph.** Copy each lane's file, rewrite `sessionId`, keep message uuids.
-Topology reassembles itself, because forks are detected by shared uuids.
+**Branching a running lane is allowed.** Forking writes a new file, so the
+running session is untouched. Any completed turn is permitted; only the in-flight
+turn is blocked, because its records are still being written. This is the point:
+you watch an agent go wrong, branch from three turns before it did, and try
+another way without killing it.
 
 **Promote a subagent.** Set `isSidechain: false`, rewrite `sessionId`, drop
-`agentId`, write as a top-level file.
+`agentId`, write as a top-level file. The subagent's own transcript is not
+touched.
 
-**Merge.** `m` on a branch in the spine joins it back, as a **new** conversation
+**Merge.** `m` on a branch in the spine joins it back as a **new** conversation
 holding the base in full and then the branch's own turns. Neither original is
-touched — a test hashes both before and after.
+touched, which a test asserts by hashing both.
 
-It is a splice of real messages, not a summary of them: the turns that happened
-on the branch are carried over as they were written. Anthropic's own request for
-this concedes merge can only ever be summary injection; at the file layer it
-does not have to be.
-
-Carried records are given fresh IDs. Reusing them would leave a conversation
-sharing message IDs with the branch, which is precisely what braids reads as a
-fork — the merged lane would draw as a branch of the thing it merged.
+It is a splice of real messages, not a summary of them. Carried records are
+given fresh IDs, because reusing them would leave a conversation sharing message
+IDs with the branch, which is precisely what braids reads as a fork: the merged
+lane would draw as a branch of the thing it merged.
 
 **A merge only makes sense when both sides carried on after they parted.** A
 branch that left and was never followed already holds the whole conversation it
 came from, so joining them would write a copy of the branch under a new name.
 braids refuses that and says which one to open instead. The case merge exists
 for is the other one: you branched at turn 20 to try something, went back and
-kept working in the original, and now want both in one context — which is
-exactly what happens when two agents work from the same point at once.
+kept working in the original, and now want both in one context, which is exactly
+what happens when two agents work from the same point at once.
 
 **A merge is never one keystroke.** It is the only action that combines two
-histories, so `m` reports what it would carry over and waits: *merge try option
-c into this? 14 turns would be carried over · enter yes · esc no*. Fourteen
-turns and one turn are different decisions.
+histories, so `m` reports what it would carry over and waits. Fourteen turns and
+one turn are different decisions.
 
 Verified end to end: a conversation of ROOT, STEM, TRUNK merged with a branch of
 LEAFA, LEAFB resumed as `ROOT, STEM, TRUNK, LEAFA, LEAFB`.
 
 **Continue a conversation.** `y` copies `claude --resume <id> --name <title>`
-through the terminal's own copy escape (OSC 52), so it works over SSH with no
-helper binary. `o` opens a terminal when `BRAIDS_SPAWN` names one — a template
-understanding `{cmd} {id} {name} {dir}` — and otherwise copies the command and
-says how to configure a launcher.
+through the terminal's own copy escape, OSC 52, so it works over SSH with no
+helper binary. `o` opens a terminal: tmux and iTerm2 are driven directly, and
+anywhere else `BRAIDS_SPAWN` names a template understanding `{cmd}`, `{name}`
+and `{dir}`. With neither, `o` copies the command rather than guessing at a
+setup.
 
 A title and a working directory are data braids read out of a transcript, so
-every value substituted into that template is shell-quoted first: the template
-supplies the shell syntax and the values never do. Unquoted, a conversation
-called `x; rm -rf ~ #` is a command rather than a name, and pressing `o` runs
-it. For the same reason the bin refuses an entry ID that is not one plain
-directory name inside it — `Purge` removes a tree, and `filepath.Join` resolves
-`..` straight out of the bin.
+**every value substituted into that template is shell-quoted first**: the
+template supplies the shell syntax and the values never do. Unquoted, a
+conversation called `x; rm -rf ~ #` is a command rather than a name, and pressing
+`o` runs it. That was a real hole, found with a probe and closed. For the same
+reason the bin refuses an entry ID that is not one plain directory name, because
+`Purge` removes a tree and `filepath.Join` resolves `..` straight out of the bin.
+Three separate places had that same shape of bug: the bin, the memory remover,
+and a `--path` on the command line. Each is now guarded at the destructive call
+rather than at the caller.
 
 braids does not guess at a terminal. Terminals differ in whether they can be
 told to run a command at all, and the working directory matters: resuming from
 elsewhere files the transcript under a different project, so a lane carries the
 `cwd` its conversation ran in.
 
-**Delete.** Move files to trash. Never cascades. Never allowed on a running lane.
+**Naming a branch** is a stop-word filter over the turn's own words, so
+"why is the queue stalling" becomes `queue-stalling`, pre-filled into an
+editable field. It is good enough never to block on and not good enough to be
+permanent, which is why `r` renames and names live in the sidecar.
 
-**Branch a running lane — allowed.** Forking writes a new file, so the running
-session is untouched. Permitted from any *completed* turn; only the in-flight
-turn is blocked, because its records are still being written. This is the point:
-you watch an agent go wrong, branch from three turns before it did, and try
-another way without killing it.
+A better version was designed and is not built: score the tokens by document
+frequency across the corpus, which is free because FTS5 already has it, keep
+terms in a band where `2 ≤ df ≤ 4%` of the corpus, prefer tokens containing
+`- _ 0-9` because identifiers make better names, take three and slugify.
+Validated by hand against 2,298 real messages, it produced names like
+`ttl-reconcile-provisioning` and `clone-annotaion-fresh`. It is written down here
+rather than in the code because the stop-word filter has not yet annoyed anyone.
 
-**Auto-naming today** is a plain stop-word filter over the turn's own words —
-`"why is the queue stalling"` → `queue-stalling` — pre-filled into an editable
-field. The df-banded version below is the intended upgrade once the index
-exposes term frequencies; it is not what ships yet.
-
-**Auto-naming, no model involved.** Score the tokens of the forked message by
-document frequency across the corpus — free, since the FTS5 index already has
-it. Keep terms in a band (`2 ≤ df ≤ 4% of corpus`): dropping `df == 1` removes
-typos, and the ceiling removes filler. Prefer tokens containing `- _ 0-9`, since
-identifiers make better names. Take three, keep source order, slugify.
-
-Validated against 2,298 real user messages here:
-
-```
-ttl-reconcile-provisioning   ← "Watcher misses the Running event (watch gap / ttl deletes…"
-deployment-manual-right      ← "so we deployment is manual right now?"
-clone-annotaion-fresh        ← "anther session is using this repo copy. In copies clone…"
-start-caffeinate             ← "start caffeinate"
-```
-
-Good enough to never block on, not good enough to be permanent: `r` renames, and
-names live in the sidecar, so renaming never touches a transcript.
-
-**Worktree lifecycle — never automatic.** A conversation can be trashed and
-undone; uncommitted code cannot. Archiving a workspace lane leaves its worktree
-alone. Deleting offers removal as a *separate*, default-off checkbox, and refuses
-outright when `git status --porcelain` is dirty or the branch has unpushed
-commits — showing which, rather than a generic warning. Worktree state is a
-column in the sweep screen.
+**Worktree lifecycle is never automatic.** A conversation can be binned and
+restored; uncommitted code cannot. Archiving a workspace lane leaves its worktree
+alone, and braids does not remove one.
 
 ---
 
 ## 9. Visual language
 
 ```
-●  turn / lane            ⋯  collapsed run           ⊕  subagent
-◆  needs you              ⚠  error or failed tool    ○  archived
-├─ junction               ▓  cursor                  ╎  nested lane
-▸ ▾  collapsed / expanded                            ←  fork point
+●  turn or lane           ⋯  collapsed run          ◆  agent, or needs you
+⚠  a failed tool call     ○  archived               ≈≈ context compacted
+├─ junction               ← t14  fork point         ⊘  not in the index
 ```
 
-- Colour carries **status only** — never identity. Identity is position and name.
-- **The scale is steep, and the top of it is rare.** A session stopped and
-  waiting on a person is the only thing drawn loudly — the accent, its own mark
-  `◆`, a bold name — because it is the only thing that cannot proceed
-  without them. Anything alive is green. An open loop is accent. Something
-  merely owed a reply is plain text, because there are usually a great many of
-  those and a screen where everything is urgent says nothing. This was wrong at
-  first: `your turn` was drawn in the accent too, so seventeen rows shouted and
-  the one that mattered did not stand out.
-- **Shape, not only colour, at the top of the scale.** In a long list a
-  different glyph carries further than a different hue, and it survives a
-  terminal whose palette is not what braids assumed.
-- **No filled backgrounds outside the cursor.** A background reads as a box
-  drawn around a row, which is heavier than anything else on screen and fights
-  the panel it sits in. Emphasis is colour and weight.
-- **An archived row reads as set aside** while shown: `○`, its name dulled but
-  still readable,
-  and its status column says `archived` rather than whatever it was doing when
-  it was put away, which is no longer the useful thing about it.
-- Idle age is always right-aligned; it is the field people scan.
-- **The cursor follows the conversation, and when it is gone, the row above
-  it.** Archiving or deleting the selected row would otherwise throw the reader
-  to the top of the list on every act of tidying, which is exactly when losing
-  your place costs most.
-- Never render more than one junction per row.
+- Colour carries **status only**, never identity. Identity is position and name.
+- **The scale is steep and the top of it is rare.** A session stopped and waiting
+  on a person is the only thing drawn loudly, because it is the only thing that
+  cannot proceed without them. Anything alive is green, an open loop is the
+  accent, and something merely owed a reply is plain text, because there are
+  usually a great many of those and a screen where everything is urgent says
+  nothing. This was wrong at first: `your turn` was drawn in the accent too, so
+  seventeen rows shouted and the one that mattered did not stand out.
+- **Shape as well as colour at the top of the scale.** In a long list a different
+  glyph carries further than a different hue, and it survives a terminal whose
+  palette is not what braids assumed.
+- **No filled backgrounds outside the cursor.** A background reads as a box drawn
+  around a row, which is heavier than anything else on screen and fights the
+  panel it sits in.
+- **The cursor follows the conversation, and when it is gone, the row above it.**
+  Archiving or deleting the selected row would otherwise throw the reader to the
+  top of the list on every act of tidying, which is exactly when losing your
+  place costs most.
 - **The header and the table are laid out by the same code.** Columns drop from
-  the right as the terminal narrows — size, then status, then project, then
-  turns — keeping the name and the age, which answer what it is and whether it
-  is stale. The two width bugs this screen has had were both the header and the
-  rows computing their own widths and drifting apart.
+  the right as the terminal narrows: size, then status, then project, then turns,
+  keeping the name and the age. The two width bugs this screen has had were both
+  the header and the rows computing their own widths and drifting apart.
 - **Every binding a screen has is in its legend.** A key that works but is not
   listed may as well not exist, so the header grows rows and drops the glyph key
-  before it drops a key. Only when even one column will not hold them all does
-  it keep what it can — ordered so moving, opening, searching and quitting
-  survive.
-- A glyph key sits beside the facts when there is room left after the keys. **Each mark in it is drawn in the
-  style it is drawn in on the screen** — green for alive, the accent for what
-  wants you, grey for the rest. Colour here is meaning, so a key rendered in one
-  flat colour would teach the wrong thing.
-- A paired key says what each half does: `n / N  next / prev marker`, not
-  `n/N  next marker`.
-- Animation is limited to a lane growing out of a junction on branch creation.
-  That single motion is what teaches the model.
+  before it drops a key.
+- A glyph key sits beside the facts when there is room left after the keys, and
+  **each mark in it is drawn in the style it is drawn in on the screen**. Colour
+  here is meaning, so a key rendered in one flat colour would teach the wrong
+  thing.
+- A paired key says what each half does: `n / N  next / prev`, not `n/N  next`.
+
+**The mark is decoration, and priced accordingly.** braids sets its name in the
+angular ASCII face k9s uses, flush right in the header. It is the last thing to
+get room and the first to lose it: the facts, every key binding and the glyph key
+all come first. Two sizes exist so a normal terminal gets one at all, and below
+that it goes.
+
+Pricing it correctly took two attempts. The plan reserved `logoGap` for it while
+the drawing spent `factsGap` plus slack, so across a five-column band the plan
+decided the mark fitted and then drew no mark at all: 215 columns had the logo,
+220 did not, 230 did again. Three tests already covered the mark and all of them
+passed through that band, because they asserted on the plan, where the mark was
+set the whole time. The test that catches it asserts on the drawn header.
+
+It is also genuinely expensive. The map needs 108 columns for its facts, its
+glyph key and all fourteen bindings, and 195 for those and the mark: 87 columns
+of decoration. `Options.HideMark` exists for a caller drawing a frame to be
+looked at somewhere the logo already is, which is how every screenshot in this
+document is 138 columns rather than 195.
 
 **Glyph width is a correctness issue.** `● ◆ ○ ← ⚠ ⊕` are East-Asian *Ambiguous*
-width: some terminals and fonts render them double-wide, which silently breaks
-every box in this document. Pick glyphs from the unambiguous-narrow set where
-possible, measure with `go-runewidth` rather than `len()`, and add a
-`--ascii` fallback (`* + o <- ! @`) for terminals that get it wrong. Golden-file
-tests via `teatest` should assert frame width, not just content.
-
----
+width, and some terminals and fonts render them double wide, which silently
+breaks every box. Widths are measured with a rune-width table rather than
+`len()`, and `--ascii` swaps in narrow glyphs for terminals that get it wrong.
+The frame is swept across widths 1 to 300 and heights 1 to 40 in tests, because
+the arithmetic subtracts borders and margins and below a floor those
+subtractions go negative and panic.
 
 ### 9.1 Other harnesses
 
 v1 is Claude Code only. The primitive generalises to any agent that writes local
-transcripts and can resume one by id, so `store.Source` is a port from day one —
+transcripts and can resume one by id, so `store.Source` is a port from day one,
 but no second adapter ships until someone asks for it.
 
 Verified on this machine:
 
 | Harness | Storage | Shape | Fit |
 |---|---|---|---|
-| Claude Code | `~/.claude/projects/**/*.jsonl` | **DAG** — uuid/parentUuid | native |
-| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (493 MB here) | flat log, **no parent pointers** | works, file-level branches only |
-| opencode | SQLite since v1.2 (was per-file JSON) | messages + parts | adapter reads SQLite |
-| Aider | `.aider.chat.history.md` | markdown, linear, no resume-by-id | poor fit |
+| Claude Code | `~/.claude/projects/**/*.jsonl` | a DAG, uuid and parentUuid | native |
+| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, 493 MB here | a flat log, no parent pointers | works, file-level branches only |
+| opencode | SQLite since v1.2, was per-file JSON | messages and parts | an adapter reads SQLite |
+| Aider | `.aider.chat.history.md` | markdown, linear, no resume by id | poor fit |
 
 Two consequences for the domain model:
 
 - **Branch points must not be assumed to live inside a transcript.** They do in
   Claude Code; in Codex a fork is only ever a separate file.
-- **Prefix fingerprinting is the universal fork-detection method** — hash the
-  opening run of turns and match across lanes. Shared-uuid matching (§5) is the
-  exact fast path where a harness offers it, not the general algorithm.
+- **Prefix fingerprinting is the universal fork-detection method**: hash the
+  opening run of turns and match across lanes. Shared-uuid matching is the exact
+  fast path where a harness offers it, not the general algorithm.
 
-Claude Code luxuries — subagent forest, `compactMetadata`, hook-driven
-needs-you — are declared as optional `Capabilities`, never assumed.
-
----
-
-## 10. Non-goals
-
-- Not a chat client. braids never sends a message to Claude.
-- No server, no account, no sync. Everything is local.
-- No auto-segmentation of existing conversations. **The user decides where a
-  branch belongs** — the tool only makes it one keystroke.
-- No re-stamping of stale environment on fork. A branch replays the world as it
-  was; the harness already refuses edits based on stale reads.
-- No merge in v1.
+Claude Code's luxuries, the subagent forest, `compactMetadata` and hook-driven
+state, are declared as optional capabilities and never assumed.
 
 ---
 
-## 11. Build order
+## 10. The command line
 
-1. ~~**Index + search.**~~ **Done.** Parse, FTS5, `braids search`.
-2. ~~**The Map.**~~ **Done.** Lanes, fork detection by shared uuid, statuses
-   from mtime, k9s-style chrome.
-3. ~~**The Spine.**~~ **Done**: runs, junctions, compaction seams, subagent
-   lanes and the marks for failed tool calls.
-4. ~~**Branch.**~~ **Done**: file synthesis, naming, renaming, the `b` key,
-   thought-versus-workspace, navigating into a branch from its parent, recorded
-   provenance, and an immediate in-place refresh.
-5. ~~**Live.**~~ **Done**: the watcher and in-place refresh, so the map follows
-   sessions as they are written and a branch appears without any command; plus
-   optional hooks and the needs-you queue built on them.
-6. ~~**Search screen.**~~ **Done**: full text across every conversation, with
-   `↵` jumping to the turn it found.
-7. ~~**Lane state.**~~ **Done** from files: working, thinking, your turn,
-   stopped, unanswered, with `n`/`N` stepping between what is owed. Hooks
-   would add the running-versus-blocked distinction.
-8. ~~**Subagents.**~~ **Done**: discovered, indexed against the turn that
-   spawned them, drawn in the spine, and promotable with `p`.
-9. ~~**Housekeeping.**~~ **Done**: archive, delete to a bin, and a bin you can
-   browse and recover from. Multi-select, the filtered sweep and reclaiming job
-   artifacts remain.
-10. ~~**Merge.**~~ **Done**: a splice of real turns into a new conversation,
-    behind a preview of what it would carry over, and refused where it would
-    only duplicate a branch.
+braids should be usable by the thing it is watching. Every command that reports
+something takes `--json`, so an agent can search its own past conversations,
+find where a decision was made and branch from that exact turn.
 
-All ten are done. What remains is listed as it comes up rather than planned
-here: multi-select and the filtered sweep (§9), reclaiming job artifacts, a
-16-pixel mark, and the web frontend below.
+Two properties make that work and neither is incidental. **IDs are whole in
+JSON**: the tables shorten them with an ellipsis to fit a terminal, and a caller
+that cannot hand an ID back has been given nothing. **An empty result is `[]`**
+rather than a sentence, so nothing has to tell "no matches" from a parse failure.
+The JSON types are declared separately from the ones braids works with
+internally, because what it prints for a program is a promise and what it holds
+in memory is not.
+
+The same ellipsis is accepted on the way back in. Copying a shortened ID off the
+screen and pasting it is the obvious thing to do with one, and refusing an ID
+braids itself printed teaches nobody anything.
+
+**Getting it wrong should cost one line, not a trip to the manual.** A mistyped
+command names the one that was meant, measured by edit distance and offered only
+within two edits, because beyond that it is a different word. A flag mistake
+answers with the flags that command actually takes, drawn from the flag set
+itself so it cannot drift. A flag where a command should be is the map, because
+`braids --print` is documented that way and reading it as a command name answers
+a documented invocation with "unknown command". Errors exit 1 and go to stderr.
+
+`braids hook` is the one command meant for the harness rather than a person. It
+reads a payload on stdin, so typed by hand it used to wait on a terminal that
+would never send it one, indistinguishable from a hang. It now checks whether
+stdin is a terminal, by ioctl rather than file mode so a redirect from
+`/dev/null` still reads as the harness, and says who runs it. Piped, it stays
+silent whatever it is given, because a hook that fails loudly breaks the session
+it is reporting on.
+
+`braids help` and `braids version` carry the mark, the full face and the small
+one respectively, coloured only when stdout is a terminal, because escape codes
+in a pipe are noise in somebody's grep. The installer opens with the same mark.
 
 ---
 
-## 12. Open questions
+## 11. What is built, and what is not
 
-1. **Web frontend scope.** Deferred, not dismissed — §4.1 keeps it cheap. When it
-   comes, does it mirror the TUI, or take a different shape entirely (wider
-   canvas, real animation, mouse-first) for people who find a TUI hard?
+Built: the index and `braids search`; the map with fork detection and state; the
+spine with runs, junctions, compaction seams, failed calls and subagents; branch,
+with thought and workspace kinds and recorded provenance; live refresh by
+tailing, off the interface thread; the search screen across conversations,
+memories and work-product names; optional hooks and the waiting queue; the work
+product browser with peeking and orphan reclamation; the memory screen with
+delete, repair and rename; archive, delete and a bin you can browse and recover
+from; merge; promote; `--json` on every reporting command; and the site and docs
+at [braids.chat](https://braids.chat).
 
-Settled since first draft: compaction (§5.1), map scope — one global map with a
-project prefix and `f` to filter, because the needs-you queue must never be
-scoped away; branching a running lane (§8, allowed); worktree lifecycle (§8,
-never automatic); auto-naming (§8, df-banded, renameable).
+Not built, in the order they are likely to matter:
+
+- **Multi-select and a filtered sweep.** Tidying thirty conversations one key at
+  a time is the obvious next thing.
+- **Document-frequency naming.** Designed above, not written.
+- **A second harness adapter.** The port exists and nobody has asked.
+- **A web frontend.** Deferred rather than dismissed, and §4.1 says honestly
+  what it would cost. The open question is whether it mirrors the TUI or takes a
+  different shape entirely for people who find a terminal hard.
+
+How the screenshots and the site are built is in
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+
+## 12. Non-goals
+
+- **Not a chat client.** braids never sends a message to a model.
+- **No server, no account, no sync.** Everything is local, and there is no HTTP
+  client and no listener in the binary.
+- **No auto-segmentation of existing conversations.** The user decides where a
+  branch belongs; the tool only makes it one keystroke.
+- **No re-stamping of stale environment on fork.** A branch replays the world as
+  it was, and the harness already refuses edits based on stale reads.
+- **No summary-based merge.** Merging splices real turns or it does not happen.

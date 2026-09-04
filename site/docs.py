@@ -991,6 +991,9 @@ REFERENCE = f"""
      "waiting states fall back to what the transcript can prove. <code>braids hooks --install</code>"),
     ("hook reads an event on stdin",
      "you typed <code>braids hook</code>. You wanted <code>braids hooks</code>"),
+    ("N conversations grew and produced no new messages",
+     "braids could read them before and cannot now, which is what a format "
+     "change looks like while it happens. <code>braids index</code> names them"),
     ("N conversations hold bytes braids could not read",
      "a transcript yielded no messages at all, which usually means the format "
      "changed. <code>braids index</code> names the files. Please report it"),

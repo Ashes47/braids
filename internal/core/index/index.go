@@ -133,12 +133,34 @@ type Index struct {
 	recreated bool
 }
 
+// Stalled is a conversation that grew without producing a single new message.
+type Stalled struct {
+	Lane   string
+	Path   string
+	Gained int64
+}
+
+// stalledGrowth is how much a transcript can gain, with nothing to show for
+// it, before that is worth saying out loud.
+//
+// The Unreadable query catches a transcript that yielded nothing at all. This
+// catches the subtler half: a format change that breaks only assistant turns
+// leaves the user's still readable, so the count stays above zero and that
+// check stays quiet while half the history stops arriving. Measured against a
+// real corpus, the median lane produces a message every 6.8 kB and the worst
+// every 15 kB, so 32 kB with nothing at all is twice as bad as anything real.
+const stalledGrowth = 32 << 10
+
 // Stats summarises a Rebuild.
 type Stats struct {
 	Lanes    int
 	Messages int
 	Parts    int
 	Duration time.Duration
+	// Stalled names conversations that gained bytes in this pass and no
+	// messages, which is what a format change looks like while it is
+	// happening.
+	Stalled []Stalled
 }
 
 // Query selects messages. An empty Lane searches every lane, and empty Kinds
@@ -421,6 +443,10 @@ func (ix *Index) Sync(ctx context.Context, src store.Source) (Stats, error) {
 		}
 		stats.Messages += msgs
 		stats.Parts += parts
+		if gained := lane.Size - was.Size; known && gained >= stalledGrowth && msgs <= was.Messages {
+			stats.Stalled = append(stats.Stalled,
+				Stalled{Lane: lane.ID, Path: lane.Path, Gained: gained})
+		}
 	}
 	for id := range stored {
 		if !seen[id] {

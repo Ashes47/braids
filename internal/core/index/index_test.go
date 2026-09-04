@@ -1195,3 +1195,84 @@ func TestAroundCountsEverythingAndQuotesWhatWasSaid(t *testing.T) {
 		t.Errorf("an empty window reported %+v", empty)
 	}
 }
+
+// The subtler half of a format change: a transcript braids used to read keeps
+// growing and stops producing messages. The total never drops to zero, so the
+// Unreadable check stays quiet while half the history stops arriving.
+func TestSyncNoticesATranscriptThatStoppedProducingMessages(t *testing.T) {
+	ctx := context.Background()
+	ix := openIndex(t)
+	base := time.Unix(1_700_000_000, 0)
+	src := &fakeSource{
+		lanes: []model.Lane{
+			{ID: "l", Source: "fake", Path: "/t/l.jsonl", Size: 4 << 10, Updated: base},
+		},
+		messages: map[string][]model.Message{"l": {
+			{ID: "m1", LaneID: "l", Role: model.RoleUser, At: base,
+				Parts: []model.Part{{Kind: model.PartText, Text: "readable"}}},
+		}},
+	}
+	first, err := ix.Sync(ctx, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Stalled) != 0 {
+		t.Errorf("a first read reported %d stalled lanes; there is nothing to compare against",
+			len(first.Stalled))
+	}
+
+	// It grows, and braids gets nothing new out of it.
+	src.lanes[0].Size = 4<<10 + stalledGrowth
+	src.lanes[0].Updated = base.Add(time.Minute)
+	stalled, err := ix.Sync(ctx, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stalled.Stalled) != 1 {
+		t.Fatalf("growth with no messages reported %d stalled lanes, want 1", len(stalled.Stalled))
+	}
+	if stalled.Stalled[0].Gained != stalledGrowth {
+		t.Errorf("reported %d bytes gained, want %d", stalled.Stalled[0].Gained, stalledGrowth)
+	}
+	if stalled.Stalled[0].Path != "/t/l.jsonl" {
+		t.Errorf("reported %q, which does not tell anyone which file to look at",
+			stalled.Stalled[0].Path)
+	}
+}
+
+// Growing and producing messages is what healthy looks like, and a small
+// amount of growth with none is ordinary bookkeeping rather than an alarm.
+func TestSyncStaysQuietWhenGrowthIsNormal(t *testing.T) {
+	ctx := context.Background()
+	ix := openIndex(t)
+	base := time.Unix(1_700_000_000, 0)
+	src := &fakeSource{
+		lanes: []model.Lane{
+			{ID: "l", Source: "fake", Path: "/t/l.jsonl", Size: 4 << 10, Updated: base},
+		},
+		messages: map[string][]model.Message{"l": {
+			{ID: "m1", LaneID: "l", Role: model.RoleUser, At: base,
+				Parts: []model.Part{{Kind: model.PartText, Text: "readable"}}},
+		}},
+	}
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+
+	// Grew a lot, and said something: healthy.
+	src.lanes[0].Size = 4<<10 + 10*stalledGrowth
+	src.lanes[0].Updated = base.Add(time.Minute)
+	src.messages["l"] = append(src.messages["l"], model.Message{
+		ID: "m2", LaneID: "l", ParentID: "m1", Role: model.RoleAssistant, At: base.Add(time.Minute),
+		Parts: []model.Part{{Kind: model.PartText, Text: "still readable"}}})
+	if got, err := ix.Sync(ctx, src); err != nil || len(got.Stalled) != 0 {
+		t.Errorf("a healthy read reported %v (%v)", got.Stalled, err)
+	}
+
+	// Grew a little, said nothing: bookkeeping, not an alarm.
+	src.lanes[0].Size += stalledGrowth - 1
+	src.lanes[0].Updated = base.Add(2 * time.Minute)
+	if got, err := ix.Sync(ctx, src); err != nil || len(got.Stalled) != 0 {
+		t.Errorf("growth under the threshold cried wolf: %v (%v)", got.Stalled, err)
+	}
+}

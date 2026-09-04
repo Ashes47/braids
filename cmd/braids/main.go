@@ -731,17 +731,23 @@ func cmdIndex(args []string, out *printer) error {
 		for _, l := range unreadable {
 			paths = append(paths, l.Path)
 		}
+		stalled := make([]string, 0, len(stats.Stalled))
+		for _, s := range stats.Stalled {
+			stalled = append(stalled, s.Path)
+		}
 		return out.emit(struct {
 			Lanes      int      `json:"lanes"`
 			Messages   int      `json:"messages"`
 			Parts      int      `json:"parts"`
 			Took       float64  `json:"took_ms"`
 			Unreadable []string `json:"unreadable"`
+			Stalled    []string `json:"stalled"`
 		}{stats.Lanes, stats.Messages, stats.Parts,
-			float64(stats.Duration.Microseconds()) / 1000, paths})
+			float64(stats.Duration.Microseconds()) / 1000, paths, stalled})
 	}
 	out.printf("indexed %d lanes · %d messages · %d searchable parts in %s\n",
 		stats.Lanes, stats.Messages, stats.Parts, stats.Duration.Round(time.Millisecond))
+	reportStalled(stats.Stalled, out)
 	reportUnreadable(unreadable, out)
 	return out.Err()
 }
@@ -793,6 +799,29 @@ func parseAge(text string) (time.Duration, error) {
 		return time.Duration(n) * 7 * 24 * time.Hour, nil
 	}
 	return 0, fmt.Errorf("unknown unit %q", string(unit))
+}
+
+// reportStalled says when a transcript grew and produced nothing.
+//
+// Unreadable catches a conversation braids never got anything from. This
+// catches the half that is worse to miss: one it used to read and has stopped
+// reading, which is what a format change looks like while it is happening.
+func reportStalled(stalled []index.Stalled, out *printer) {
+	if len(stalled) == 0 {
+		return
+	}
+	out.printf("\n%d conversation(s) grew in this pass and produced no new messages.\n",
+		len(stalled))
+	out.printf("braids could read them before, so something about the format has\n")
+	out.printf("probably changed. Please report it:\n")
+	out.printf("  https://github.com/Ashes47/braids/issues\n")
+	for i, s := range stalled {
+		if i == 3 {
+			out.printf("  ... and %d more\n", len(stalled)-3)
+			break
+		}
+		out.printf("  gained %s  %s\n", format.Bytes(s.Gained), s.Path)
+	}
 }
 
 // reportUnreadable says when a transcript has bytes in it that produced no

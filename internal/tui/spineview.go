@@ -239,6 +239,11 @@ func (m Model) spineKey(key string) (Model, tea.Cmd) {
 		s.filter.active = true
 	case "b":
 		return m.startBranch(), nil
+	case "a":
+		return m.toggleArchive(), nil
+	case "d":
+		s.notice, s.failed = "delete from the map, where you can see what goes", true
+		return m, nil
 	case "y":
 		updated, cmd := m.copyResume()
 		return updated.(Model), cmd

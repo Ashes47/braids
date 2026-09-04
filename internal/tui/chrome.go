@@ -52,7 +52,8 @@ func hints() []hint {
 	return []hint{
 		{"j/k", "down / up"}, {"↵", "open spine"},
 		{"n / N", "next / prev waiting"}, {"/", "search"},
-		{"f", "filter"}, {"y / o", "copy / open"},
+		{"a / d", "archive / delete"}, {"f", "filter"},
+		{"y / o", "copy / open"}, {"q", "quit"},
 	}
 }
 
@@ -67,6 +68,25 @@ func (m Model) mapGlyphs() []glyph {
 		{g.Lane, m.theme.Accent, "waiting on you"},
 		{g.Lane, m.theme.Faint, "idle"},
 		{g.Branch, m.theme.Rail, "branched from above"},
+	}
+}
+
+// archivedNote tells the user what state the map is in when it is hiding
+// things, since a map that silently omits conversations is a map you distrust.
+func (m Model) archivedNote() string {
+	hidden := 0
+	for id := range m.archived {
+		if _, ok := m.forestHas[id]; ok {
+			hidden++
+		}
+	}
+	switch {
+	case m.showArchived && hidden > 0:
+		return fmt.Sprintf(" · showing %d archived", hidden)
+	case hidden > 0:
+		return fmt.Sprintf(" · %d archived hidden", hidden)
+	default:
+		return ""
 	}
 }
 
@@ -170,7 +190,9 @@ func (m Model) panelTitle() string {
 	if m.filter.on() {
 		scope = m.filter.label()
 	}
-	return fmt.Sprintf("Conversations(%s)[%d]", scope, len(m.visible))
+	// A map that silently omits conversations is a map you stop trusting, so
+	// the title always says whether anything is being held back.
+	return fmt.Sprintf("Conversations(%s)[%d]%s", scope, len(m.visible), m.archivedNote())
 }
 
 func (m Model) panelTop() string { return m.panelTopTitled(m.panelTitle()) }

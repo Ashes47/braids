@@ -18,9 +18,10 @@ import (
 	"github.com/Ashes47/braids/internal/core/graph"
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/model"
-	"github.com/Ashes47/braids/internal/core/origins"
+	"github.com/Ashes47/braids/internal/core/sidecar"
 	"github.com/Ashes47/braids/internal/core/store"
 	"github.com/Ashes47/braids/internal/core/store/claudecode"
+	"github.com/Ashes47/braids/internal/core/trash"
 	"github.com/Ashes47/braids/internal/core/watch"
 	"github.com/Ashes47/braids/internal/launch"
 	"github.com/Ashes47/braids/internal/tui"
@@ -179,7 +180,7 @@ func cmdMap(args []string, out *printer) error {
 	defer ix.Close() //nolint:errcheck // read-only
 
 	ctx := context.Background()
-	provenance, err := origins.Load(originsPath(dbPath))
+	provenance, err := sidecar.Load[model.Origin](sidecarPath(dbPath, "origins.json"))
 	if err != nil {
 		return err
 	}
@@ -196,6 +197,11 @@ func cmdMap(args []string, out *printer) error {
 			changes = w.Changes()
 		}
 	}
+	shelf, err := sidecar.Load[bool](sidecarPath(dbPath, "archived.json"))
+	if err != nil {
+		return err
+	}
+	bin := trash.New(filepath.Join(filepath.Dir(dbPath), "trash"))
 	spawn, terminal := spawner(ctx, ix)
 	opts := tui.Options{
 		ASCII:     *ascii,
@@ -211,8 +217,19 @@ func cmdMap(args []string, out *printer) error {
 		LoadAgentSpine: func(laneID, agentID string) ([]graph.Segment, error) {
 			return agentSpine(ctx, ix, root, laneID, agentID)
 		},
-		Origins: provenance.All(),
-		Changes: changes,
+		Origins:  provenance.All(),
+		Changes:  changes,
+		Archived: shelf.All(),
+		Archive: func(laneID string, archived bool) error {
+			if archived {
+				return shelf.Set(laneID, true)
+			}
+			return shelf.Delete(laneID)
+		},
+		Delete: func(laneID string) (int64, error) {
+			return discardLane(ctx, ix, bin, laneID)
+		},
+		Undo: func() (int64, error) { return restoreLast(bin) },
 		ResumeCommand: func(laneID string) (string, error) {
 			return resumeCommand(ctx, ix, laneID)
 		},
@@ -354,7 +371,7 @@ func cmdBranch(args []string, out *printer) error {
 	defer ix.Close() //nolint:errcheck // read-only
 
 	ctx := context.Background()
-	provenance, err := origins.Load(originsPath(dbPath))
+	provenance, err := sidecar.Load[model.Origin](sidecarPath(dbPath, "origins.json"))
 	if err != nil {
 		return err
 	}
@@ -370,7 +387,7 @@ func cmdBranch(args []string, out *printer) error {
 
 // branchAt cuts a lane at a turn number and returns the new lane's ID. Shared
 // by the CLI and the map so both take exactly the same path.
-func branchAt(ctx context.Context, ix *index.Index, provenance *origins.Store, laneRef string, turn int, name string) (string, error) {
+func branchAt(ctx context.Context, ix *index.Index, provenance *sidecar.Store[model.Origin], laneRef string, turn int, name string) (string, error) {
 	lane, err := findLane(ctx, ix, laneRef)
 	if err != nil {
 		return "", err
@@ -401,15 +418,15 @@ func branchAt(ctx context.Context, ix *index.Index, provenance *origins.Store, l
 	}
 	// Record where it came from: two lanes can hold identical prefixes, so
 	// inference alone would sometimes attach it to the wrong parent.
-	if err := provenance.Record(branch.ID, model.Origin{Parent: lane.ID, ForkSeq: turn}); err != nil {
+	if err := provenance.Set(branch.ID, model.Origin{Parent: lane.ID, ForkSeq: turn}); err != nil {
 		return "", err
 	}
 	return branch.ID, nil
 }
 
-// originsPath keeps provenance next to the index it describes.
-func originsPath(dbPath string) string {
-	return filepath.Join(filepath.Dir(dbPath), "origins.json")
+// sidecarPath keeps braids' own small files next to the index they describe.
+func sidecarPath(dbPath, name string) string {
+	return filepath.Join(filepath.Dir(dbPath), name)
 }
 
 func nameFlag(name string) string {
@@ -453,7 +470,7 @@ func cmdPromote(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
-	provenance, err := origins.Load(originsPath(dbPath))
+	provenance, err := sidecar.Load[model.Origin](sidecarPath(dbPath, "origins.json"))
 	if err != nil {
 		return err
 	}
@@ -562,7 +579,7 @@ func agentSpine(ctx context.Context, ix *index.Index, root, laneID, agentID stri
 
 // promoteAgent turns a subagent into a conversation of its own and records
 // where it came from, so the map hangs it under the lane that spawned it.
-func promoteAgent(ctx context.Context, ix *index.Index, provenance *origins.Store, laneID, agentID string) (string, error) {
+func promoteAgent(ctx context.Context, ix *index.Index, provenance *sidecar.Store[model.Origin], laneID, agentID string) (string, error) {
 	agents, err := ix.LaneSubagents(ctx, laneID)
 	if err != nil {
 		return "", err
@@ -582,12 +599,52 @@ func promoteAgent(ctx context.Context, ix *index.Index, provenance *origins.Stor
 		// A promoted agent shares no message IDs with its parent, so nothing
 		// could infer where it came from; recording it is the only way it hangs
 		// under the conversation that spawned it.
-		if err := provenance.Record(lane.ID, model.Origin{Parent: laneID, ForkSeq: a.ParentSeq}); err != nil {
+		if err := provenance.Set(lane.ID, model.Origin{Parent: laneID, ForkSeq: a.ParentSeq}); err != nil {
 			return "", err
 		}
 		return lane.ID, nil
 	}
 	return "", fmt.Errorf("no subagent %s in %s", shortID(agentID), shortID(laneID))
+}
+
+// lastDiscarded remembers the most recent deletion so it can be undone. One
+// step is enough: an undo the user did not take immediately is a decision, and
+// the bin keeps the files either way.
+var lastDiscarded *trash.Entry
+
+// discardLane moves a conversation's files into the bin, returning how much was
+// reclaimed. Everything a conversation owns goes together: the transcript and
+// the directory beside it holding its subagents and tool output.
+func discardLane(ctx context.Context, ix *index.Index, bin *trash.Bin, laneID string) (int64, error) {
+	lane, err := findLane(ctx, ix, laneID)
+	if err != nil {
+		return 0, err
+	}
+	entry, err := bin.Discard([]string{
+		lane.Path,
+		strings.TrimSuffix(lane.Path, ".jsonl"),
+	})
+	if err != nil {
+		return 0, err
+	}
+	if len(entry.Items) == 0 {
+		return 0, fmt.Errorf("nothing to delete for %s", shortID(lane.ID))
+	}
+	lastDiscarded = &entry
+	return entry.Bytes, nil
+}
+
+// restoreLast undoes the most recent deletion.
+func restoreLast(bin *trash.Bin) (int64, error) {
+	if lastDiscarded == nil {
+		return 0, errors.New("nothing to undo")
+	}
+	entry := *lastDiscarded
+	if err := bin.Restore(entry); err != nil {
+		return 0, err
+	}
+	lastDiscarded = nil
+	return entry.Bytes, nil
 }
 
 // resumeCommand is what the user would type to continue a conversation.

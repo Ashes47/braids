@@ -57,6 +57,16 @@ type Options struct {
 	// after a branch so the new lane appears at once instead of after a
 	// remembered command.
 	Refresh func() (*graph.Forest, error)
+	// Archived is the set of conversations put out of the way. They stay
+	// searchable and reachable, but do not clutter the map.
+	Archived map[string]bool
+	// Archive puts a conversation out of the way, or brings it back.
+	Archive func(laneID string, archived bool) error
+	// Delete moves a conversation's files to the bin, returning how much was
+	// reclaimed. Nil disables deleting.
+	Delete func(laneID string) (int64, error)
+	// Undo restores the most recent deletion.
+	Undo func() (int64, error)
 	// Changes signals that transcripts moved on disk. With it the map follows
 	// live sessions; without it the map is a snapshot.
 	Changes <-chan struct{}
@@ -104,6 +114,12 @@ type Model struct {
 	spawn          func(string) error
 	terminal       string
 	searchFn       func(string, string) ([]index.Hit, error)
+	archived       map[string]bool
+	archiveFn      func(string, bool) error
+	deleteFn       func(string) (int64, error)
+	undoFn         func() (int64, error)
+	// showArchived reveals what has been put away, so it can be brought back.
+	showArchived bool
 
 	notice string
 	failed bool
@@ -117,6 +133,10 @@ type Model struct {
 	all     []row
 	visible []row
 	filter  filterInput
+
+	// forestHas is every lane the map knows about, used to count how many
+	// archived conversations are being hidden.
+	forestHas map[string]struct{}
 
 	// Columns that earn their space only sometimes: a fork column is dead
 	// weight until a fork exists, and a project column until there is more
@@ -150,6 +170,10 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		spawn:          opts.Spawn,
 		terminal:       opts.Terminal,
 		searchFn:       opts.Search,
+		archived:       opts.Archived,
+		archiveFn:      opts.Archive,
+		deleteFn:       opts.Delete,
+		undoFn:         opts.Undo,
 		now:            time.Now,
 		width:          80,
 		height:         24,
@@ -201,6 +225,10 @@ func (m *Model) measure() {
 		projects[r.node.Lane.Project] = struct{}{}
 	}
 	m.showProject = len(projects) > 1
+	m.forestHas = make(map[string]struct{}, len(m.all))
+	for _, r := range m.all {
+		m.forestHas[r.node.Lane.ID] = struct{}{}
+	}
 	m.ambiguous = make(map[string]bool)
 	for title, n := range titles {
 		if n > 1 && title != "" {
@@ -333,6 +361,16 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.openSpine(), nil
 	case "f":
 		m.filter.active = true
+	case "a":
+		return m.toggleArchive(), nil
+	case "A":
+		m.showArchived = !m.showArchived
+		m.apply()
+		m.clamp()
+	case "d":
+		return m.deleteLane(), nil
+	case "u":
+		return m.undoDelete(), nil
 	case "n":
 		m.cursor = m.nextWaiting(m.cursor, 1)
 	case "N":
@@ -356,6 +394,71 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	m.clamp()
 	return m, nil
+}
+
+// toggleArchive puts a conversation out of the way, or brings it back.
+// Archiving is the gesture for most tidying: it is instant, reversible, and
+// leaves the conversation searchable, so nothing has to be deleted to get a
+// map that reflects what is being worked on.
+func (m Model) toggleArchive() Model {
+	lane, ok := m.selectedLane()
+	if !ok || m.archiveFn == nil {
+		return m.withNotice("nothing to archive here", true)
+	}
+	if m.archived == nil {
+		m.archived = map[string]bool{}
+	}
+	archived := !m.archived[lane]
+	if err := m.archiveFn(lane, archived); err != nil {
+		return m.withNotice(err.Error(), true)
+	}
+	if archived {
+		m.archived[lane] = true
+	} else {
+		delete(m.archived, lane)
+	}
+	m.apply()
+	m.clamp()
+	if archived {
+		return m.withNotice("archived "+shortID(lane)+" · A shows archived, a brings it back", false)
+	}
+	return m.withNotice("unarchived "+shortID(lane), false)
+}
+
+// deleteLane moves a conversation's files to the bin.
+//
+// It is refused while a conversation is being written to: deleting a session
+// mid-turn is the one accident here worth preventing outright. It is never
+// refused for having children, because a fork carries its own copy of the
+// prefix it shares — deleting a parent cannot break one.
+func (m Model) deleteLane() Model {
+	lane, ok := m.selectedLane()
+	if !ok || m.deleteFn == nil {
+		return m.withNotice("nothing to delete here", true)
+	}
+	info := m.visible[m.cursor].node.Lane
+	if stateOf(info, m.now()) == stateWorking {
+		return m.withNotice("that conversation is still running — stop it first", true)
+	}
+	bytes, err := m.deleteFn(lane)
+	if err != nil {
+		return m.withNotice(err.Error(), true)
+	}
+	m = m.catchUp()
+	return m.withNotice(fmt.Sprintf("deleted %s · %s reclaimed · u to undo · children unaffected",
+		shortID(lane), humanBytes(bytes)), false)
+}
+
+func (m Model) undoDelete() Model {
+	if m.undoFn == nil {
+		return m.withNotice("nothing to undo", true)
+	}
+	bytes, err := m.undoFn()
+	if err != nil {
+		return m.withNotice(err.Error(), true)
+	}
+	m = m.catchUp()
+	return m.withNotice(fmt.Sprintf("restored %s", humanBytes(bytes)), false)
 }
 
 // selectedLane is the conversation under the cursor on whichever screen is up.
@@ -435,16 +538,16 @@ func (m *Model) apply() {
 	if m.cursor >= 0 && m.cursor < len(m.visible) {
 		held = m.visible[m.cursor].node.Lane.ID
 	}
-	if !m.filter.on() {
-		m.visible = m.all
-	} else {
-		m.visible = nil
-		for _, r := range m.all {
-			l := r.node.Lane
-			if m.filter.matches(l.Title + " " + l.Project + " " + l.ID) {
-				m.visible = append(m.visible, row{node: r.node})
-			}
+	m.visible = nil
+	for _, r := range m.all {
+		l := r.node.Lane
+		if m.archived[l.ID] && !m.showArchived {
+			continue
 		}
+		if m.filter.on() && !m.filter.matches(l.Title+" "+l.Project+" "+l.ID) {
+			continue
+		}
+		m.visible = append(m.visible, row{node: r.node})
 	}
 	// Follow the selected lane across the change, so clearing a filter leaves
 	// you where you were rather than back at the top.
@@ -622,6 +725,11 @@ func (m Model) rowParts(r row) (plain, styled string) {
 
 	state := stateOf(lane, m.now())
 	glyphStyle := m.styleFor(lane, state)
+	mark := g.Lane
+	if m.archived[lane.ID] {
+		// Archived rows read as set aside rather than active, even while shown.
+		mark, glyphStyle = g.Archived, m.theme.Faint
+	}
 
 	title := lane.Title
 	if title == "" {
@@ -681,8 +789,8 @@ func (m Model) rowParts(r row) (plain, styled string) {
 	if r.prefix != "" {
 		rail = m.theme.Rail.Render(r.prefix)
 	}
-	plain = " " + r.prefix + g.Lane + " " + name + suffix + " " + rightPlain
-	styled = " " + rail + glyphStyle.Render(g.Lane) + " " +
+	plain = " " + r.prefix + mark + " " + name + suffix + " " + rightPlain
+	styled = " " + rail + glyphStyle.Render(mark) + " " +
 		m.theme.Title.Render(name) + m.theme.Faint.Render(suffix) + " " + rightStyled
 	return plain, styled
 }

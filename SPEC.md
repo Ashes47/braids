@@ -429,37 +429,34 @@ A promoted agent shares no message IDs with its parent, so nothing could infer
 where it came from. Its provenance is recorded (§4), which is what hangs it
 under the conversation that spawned it.
 
-### 6.7 Sweep — the Friday clean-up
+### 6.7 Archive and delete
 
-```
-┌ sweep ─────────────────────────────────────────────────────────────────────────┐
-│  filter  idle > 30d   turns < 5   never branched from      12 lanes · 418 MB   │
-├────────────────────────────────────────────────────────────────────────────────┤
-│ [x] probe-mdt-contention        3 turns   idle 41d     2.1 MB                  │
-│ [x] test-registry-tags          1 turn    idle 38d     0.4 MB                  │
-│ [ ] halt-incident-postmortem   14 turns   idle 33d    61.0 MB   has 1 branch   │
-│ [x] scratch-2026-07-19          2 turns   idle 46d     1.2 MB                  │
-├────────────────────────────────────────────────────────────────────────────────┤
-│  also reclaim   [x] job artifacts 3.2 GB    [ ] tool-result blobs 41 MB        │
-├────────────────────────────────────────────────────────────────────────────────┤
-│ ␣ toggle   A all   d delete   a archive   esc cancel                           │
-└────────────────────────────────────────────────────────────────────────────────┘
-```
+`a` archives the selected conversation and `A` reveals what is archived. That is
+the gesture for most tidying: instant, reversible, and it leaves the
+conversation searchable, so nothing has to be deleted to get a map that reflects
+what is being worked on. An archived row keeps its place in the tree when shown,
+drawn with `○` rather than `●`.
 
-Nobody deletes one lane; they clear thirty. Job artifacts are a separate axis —
-on this machine they are 3.2 GB against 392 MB of actual conversation, so
-"delete the work products, keep the thread" is the deletion nobody regrets.
+**The title always says what is being held back** — `Conversations(all)[31] · 4
+archived hidden` — because a map that silently omits things is one you stop
+trusting.
 
-### 6.8 Undo — deletion is quiet and reversible
+`d` deletes, moving everything a conversation owns — the transcript and the
+directory beside it holding its subagents and tool output — into
+`~/.braids/trash/`, and reporting what was reclaimed. `u` restores it.
 
-```
-│  ⌫ 4 lanes deleted · 3.6 GB reclaimed · child branches unaffected   [u] undo 9s│
-```
+Two rules the notice states outright:
 
-No confirm dialog. Files move to `~/.braids/trash/<date>/`, purged after 7 days.
-The toast states that children are unaffected, because that is the fear that
-makes people hoard — and it is verifiably false here: every fork file carries a
-full copy of its prefix.
+- **It never cascades.** A fork carries its own copy of the prefix it shares, so
+  deleting a parent cannot break a child. That is the fear that makes people
+  hoard, and here it is simply not true.
+- **A running conversation is refused.** Deleting a session mid-turn is the one
+  accident worth preventing outright; `d` from inside a conversation is
+  redirected to the map, where you can see what would go.
+
+Still to come: multi-select and the filtered sweep, and reclaiming job artifacts
+separately from the conversation — 3.2 GB against 392 MB of transcript on this
+machine, which is the deletion nobody regrets.
 
 ---
 
@@ -656,7 +653,8 @@ needs-you — are declared as optional `Capabilities`, never assumed.
    would add the running-versus-blocked distinction.
 8. ~~**Subagents.**~~ **Done**: discovered, indexed against the turn that
    spawned them, drawn in the spine, and promotable with `p`.
-9. **Housekeeping.** Archive, sweep, trash, undo.
+9. ~~**Housekeeping.**~~ **Done** for archive, delete to a bin, and undo.
+   Multi-select, the filtered sweep and reclaiming job artifacts remain.
 10. **Merge.** Splice with preview.
 
 Steps 1–2 are already a tool worth opening.

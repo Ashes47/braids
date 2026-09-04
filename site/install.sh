@@ -14,9 +14,29 @@ REPO="Ashes47/braids"
 VERSION="${BRAIDS_VERSION:-latest}"
 
 say() { printf '%s\n' "$*"; }
+
+# The same mark `braids help` prints, so the install and the program greet you
+# the same way. Accent colour only when stdout is a terminal: with `curl | sh`
+# it is the pipe that is on stdin, so this is usually true, but a log file
+# should not collect escape codes.
+mark() {
+  if [ -t 1 ]; then a=$(printf '\033[38;5;208m'); z=$(printf '\033[0m')
+  else a=""; z=""; fi
+  printf '%s' "$a"
+  cat <<'ART'
+  ___.                          __        .___
+  \_ |__   ______     _____    |__|    __| _/    ______
+   | __ \  \_  __ \   \__  \    |     / __ |    /  ___/
+   | \_\ \  |  | \/    / __ \_  |    / /_/ |    \___  \
+   |___  /  |__|      (____  / |__|  \____ |   /____  /
+       \/                  \/             \/        \/
+ART
+  printf '%s    conversations as a graph\n\n' "$z"
+}
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required and was not found"; }
 
+mark
 need uname
 need tar
 if command -v curl >/dev/null 2>&1; then

@@ -431,6 +431,10 @@ func TestOnlyIndexCreatesTheIndex(t *testing.T) {
 		{"lanes", "--db", missing},
 		{"agents", "--lane", "x", "--db", missing},
 		{"map", "--print", "--db", missing},
+		// A map flag with no command in front of it is still the map. If
+		// dispatch read it as a command name this would fail with "unknown
+		// command" instead, which is what `braids --print` used to answer.
+		{"--print", "--db", missing},
 	} {
 		err := run(args, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "no index at") {

@@ -151,6 +151,13 @@ func run(args []string, w io.Writer) error {
 		out.printf("%s", usage)
 		return out.Err()
 	default:
+		// A flag where a command would go belongs to the map, which is what
+		// braids does when told to do nothing in particular. `braids --print`
+		// is documented that way, and reading it as a command name would
+		// answer a documented invocation with "unknown command".
+		if strings.HasPrefix(args[0], "-") {
+			return cmdMap(args, out)
+		}
 		if guess := nearest(args[0]); guess != "" {
 			return fmt.Errorf("unknown command %q — did you mean %q?", args[0], guess)
 		}

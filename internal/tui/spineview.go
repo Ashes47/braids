@@ -420,7 +420,7 @@ func spineHints() []hint {
 		{"j/k", "down / up"}, {"↵", "open branch/agent"},
 		{"b", "branch here"}, {"/", "search"},
 		{"esc", "back"}, {"q", "quit"},
-		{"n / N", "next / prev marker"}, {"p", "promote agent"},
+		{"n / N", "next / prev branch/agent"}, {"p", "promote agent"},
 		{"f", "filter turns"}, {"a", "toggle archive"},
 		{"y", "copy resume"}, {"o", "open terminal"},
 	}

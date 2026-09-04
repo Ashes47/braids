@@ -561,7 +561,7 @@ func TestSpineGlyphKeyNamesTheMarks(t *testing.T) {
 	m = m.openSpine()
 	m.width = 132
 	out := plain(m.renderSpine())
-	for _, want := range []string{"your turn", "claude's turn", "turns collapsed", "agent it spawned", "next / prev marker"} {
+	for _, want := range []string{"your turn", "claude's turn", "turns collapsed", "agent it spawned", "next / prev branch/agent"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("spine legend missing %q:\n%s", want, out)
 		}

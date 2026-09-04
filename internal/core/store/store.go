@@ -59,6 +59,33 @@ type Rememberer interface {
 	MemoryDirs() ([]memory.Location, error)
 }
 
+// Tail is where a read of a transcript stopped.
+//
+// Transcripts are append-only, so a conversation that grew by one turn can be
+// read from where the last read finished instead of from the start. Re-reading
+// a 145 MB transcript on every keystroke of a live session costs seconds; the
+// bytes that were actually added cost nothing.
+type Tail struct {
+	// Offset is the byte after the last complete record read. A record still
+	// being written is left for next time rather than half-parsed.
+	Offset int64
+	// LastID is the last conversational message seen, which is what a record
+	// in the next read resolves its parent to when that parent lies behind the
+	// offset. A transcript is linear, so the message before is the parent.
+	LastID string
+	// Title and Cwd are set when the tail carried a record naming them, so a
+	// conversation renamed mid-session is picked up without re-reading it all.
+	Title, Cwd string
+}
+
+// Tailer reads a transcript from where a previous read stopped.
+//
+// A source that cannot promise its files are append-only simply does not
+// implement it, and braids re-reads whole transcripts for that source.
+type Tailer interface {
+	MessagesFrom(ctx context.Context, lane model.Lane, from Tail, visit Visit) (Tail, error)
+}
+
 // Measurer re-measures a conversation's work products.
 //
 // They change without the transcript changing — deleting a scratch file leaves

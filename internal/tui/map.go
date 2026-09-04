@@ -193,6 +193,12 @@ type Model struct {
 	notice string
 	failed bool
 
+	// refreshing and refreshAgain coalesce background reads: while one is
+	// running, further changes are remembered rather than starting a second
+	// read of the same files.
+	refreshing   bool
+	refreshAgain bool
+
 	forest   *graph.Forest
 	mode     mode
 	returnTo mode
@@ -376,7 +382,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		return m.pasted(msg.Content), nil
 	case changedMsg:
-		return m.catchUp(), awaitChange(m.changes)
+		// A file changed. Bringing the index up to date happens off this
+		// thread: a conversation of any size must never be able to freeze the
+		// frame, however long it takes to read.
+		cmds := []tea.Cmd{awaitChange(m.changes)}
+		switch {
+		case m.refresh == nil:
+			// Nothing to do, but keep listening.
+		case m.refreshing:
+			// One is already running. Note that more arrived rather than
+			// starting a second read of the same files.
+			m.refreshAgain = true
+		default:
+			m.refreshing = true
+			cmds = append(cmds, refreshInBackground(m.refresh))
+		}
+		return m, tea.Batch(cmds...)
+	case refreshedMsg:
+		m.refreshing = false
+		if msg.err == nil && msg.forest != nil {
+			m = m.adopt(msg.forest)
+		}
+		if m.refreshAgain {
+			m.refreshAgain = false
+			m.refreshing = true
+			return m, refreshInBackground(m.refresh)
+		}
+		return m, nil
 	case tea.KeyPressMsg:
 		return m.key(msg)
 	}
@@ -1262,4 +1294,20 @@ func (m Model) selected() (row, bool) {
 		return row{}, false
 	}
 	return m.visible[m.cursor], true
+}
+
+// refreshedMsg carries the result of a background read.
+type refreshedMsg struct {
+	forest *graph.Forest
+	err    error
+}
+
+// refreshInBackground brings the index up to date away from the interface
+// thread. A failure is dropped on purpose: the map already holds a good view,
+// and a half-written transcript being read is normal rather than notable.
+func refreshInBackground(refresh func() (*graph.Forest, error)) tea.Cmd {
+	return func() tea.Msg {
+		forest, err := refresh()
+		return refreshedMsg{forest: forest, err: err}
+	}
 }

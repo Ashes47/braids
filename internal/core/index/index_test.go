@@ -724,3 +724,265 @@ func TestInterleaveGivesEachKindAPlace(t *testing.T) {
 		t.Errorf("got %d hits, want all six", len(all))
 	}
 }
+
+// The append path must produce exactly what a full read produces. Being wrong
+// about this corrupts a conversation's history, so it is compared row for row.
+func TestAppendingMatchesReadingWhole(t *testing.T) {
+	const session = "a1b2c3d4-0000-4000-8000-000000000001"
+	// A transcript with the awkward shapes: bookkeeping records in the parent
+	// chain, a compaction boundary, a tool call, and a rename.
+	turns := []string{
+		`{"type":"ai-title","aiTitle":"first name","sessionId":"` + session + `"}`,
+		`{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-09-01T10:00:00Z","cwd":"/w","message":{"role":"user","content":"one"}}`,
+		`{"type":"attachment","uuid":"x1","parentUuid":"u1","timestamp":"2026-09-01T10:00:01Z"}`,
+		`{"type":"assistant","uuid":"a1","parentUuid":"x1","timestamp":"2026-09-01T10:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"two"}]}}`,
+		`{"type":"user","uuid":"u2","parentUuid":"a1","timestamp":"2026-09-01T10:01:00Z","message":{"role":"user","content":"three"}}`,
+		`{"type":"assistant","uuid":"a2","parentUuid":"u2","timestamp":"2026-09-01T10:01:02Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}`,
+		`{"type":"system","subtype":"compact_boundary","uuid":"s1","parentUuid":null,"logicalParentUuid":"a2","timestamp":"2026-09-01T10:02:00Z","compactMetadata":{"trigger":"manual","preTokens":900,"postTokens":100}}`,
+		`{"type":"user","uuid":"u3","parentUuid":"s1","timestamp":"2026-09-01T10:02:01Z","message":{"role":"user","content":"four"}}`,
+		`{"type":"custom-title","customTitle":"renamed later","sessionId":"` + session + `"}`,
+		`{"type":"assistant","uuid":"a3","parentUuid":"u3","timestamp":"2026-09-01T10:03:00Z","message":{"role":"assistant","content":[{"type":"text","text":"five"}]}}`,
+	}
+
+	// snapshot indexes a transcript made of the first n lines, one way or the
+	// other, and returns what the index holds.
+	snapshot := func(t *testing.T, upTo int, incremental bool) (LaneInfo, []MessageRow) {
+		t.Helper()
+		root := t.TempDir()
+		projects := filepath.Join(root, "projects", "-p")
+		if err := os.MkdirAll(projects, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(projects, session+".jsonl")
+		write := func(lines []string) {
+			body := strings.Join(lines, "\n") + "\n"
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ctx := context.Background()
+		ix, err := Open(filepath.Join(t.TempDir(), "index.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ix.Close() //nolint:errcheck // test cleanup
+		src := claudecode.New(filepath.Join(root, "projects"))
+
+		if incremental {
+			// Grow the file one turn at a time, syncing after each, so the
+			// append path does all the work after the first read.
+			for n := 1; n <= upTo; n++ {
+				write(turns[:n])
+				// Second-precision mtimes: make each state look distinct.
+				stamp := time.Now().Add(time.Duration(n) * time.Second)
+				if err := os.Chtimes(path, stamp, stamp); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := ix.Sync(ctx, src); err != nil {
+					t.Fatalf("sync at %d lines: %v", n, err)
+				}
+			}
+		} else {
+			write(turns[:upTo])
+			if _, err := ix.Sync(ctx, src); err != nil {
+				t.Fatalf("sync: %v", err)
+			}
+		}
+		lane := laneOf(t, ctx, ix, session)
+		rows, err := ix.LaneMessages(ctx, session)
+		if err != nil {
+			t.Fatalf("LaneMessages: %v", err)
+		}
+		// A compaction indexed twice, or at the wrong turn, would be invisible
+		// in the message rows and obvious in the spine.
+		compactions, err := ix.LaneCompactions(ctx, session)
+		if err != nil {
+			t.Fatalf("LaneCompactions: %v", err)
+		}
+		if len(compactions) != 1 {
+			t.Errorf("recorded %d compactions, want exactly one", len(compactions))
+		}
+		return lane, rows
+	}
+
+	wholeLane, wholeRows := snapshot(t, len(turns), false)
+	tailLane, tailRows := snapshot(t, len(turns), true)
+
+	if tailLane.Tail.Offset == 0 {
+		t.Fatal("the incremental run recorded no offset, so it never appended")
+	}
+	if len(tailRows) != len(wholeRows) {
+		t.Fatalf("appending produced %d messages, reading whole produced %d",
+			len(tailRows), len(wholeRows))
+	}
+	for i := range wholeRows {
+		w, g := wholeRows[i], tailRows[i]
+		if w.Seq != g.Seq || w.ID != g.ID || w.ParentID != g.ParentID ||
+			w.Role != g.Role || w.Preview != g.Preview || w.Failed != g.Failed {
+			t.Errorf("row %d differs:\n whole %+v\n tail  %+v", i, w, g)
+		}
+	}
+	if wholeLane.Messages != tailLane.Messages || wholeLane.Parts != tailLane.Parts {
+		t.Errorf("counts differ: whole %d/%d, tail %d/%d",
+			wholeLane.Messages, wholeLane.Parts, tailLane.Messages, tailLane.Parts)
+	}
+	// The rename arrived in the tail and must have been picked up.
+	if wholeLane.Title != tailLane.Title {
+		t.Errorf("title: whole %q, tail %q", wholeLane.Title, tailLane.Title)
+	}
+	if tailLane.Title != "renamed later" {
+		t.Errorf("title = %q, want the rename carried in the tail", tailLane.Title)
+	}
+}
+
+// Appending is only safe while a file has grown from a prefix already read.
+// Every other shape falls back to reading it whole, because being wrong here
+// corrupts history and re-reading is merely slow.
+func TestAppendableOnlyWhenTheFileGrew(t *testing.T) {
+	lane := func(size int64) model.Lane { return model.Lane{Size: size} }
+	was := func(offset int64) LaneInfo { return LaneInfo{Tail: store.Tail{Offset: offset}} }
+
+	for _, tc := range []struct {
+		name  string
+		lane  model.Lane
+		was   LaneInfo
+		known bool
+		want  bool
+	}{
+		{"never indexed", lane(100), LaneInfo{}, false, false},
+		{"indexed by a build with no offset", lane(100), was(0), true, false},
+		{"grew", lane(200), was(100), true, true},
+		{"grew by a partial line only", lane(100), was(100), true, true},
+		{"shrank", lane(50), was(100), true, false},
+		{"rewritten shorter than the offset", lane(1), was(100), true, false},
+	} {
+		if got := appendable(tc.lane, tc.was, tc.known); got != tc.want {
+			t.Errorf("%s: appendable = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A transcript that is truncated and rewritten must be re-read whole, not
+// appended to, or the index keeps rows for turns that no longer exist.
+func TestATruncatedTranscriptIsReadWhole(t *testing.T) {
+	const session = "a1b2c3d4-0000-4000-8000-000000000001"
+	root := t.TempDir()
+	projects := filepath.Join(root, "projects", "-p")
+	if err := os.MkdirAll(projects, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(projects, session+".jsonl")
+	turn := func(n string) string {
+		return `{"type":"user","uuid":"u` + n + `","parentUuid":null,` +
+			`"timestamp":"2026-09-01T10:0` + n + `:00Z","message":{"role":"user","content":"turn ` + n + `"}}`
+	}
+	write := func(lines ...string) {
+		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		stamp := time.Now().Add(time.Duration(len(lines)) * time.Second)
+		if err := os.Chtimes(path, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ctx := context.Background()
+	ix, err := Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Close() //nolint:errcheck // test cleanup
+	src := claudecode.New(filepath.Join(root, "projects"))
+
+	write(turn("1"), turn("2"), turn("3"))
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	if got := laneOf(t, ctx, ix, session).Messages; got != 3 {
+		t.Fatalf("indexed %d messages, want 3", got)
+	}
+
+	// Rewritten shorter: the offset now points past the end.
+	write(turn("9"))
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	lane := laneOf(t, ctx, ix, session)
+	if lane.Messages != 1 {
+		t.Errorf("after truncation the index holds %d messages, want 1", lane.Messages)
+	}
+	rows, err := ix.LaneMessages(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ID != "u9" {
+		t.Errorf("rows = %+v, want only the rewritten turn", rows)
+	}
+}
+
+// A memory written now must be findable now: it is the thing you write and
+// then immediately search for. Deciding whether to re-index is a directory
+// listing, so this can run on every refresh.
+func TestSyncMemoriesPicksUpANewMemoryAndSkipsWhenNothingMoved(t *testing.T) {
+	root := t.TempDir()
+	memories := filepath.Join(root, "projects", "-p", "memory")
+	if err := os.MkdirAll(memories, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(memories, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entry := func(name, text string) string {
+		return "---\nname: " + name + "\ndescription: d\nmetadata:\n  type: project\n---\n\n" + text + "\n"
+	}
+	write("first.md", entry("first", "the shard manifest is written twice"))
+	write(memory.IndexFile, "- [First](first.md) — d\n")
+
+	ctx := context.Background()
+	ix, err := Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Close() //nolint:errcheck // test cleanup
+	src := claudecode.New(filepath.Join(root, "projects"))
+
+	changed, err := ix.SyncMemories(ctx, src)
+	if err != nil || !changed {
+		t.Fatalf("first SyncMemories = %v, %v; want it to index", changed, err)
+	}
+	if hits, _ := ix.Search(ctx, Query{Text: "manifest", Limit: 5}); len(hits) != 1 {
+		t.Fatalf("found %d hits for a memory just indexed", len(hits))
+	}
+
+	// Nothing moved: no work.
+	if changed, err := ix.SyncMemories(ctx, src); err != nil || changed {
+		t.Errorf("second SyncMemories = %v, %v; want it skipped", changed, err)
+	}
+
+	// A new memory appears.
+	write("second.md", entry("second", "the reader contract came later"))
+	if changed, err := ix.SyncMemories(ctx, src); err != nil || !changed {
+		t.Fatalf("SyncMemories after a new memory = %v, %v", changed, err)
+	}
+	if hits, _ := ix.Search(ctx, Query{Text: "contract", Limit: 5}); len(hits) != 1 {
+		t.Error("a memory written after the last index is not searchable")
+	}
+
+	// One is rewritten in place: same count, newer mtime.
+	write("second.md", entry("second", "the reader contract was abandoned"))
+	stamp := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(filepath.Join(memories, "second.md"), stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := ix.SyncMemories(ctx, src); err != nil || !changed {
+		t.Fatalf("SyncMemories after a rewrite = %v, %v", changed, err)
+	}
+	if hits, _ := ix.Search(ctx, Query{Text: "abandoned", Limit: 5}); len(hits) != 1 {
+		t.Error("a rewritten memory was not re-indexed")
+	}
+	if hits, _ := ix.Search(ctx, Query{Text: "came later", Limit: 5}); len(hits) != 0 {
+		t.Error("the old text of a rewritten memory is still searchable")
+	}
+}

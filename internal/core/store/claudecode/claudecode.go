@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -23,6 +24,10 @@ const shortIDLen = 8
 // maxLine caps a single JSONL record. The largest record seen in a real
 // transcript is ~1.2 MB, so 64 MB is generous headroom rather than a guess.
 const maxLine = 64 << 20
+
+// readBuffer is how much of a transcript is held while scanning it. Records run
+// to a megabyte, so a small buffer would grow on nearly every line.
+const readBuffer = 1 << 20
 
 // titleHints pre-filter lines before JSON decoding: title records are tiny and
 // rare, so scanning bytes is far cheaper than decoding every line.
@@ -157,11 +162,34 @@ func (s *Source) Artifacts(laneID string) (path string, bytes int64) {
 // Messages streams a lane's messages in file order, skipping the bookkeeping
 // records Claude Code interleaves with the conversation.
 func (s *Source) Messages(ctx context.Context, lane model.Lane, visit store.Visit) error {
+	_, err := s.read(ctx, lane, store.Tail{}, visit)
+	return err
+}
+
+// MessagesFrom streams the messages a transcript has gained since a previous
+// read, and reports where to start next time.
+//
+// Transcripts are append-only and written a line at a time, so this is the
+// difference between a live session costing the bytes it added and costing the
+// whole file: 3.3 seconds against milliseconds on a 145 MB conversation.
+func (s *Source) MessagesFrom(ctx context.Context, lane model.Lane, from store.Tail, visit store.Visit) (store.Tail, error) {
+	return s.read(ctx, lane, from, visit)
+}
+
+// read streams a transcript from an offset, resolving each message's parent as
+// it goes.
+func (s *Source) read(ctx context.Context, lane model.Lane, from store.Tail, visit store.Visit) (store.Tail, error) {
 	f, err := os.Open(lane.Path)
 	if err != nil {
-		return fmt.Errorf("open lane %s: %w", lane.ID, err)
+		return from, fmt.Errorf("open lane %s: %w", lane.ID, err)
 	}
 	defer f.Close() //nolint:errcheck // read-only
+
+	if from.Offset > 0 {
+		if _, err := f.Seek(from.Offset, io.SeekStart); err != nil {
+			return from, fmt.Errorf("seek lane %s: %w", lane.ID, err)
+		}
+	}
 
 	// Claude Code threads bookkeeping records (attachments, snapshots) into the
 	// same parent chain as the conversation, so a message's parentUuid usually
@@ -173,23 +201,48 @@ func (s *Source) Messages(ctx context.Context, lane model.Lane, visit store.Visi
 	// replaces what it dropped, so it is carried forward one record rather than
 	// costing a second pass over the transcript.
 	var pending *model.Compaction
+	// pendingAt is where that announcement began. A read that ends still
+	// holding one stops there instead of consuming it: the message it belongs
+	// to has not been written yet, and an announcement dropped between two
+	// reads is a compaction the spine never shows.
+	var pendingAt int64
 
-	sc := newScanner(f)
-	for sc.Scan() {
+	at := store.Tail{Offset: from.Offset, LastID: from.LastID}
+	reader := bufio.NewReaderSize(f, readBuffer)
+	for {
 		if err := ctx.Err(); err != nil {
-			return err
+			return at, err
+		}
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			// A line with no newline is a record still being written. It is
+			// left where it is, so the next read sees it whole.
+			break
+		}
+		began := at.Offset
+		at.Offset += int64(len(line))
+		if len(line) > maxLine {
+			continue // absurdly long: not a record braids can use
 		}
 		var r record
-		if err := json.Unmarshal(sc.Bytes(), &r); err != nil {
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
 			continue // a malformed line must not abort an otherwise good lane
 		}
+		if title, cwd := metaFrom([]byte(line)); title != "" || cwd != "" {
+			if title != "" {
+				at.Title = title
+			}
+			if cwd != "" {
+				at.Cwd = cwd
+			}
+		}
 		if c := r.compaction(); c != nil {
-			pending = c
+			pending, pendingAt = c, began
 		}
 		if r.UUID == "" {
 			continue
 		}
-		ancestor := nearest[r.parentID()]
+		ancestor := resolveParent(nearest, r.parentID(), at.LastID)
 		msg, ok := r.toMessage(lane.ID)
 		if !ok {
 			nearest[r.UUID] = ancestor
@@ -197,15 +250,34 @@ func (s *Source) Messages(ctx context.Context, lane model.Lane, visit store.Visi
 		}
 		nearest[r.UUID] = r.UUID
 		msg.ParentID = ancestor
-		msg.Compaction, pending = pending, nil
+		msg.Compaction, pending, pendingAt = pending, nil, 0
+		at.LastID = r.UUID
 		if err := visit(msg); err != nil {
-			return err
+			return at, err
 		}
 	}
-	if err := sc.Err(); err != nil {
-		return fmt.Errorf("scan lane %s: %w", lane.ID, err)
+	if pending != nil {
+		at.Offset = pendingAt
 	}
-	return nil
+	return at, nil
+}
+
+// resolveParent finds the conversational ancestor of a record.
+//
+// A parent that is not in nearest lies before where this read started. The
+// transcript is append-only and linear, so the conversational ancestor of a
+// record appended after it is the last conversational message before it. An
+// empty parent stays empty: that is a record that deliberately has none, such
+// as a compaction boundary, and giving it one would graft a new root onto the
+// conversation it replaced.
+func resolveParent(nearest map[string]string, parent, last string) string {
+	if parent == "" {
+		return ""
+	}
+	if ancestor, known := nearest[parent]; known {
+		return ancestor
+	}
+	return last
 }
 
 func newScanner(f *os.File) *bufio.Scanner {
@@ -500,4 +572,29 @@ func ReservedArtifact(name string) bool {
 // the two have never collided.
 func (s *Source) MemoryDirs() ([]memory.Location, error) {
 	return memory.Dirs(s.root, projectName)
+}
+
+// metaFrom pulls a rename and a working directory out of one record.
+//
+// Only an explicit rename counts here, not a model-generated title. This runs
+// while reading the *tail* of a transcript, and a generated title appearing
+// after a rename must not undo it — the full read that established the name in
+// the first place already prefers the rename.
+func metaFrom(line []byte) (title, cwd string) {
+	if bytes.Contains(line, []byte(`"cwd"`)) {
+		var r struct {
+			Cwd string `json:"cwd"`
+		}
+		if json.Unmarshal(line, &r) == nil {
+			cwd = r.Cwd
+		}
+	}
+	if !hasTitleHint(line) {
+		return "", cwd
+	}
+	var t titleRecord
+	if json.Unmarshal(line, &t) == nil {
+		title = t.CustomTitle
+	}
+	return title, cwd
 }

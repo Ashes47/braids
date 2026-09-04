@@ -349,16 +349,76 @@ func TestLiveUpdatesAdoptANewForest(t *testing.T) {
 		t.Error("a watching map should say so")
 	}
 
+	// A file change must not read the index on this thread: a 145 MB
+	// conversation would freeze the frame for as long as it took.
 	updated, cmd := m.Update(changedMsg{})
 	m = updated.(Model)
+	if refreshed != 0 {
+		t.Fatalf("refresh ran on the interface thread %d times", refreshed)
+	}
+	if cmd == nil {
+		t.Fatal("the map must re-arm its listener or it goes deaf after one change")
+	}
+	if !m.refreshing {
+		t.Error("the map does not know a read is in flight")
+	}
+
+	// The read happens, and its result is adopted when it arrives.
+	msg := refreshInBackground(m.refresh)()
 	if refreshed != 1 {
 		t.Fatalf("refresh called %d times, want 1", refreshed)
 	}
-	if cmd == nil {
-		t.Error("the map must re-arm its listener or it goes deaf after one change")
+	updated, _ = m.Update(msg)
+	m = updated.(Model)
+	if m.refreshing {
+		t.Error("the map still thinks a read is in flight")
 	}
 	if !strings.Contains(plain(m.render()), "appeared while watching") {
 		t.Error("the new lane should be on the map")
+	}
+}
+
+// Changes arriving while a read is in flight are coalesced: one more read
+// after it finishes, not one per change.
+func TestLiveUpdatesCoalesceWhileReading(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("a", "first", "app", 5, time.Hour)}
+	changes := make(chan struct{}, 1)
+	refreshed := 0
+	m := NewModel(forestOf(lanes, nil), Options{
+		ASCII: true, Source: "claudecode", Changes: changes,
+		Refresh: func() (*graph.Forest, error) {
+			refreshed++
+			return forestOf(lanes, nil), nil
+		},
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 90, 20
+
+	for range 4 {
+		updated, _ := m.Update(changedMsg{})
+		m = updated.(Model)
+	}
+	if !m.refreshing || !m.refreshAgain {
+		t.Fatalf("refreshing=%v again=%v, want one in flight and more noted",
+			m.refreshing, m.refreshAgain)
+	}
+	// Finishing the first read starts exactly one more.
+	updated, cmd := m.Update(refreshInBackground(m.refresh)())
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("the noted changes were dropped")
+	}
+	if m.refreshAgain {
+		t.Error("the note was not cleared, so reads would never stop")
+	}
+	// And that one settles.
+	updated, cmd = m.Update(refreshInBackground(m.refresh)())
+	m = updated.(Model)
+	if m.refreshing || cmd != nil {
+		t.Errorf("reads did not settle: refreshing=%v cmd=%v", m.refreshing, cmd != nil)
+	}
+	if refreshed != 2 {
+		t.Errorf("read the index %d times for four changes, want 2", refreshed)
 	}
 }
 

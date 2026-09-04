@@ -360,7 +360,7 @@ func cmdMap(args []string, out *printer) error {
 	// still opens as a snapshot.
 	var changes <-chan struct{}
 	if !*print {
-		if w, err := watch.New(root, filepath.Dir(dbPath)); err == nil {
+		if w, err := watch.New(watched(src, root, dbPath)...); err == nil {
 			defer w.Close() //nolint:errcheck // closing on exit
 			changes = w.Changes()
 		}
@@ -529,6 +529,13 @@ func cmdMap(args []string, out *printer) error {
 		},
 		Refresh: func() (*graph.Forest, error) {
 			if _, err := ix.Sync(ctx, src); err != nil {
+				return nil, err
+			}
+			// Memories are what you write and then immediately search for, so
+			// they are kept current here. Deciding whether to bother is a
+			// directory listing; work products are not, so they wait for
+			// `braids index`.
+			if _, err := ix.SyncMemories(ctx, src); err != nil {
 				return nil, err
 			}
 			return tui.Forest(ctx, ix, provenance.All(), names.All())
@@ -1899,4 +1906,25 @@ func foundLabel(h index.Hit) string {
 		return laneLabel(h)
 	}
 	return truncate(h.Name, 34)
+}
+
+// watched is everywhere a change should wake the map: where the harness writes
+// transcripts, where sessions report what they are waiting on, and where each
+// project keeps its memories.
+//
+// Memory directories are named individually because the watcher covers a root
+// and one level below it, and they sit two levels down — inside the project
+// directory, beside the transcripts. Work products are deliberately not
+// watched: that is a tree of thousands of files a tool writes into constantly,
+// and the only thing braids would do with the news is re-measure it.
+func watched(src *claudecode.Source, root, dbPath string) []string {
+	roots := []string{root, filepath.Dir(dbPath)}
+	locations, err := src.MemoryDirs()
+	if err != nil {
+		return roots
+	}
+	for _, location := range locations {
+		roots = append(roots, location.Dir)
+	}
+	return roots
 }

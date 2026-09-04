@@ -22,7 +22,7 @@ import (
 // schemaVersion is bumped whenever the tables change. The index holds no unique
 // state — it rebuilds from the transcripts in seconds — so an old schema is
 // dropped and recreated rather than migrated.
-const schemaVersion = 10
+const schemaVersion = 12
 
 const dropAll = `
 DROP TABLE IF EXISTS parts;
@@ -47,7 +47,11 @@ CREATE TABLE IF NOT EXISTS lanes (
 	last_role  TEXT    NOT NULL DEFAULT '',
 	last_tool  INTEGER NOT NULL DEFAULT 0,
 	artifacts  INTEGER NOT NULL DEFAULT 0,
-	artifact_path TEXT NOT NULL DEFAULT ''
+	artifact_path TEXT NOT NULL DEFAULT '',
+	-- Where the last read of this transcript stopped, so the next one can
+	-- start there. Zero means the whole file has to be read.
+	indexed_bytes INTEGER NOT NULL DEFAULT 0,
+	indexed_last  TEXT    NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS messages (
 	lane_id   TEXT    NOT NULL,
@@ -100,6 +104,14 @@ CREATE VIRTUAL TABLE IF NOT EXISTS parts USING fts5(
 -- A separate table rather than a kind column on parts, because these have
 -- nothing in common with a turn — no message, no role, no position in a
 -- conversation — and crowding them in would make every column optional.
+-- What the index last saw of each memory directory, so re-indexing memories
+-- can be skipped when none of them moved.
+CREATE TABLE IF NOT EXISTS memory_marks (
+	dir    TEXT PRIMARY KEY,
+	count  INTEGER NOT NULL,
+	newest INTEGER NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS docs USING fts5(
 	body,
 	doc_type UNINDEXED,
@@ -142,6 +154,9 @@ type LaneInfo struct {
 	model.Lane
 	Messages int
 	Parts    int
+	// Tail is where the last read of this transcript stopped. A zero offset
+	// means it has never been read incrementally, so the next read is whole.
+	Tail store.Tail
 }
 
 // Overlap records one message that appears in more than one lane. Claude Code
@@ -329,14 +344,15 @@ func (ix *Index) Sync(ctx context.Context, src store.Source) (Stats, error) {
 	seen := make(map[string]bool, len(lanes))
 	for _, lane := range lanes {
 		seen[lane.ID] = true
+		was, known := stored[lane.ID]
 		// Compare at second precision: that is what the index stores, so
 		// comparing the raw ModTime would mark every lane changed, every time.
-		if was, ok := stored[lane.ID]; ok && was.Size == lane.Size && was.Updated.Unix() == lane.Updated.Unix() {
+		if known && was.Size == lane.Size && was.Updated.Unix() == lane.Updated.Unix() {
 			stats.Messages += was.Messages
 			stats.Parts += was.Parts
 			continue
 		}
-		msgs, parts, err := replaceLane(ctx, tx, src, lane)
+		msgs, parts, err := indexLane(ctx, tx, src, lane, was, known)
 		if err != nil {
 			return Stats{}, err
 		}
@@ -417,7 +433,7 @@ func replaceLane(ctx context.Context, tx *sql.Tx, src store.Source, lane model.L
 	// Subagents name the tool call they answer, so the turn each one attaches
 	// to is learned while streaming rather than by a second pass.
 	spawnedAt := map[string]int{}
-	err = src.Messages(ctx, lane, func(m model.Message) error {
+	tail, err := readAll(ctx, src, lane, func(m model.Message) error {
 		msgs++
 		activity = activityOf(m)
 		for _, p := range m.Parts {
@@ -452,12 +468,12 @@ func replaceLane(ctx context.Context, tx *sql.Tx, src store.Source, lane model.L
 		return 0, 0, fmt.Errorf("index lane %s: %w", lane.ID, err)
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO lanes (id,source,project,path,title,cwd,created,updated,size,msg_count,part_count,last_role,last_tool,artifacts,artifact_path) `+
-			`VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO lanes (id,source,project,path,title,cwd,created,updated,size,msg_count,part_count,last_role,last_tool,artifacts,artifact_path,indexed_bytes,indexed_last) `+
+			`VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		lane.ID, lane.Source, lane.Project, lane.Path, lane.Title, lane.Cwd,
 		unixOrZero(lane.Created), lane.Updated.Unix(), lane.Size, msgs, parts,
 		string(activity.LastRole), boolToInt(activity.LastWasToolCall),
-		lane.ArtifactBytes, lane.ArtifactPath); err != nil {
+		lane.ArtifactBytes, lane.ArtifactPath, tail.Offset, tail.LastID); err != nil {
 		return 0, 0, fmt.Errorf("insert lane %s: %w", lane.ID, err)
 	}
 	if err := indexSubagents(ctx, tx, src, lane, spawnedAt); err != nil {
@@ -828,7 +844,7 @@ func (ix *Index) Timelines(ctx context.Context) (map[string][]time.Time, error) 
 // Lanes returns every indexed lane, most recently updated first.
 func (ix *Index) Lanes(ctx context.Context) ([]LaneInfo, error) {
 	rows, err := ix.db.QueryContext(ctx,
-		`SELECT id,source,project,path,title,cwd,created,updated,size,msg_count,part_count,last_role,last_tool,artifacts,artifact_path FROM lanes ORDER BY updated DESC`)
+		`SELECT id,source,project,path,title,cwd,created,updated,size,msg_count,part_count,last_role,last_tool,artifacts,artifact_path,indexed_bytes,indexed_last FROM lanes ORDER BY updated DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list lanes: %w", err)
 	}
@@ -842,7 +858,7 @@ func (ix *Index) Lanes(ctx context.Context) ([]LaneInfo, error) {
 		var lastTool int
 		if err := rows.Scan(&l.ID, &l.Source, &l.Project, &l.Path, &l.Title, &l.Cwd,
 			&created, &updated, &l.Size, &l.Messages, &l.Parts, &lastRole, &lastTool,
-			&l.ArtifactBytes, &l.ArtifactPath); err != nil {
+			&l.ArtifactBytes, &l.ArtifactPath, &l.Tail.Offset, &l.Tail.LastID); err != nil {
 			return nil, fmt.Errorf("scan lane: %w", err)
 		}
 		if created > 0 {
@@ -971,6 +987,92 @@ const (
 // The zero value counts as one: a turn is the common case and the original
 // kind, so a Hit built without naming its kind is a turn rather than nothing.
 func (h Hit) IsTurn() bool { return h.Of == "" || h.Of == FoundTurn }
+
+// SyncMemories re-indexes memories when any of them changed.
+//
+// Memories are the thing you write and then immediately want to find, so
+// leaving them out of search until the next `braids index` is the wrong answer.
+// They are also tiny — a few hundred kilobytes — so the whole cost is deciding
+// whether to bother, which is a directory listing per project. Work products
+// are not done here: measuring those walks a tree of thousands of files.
+func (ix *Index) SyncMemories(ctx context.Context, src store.Source) (bool, error) {
+	rememberer, ok := src.(store.Rememberer)
+	if !ok {
+		return false, nil
+	}
+	locations, err := rememberer.MemoryDirs()
+	if err != nil {
+		return false, err
+	}
+	changed := false
+	for _, location := range locations {
+		count, newest := memory.Fingerprint(location)
+		was, err := ix.memoryMark(ctx, location.Dir)
+		if err != nil {
+			return false, err
+		}
+		if was.count == count && was.newest == newest.Unix() {
+			continue
+		}
+		changed = true
+	}
+	if !changed {
+		return false, nil
+	}
+
+	tx, err := ix.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once committed
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM docs WHERE doc_type = ?`, string(FoundMemory)); err != nil {
+		return false, fmt.Errorf("clear memories: %w", err)
+	}
+	insert, err := tx.PrepareContext(ctx,
+		`INSERT INTO docs (body, doc_type, name, path, project, lane_id, at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return false, fmt.Errorf("prepare docs: %w", err)
+	}
+	defer insert.Close() //nolint:errcheck // tx-scoped
+
+	if err := indexMemories(ctx, insert, src); err != nil {
+		return false, err
+	}
+	for _, location := range locations {
+		count, newest := memory.Fingerprint(location)
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO memory_marks (dir, count, newest) VALUES (?,?,?)
+			 ON CONFLICT(dir) DO UPDATE SET count=excluded.count, newest=excluded.newest`,
+			location.Dir, count, newest.Unix()); err != nil {
+			return false, fmt.Errorf("record memory mark: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit memories: %w", err)
+	}
+	return true, nil
+}
+
+// mark is what the index last saw of a memory directory.
+type mark struct {
+	count  int
+	newest int64
+}
+
+func (ix *Index) memoryMark(ctx context.Context, dir string) (mark, error) {
+	var m mark
+	err := ix.db.QueryRowContext(ctx,
+		`SELECT count, newest FROM memory_marks WHERE dir = ?`, dir).Scan(&m.count, &m.newest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return mark{}, nil
+	}
+	if err != nil {
+		return mark{}, fmt.Errorf("read memory mark: %w", err)
+	}
+	return m, nil
+}
 
 // SyncDocs rebuilds the searchable index of memories and work-product names.
 //
@@ -1164,4 +1266,210 @@ func interleave(limit int, sets ...[]Hit) []Hit {
 		}
 	}
 	return hits
+}
+
+// readAll reads a whole transcript, reporting where the read stopped so a
+// later read can continue from there. A source that cannot be tailed reports
+// nothing, and will be read whole every time.
+func readAll(ctx context.Context, src store.Source, lane model.Lane, visit store.Visit) (store.Tail, error) {
+	if tailer, ok := src.(store.Tailer); ok {
+		return tailer.MessagesFrom(ctx, lane, store.Tail{}, visit)
+	}
+	return store.Tail{}, src.Messages(ctx, lane, visit)
+}
+
+// appendLane indexes what a transcript has gained, leaving what is already
+// indexed alone.
+//
+// This is the whole point of tracking an offset. A live session appends a few
+// hundred bytes at a time; re-reading its transcript to see them costs the
+// whole file, which on a 145 MB conversation is over three seconds of parsing
+// for every turn. Appending costs the bytes that arrived.
+func appendLane(ctx context.Context, tx *sql.Tx, src store.Source, lane model.Lane, was LaneInfo) (msgs, parts int, err error) {
+	tailer, ok := src.(store.Tailer)
+	if !ok {
+		return 0, 0, errNotTailable
+	}
+	insertPart, err := tx.PrepareContext(ctx,
+		`INSERT INTO parts (body,lane_id,msg_id,kind,role,tool,at) VALUES (?,?,?,?,?,?,?)`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("prepare part insert: %w", err)
+	}
+	defer insertPart.Close() //nolint:errcheck // tx-scoped
+	insertMsg, err := tx.PrepareContext(ctx,
+		`INSERT INTO messages (lane_id,seq,msg_id,parent_id,role,at,preview,tools,failed) `+
+			`VALUES (?,?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("prepare message insert: %w", err)
+	}
+	defer insertMsg.Close() //nolint:errcheck // tx-scoped
+	insertCompaction, err := tx.PrepareContext(ctx,
+		`INSERT INTO compactions (lane_id,seq,trigger,pre_tokens,post_tokens,dropped,duration_ms) `+
+			`VALUES (?,?,?,?,?,?,?)`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("prepare compaction insert: %w", err)
+	}
+	defer insertCompaction.Close() //nolint:errcheck // tx-scoped
+
+	msgs, parts = was.Messages, was.Parts
+	activity := was.Activity
+	spawnedAt := map[string]int{}
+
+	tail, err := tailer.MessagesFrom(ctx, lane, was.Tail, func(m model.Message) error {
+		msgs++
+		activity = activityOf(m)
+		for _, p := range m.Parts {
+			if p.Kind == model.PartToolUse && p.ID != "" {
+				spawnedAt[p.ID] = msgs
+			}
+		}
+		if c := m.Compaction; c != nil {
+			if _, err := insertCompaction.ExecContext(ctx, lane.ID, msgs, c.Trigger,
+				c.PreTokens, c.PostTokens, c.Dropped, c.Duration.Milliseconds()); err != nil {
+				return fmt.Errorf("insert compaction: %w", err)
+			}
+		}
+		if _, err := insertMsg.ExecContext(ctx, m.LaneID, msgs, m.ID,
+			m.ParentID, string(m.Role), m.At.Unix(), previewOf(m), toolsOf(m),
+			boolToInt(m.Failed())); err != nil {
+			return fmt.Errorf("insert message: %w", err)
+		}
+		for _, p := range m.Parts {
+			if strings.TrimSpace(p.Text) == "" {
+				continue
+			}
+			if _, err := insertPart.ExecContext(ctx, p.Text, m.LaneID, m.ID,
+				string(p.Kind), string(m.Role), p.Tool, m.At.Unix()); err != nil {
+				return fmt.Errorf("insert part: %w", err)
+			}
+			parts++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, 0, fmt.Errorf("append lane %s: %w", lane.ID, err)
+	}
+
+	// A rename carried in the tail is taken; a title is otherwise left as the
+	// full read established it. Work products are re-measured, because a
+	// session writing turns is usually writing files too.
+	title, cwd := was.Title, was.Cwd
+	if tail.Title != "" {
+		title = tail.Title
+	}
+	if tail.Cwd != "" {
+		cwd = tail.Cwd
+	}
+	artifactPath, artifactBytes := was.ArtifactPath, was.ArtifactBytes
+	if measurer, ok := src.(store.Measurer); ok {
+		artifactPath, artifactBytes = measurer.Artifacts(lane.ID)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE lanes SET title=?, cwd=?, updated=?, size=?, msg_count=?, part_count=?, `+
+			`last_role=?, last_tool=?, artifacts=?, artifact_path=?, indexed_bytes=?, indexed_last=? `+
+			`WHERE id=?`,
+		title, cwd, lane.Updated.Unix(), lane.Size, msgs, parts,
+		string(activity.LastRole), boolToInt(activity.LastWasToolCall),
+		artifactBytes, artifactPath, tail.Offset, tail.LastID, lane.ID); err != nil {
+		return 0, 0, fmt.Errorf("update lane %s: %w", lane.ID, err)
+	}
+	if err := appendSubagents(ctx, tx, src, lane, spawnedAt); err != nil {
+		return 0, 0, err
+	}
+	return msgs, parts, nil
+}
+
+// appendSubagents adds the subagents a conversation has gained and refreshes
+// the turn counts of the ones it already had.
+//
+// The rows already there are right and their turn numbers cannot be recomputed
+// without re-reading the transcript, so they are left alone. A subagent spawned
+// in the tail has its tool call in the tail too, which is where its turn number
+// comes from.
+func appendSubagents(ctx context.Context, tx *sql.Tx, src store.Source, lane model.Lane, spawnedAt map[string]int) error {
+	sides, ok := src.(store.Sidechains)
+	if !ok {
+		return nil
+	}
+	agents, ok := readSubagents(ctx, sides, lane)
+	if !ok {
+		return nil // a lane is still worth indexing without its subagents
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT agent_id FROM subagents WHERE lane_id = ?`, lane.ID)
+	if err != nil {
+		return fmt.Errorf("read subagents of %s: %w", lane.ID, err)
+	}
+	known := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return errors.Join(fmt.Errorf("scan subagent: %w", err), rows.Close())
+		}
+		known[id] = true
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return fmt.Errorf("iterate subagents: %w", err)
+	}
+
+	for _, a := range agents {
+		if known[a.ID] {
+			// A running subagent grows; its turn count is what the spine shows.
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE subagents SET msgs=? WHERE lane_id=? AND agent_id=?`,
+				a.Messages, lane.ID, a.ID); err != nil {
+				return fmt.Errorf("update subagent %s: %w", a.ID, err)
+			}
+			continue
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO subagents (lane_id,agent_id,type,task,tool_use_id,depth,path,msgs,parent_seq) `+
+				`VALUES (?,?,?,?,?,?,?,?,?)`,
+			lane.ID, a.ID, a.Type, a.Task, a.ToolUseID, a.Depth, a.Path, a.Messages,
+			spawnedAt[a.ToolUseID]); err != nil {
+			return fmt.Errorf("insert subagent %s: %w", a.ID, err)
+		}
+	}
+	return nil
+}
+
+// errNotTailable says a source cannot be read from an offset, so the caller
+// must fall back to reading the transcript whole.
+var errNotTailable = errors.New("source cannot be tailed")
+
+// indexLane brings one conversation up to date, appending where it can and
+// re-reading it whole where it cannot.
+//
+// Appending is only safe while the file has strictly grown from a prefix that
+// was already read. Every other shape — never indexed, shrunk, rewritten to
+// the same length, an offset past the end, a source that cannot be tailed —
+// falls back to the whole file. Being wrong about this would corrupt a
+// conversation's history, and re-reading is merely slow.
+func indexLane(ctx context.Context, tx *sql.Tx, src store.Source, lane model.Lane, was LaneInfo, known bool) (msgs, parts int, err error) {
+	if appendable(lane, was, known) {
+		msgs, parts, err = appendLane(ctx, tx, src, lane, was)
+		if err == nil {
+			return msgs, parts, nil
+		}
+		if !errors.Is(err, errNotTailable) {
+			return 0, 0, err
+		}
+	}
+	return replaceLane(ctx, tx, src, lane)
+}
+
+// appendable reports whether a transcript can be read from where the last read
+// stopped.
+func appendable(lane model.Lane, was LaneInfo, known bool) bool {
+	switch {
+	case !known || was.Tail.Offset <= 0:
+		return false // never read, or read by a build that did not record where
+	case lane.Size < was.Tail.Offset:
+		return false // shorter than what was already read: not an append
+	case lane.Size == was.Tail.Offset:
+		// Nothing new past the last complete record. The file may still have
+		// grown by a partial line, which is nothing to index yet.
+		return true
+	default:
+		return true
+	}
 }

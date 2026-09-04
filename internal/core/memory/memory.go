@@ -341,3 +341,28 @@ func Dirs(root string, project func(dir string) string) ([]Location, error) {
 	sort.SliceStable(found, func(i, j int) bool { return found[i].Project < found[j].Project })
 	return found, nil
 }
+
+// Fingerprint summarises a memory directory cheaply: how many memories it
+// holds and when one last changed.
+//
+// It exists so search over memories can be live without re-reading them on
+// every refresh. Reading 83 memories costs a few milliseconds, which is little
+// but not nothing when it happens on every keystroke of a live session;
+// stat-ing the directory costs nothing at all, and a memory is written by
+// creating or rewriting a file, which both show here.
+func Fingerprint(loc Location) (count int, newest time.Time) {
+	entries, err := os.ReadDir(loc.Dir)
+	if err != nil {
+		return 0, time.Time{}
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		count++
+		if info, err := entry.Info(); err == nil && info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+	}
+	return count, newest
+}

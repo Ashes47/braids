@@ -607,9 +607,53 @@ every conversation, which is the opposite of what a search across everything is
 for. One shared query has the same flaw one level down — a thousand filenames
 starve the memories before the merge sees them.
 
-Memories and work-product names are indexed by `braids index` rather than on
-every refresh, because measuring the work tree walks it. So they are as fresh as
-the last index run, while the map stays as live as the files.
+**Memories are kept live; work-product names are not.** Memories are what you
+write and then immediately want to find, so they are re-indexed on every
+refresh — but only after a check that costs a directory listing per project,
+comparing how many there are and when one last changed. Work-product names wait
+for `braids index`, because deciding whether *they* moved means walking a tree
+of thousands of files.
+
+### 6.4e Reading a transcript that is being written
+
+Transcripts are append-only, and until this was built braids ignored that: a
+changed conversation was deleted from the index and re-read from byte zero. On
+the largest here that is **3.3 seconds of parsing for every turn** — and it ran
+on the interface thread, so the frame froze for each one. Chatting in a big
+conversation made the map unusable.
+
+Each lane now records the byte after the last complete record read, and the last
+conversational message seen. A conversation that grew is read from there:
+**3306 ms → 43 ms**, and it no longer scales with the conversation.
+
+Three things this had to get right, each of which failed first:
+
+- **A parent behind the offset.** A message's `parentUuid` usually names a
+  bookkeeping record, resolved by walking a map built while scanning. Starting
+  mid-file, that map is empty. A transcript is linear, so a record appended
+  after the boundary has the last conversational message as its ancestor — and
+  an *empty* parent stays empty, because that is a compaction boundary
+  deliberately having none, and giving it one grafts a new root onto the
+  conversation it replaced.
+- **A compaction straddling the boundary.** A compaction is announced one record
+  before the message it belongs to. Announced at the end of one read, it
+  attached to nothing and was lost. A read that ends still holding one now stops
+  before it, so the next read sees the pair together.
+- **A record still being written.** A line with no newline yet is left where it
+  is rather than half-parsed, so the offset only ever lands on a record
+  boundary.
+
+Appending is refused for every shape that is not growth from a prefix already
+read — never indexed, shrunk, rewritten to the same length, an offset past the
+end, a source that cannot be tailed — and falls back to the whole file. Being
+wrong corrupts a conversation's history; re-reading is merely slow. A test
+grows a transcript one turn at a time and compares every row, count, title and
+compaction against reading the same file whole.
+
+**The read also moved off the interface thread**, with changes coalesced while
+one is in flight, so no conversation of any size can freeze the frame. That made
+the sidecars concurrently read while written, which for a Go map is not stale
+data but a crash, so they are now guarded.
 
 ### 6.5 Branch — inline at the junction, never a modal
 

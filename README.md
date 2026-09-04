@@ -206,7 +206,7 @@ working in never sits still:
 | | |
 |---|---|
 | First index, from nothing | ~8 s |
-| Re-index, a few conversations changed | ~300 ms |
+| Re-index, a turn added to a 145 MB conversation | ~40 ms |
 | Re-index, nothing changed | under 1 ms |
 | Search, across ~62,000 indexed units | 1–6 ms |
 | Index on disk | ~190 MB |

@@ -40,8 +40,15 @@ vet:
 fmt:
 	@test -z "$$(gofmt -l . | tee /dev/stderr)" || (echo "run gofmt -w ." && exit 1)
 
+# lint runs the same version CI does. Pinned rather than "latest" so a new
+# release cannot turn the build red without a commit saying so, and run through
+# `go run` so there is nothing to install first — a lint gate you have to set up
+# by hand is one that only ever runs on CI, which is where these rules were
+# being discovered.
+LINTER := github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+
 lint:
-	golangci-lint run
+	$(GO) run $(LINTER) run
 
 tidy:
 	$(GO) mod tidy && git diff --exit-code go.mod go.sum
@@ -49,4 +56,4 @@ tidy:
 clean:
 	rm -f $(BIN) coverage.out
 
-ci: fmt vet test race cover
+ci: fmt vet lint test race cover

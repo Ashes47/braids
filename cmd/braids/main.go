@@ -195,7 +195,7 @@ func parse(fs *flag.FlagSet, args []string, out *printer) error {
 		out.printf("braids %s\n\n%s\nsee 'braids help' for every command\n", fs.Name(), flagList(fs))
 		return errShown
 	}
-	return fmt.Errorf("%v\n\nbraids %s takes:\n%s", err, fs.Name(), flagList(fs))
+	return fmt.Errorf("%w\n\nbraids %s takes:\n%s", err, fs.Name(), flagList(fs))
 }
 
 // flagList renders a flag set's own documentation, spelled the way braids

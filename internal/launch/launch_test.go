@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func envOf(pairs map[string]string) func(string) string {
@@ -59,6 +60,9 @@ func TestRunReportsWhatWentWrong(t *testing.T) {
 	}
 }
 
+// itermBundleID is what AppleScript resolves `tell application "iTerm2"` to.
+const itermBundleID = "com.googlecode.iterm2"
+
 func TestQuotingCannotBreakTheScript(t *testing.T) {
 	// A resume command carries a quoted title; a directory can contain one too.
 	script := itermScript(`/tmp/it's here`, `claude --resume abc --name "say \"hi\""`)
@@ -76,6 +80,18 @@ func TestQuotingCannotBreakTheScript(t *testing.T) {
 	}
 	if _, err := exec.LookPath("osacompile"); err != nil {
 		t.Skip("osacompile unavailable")
+	}
+	// Compiling resolves iTerm2's own terminology — `tab`, `session`,
+	// `default profile` are its words, not AppleScript's. Without the app
+	// installed they are unresolvable class names and every script fails
+	// alike, which tests the runner rather than the quoting.
+	// Bounded: a lookup that hangs on a headless runner would be worse than
+	// one that fails.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "osascript", "-e",
+		`path to application id "`+itermBundleID+`"`).Run(); err != nil {
+		t.Skip("iTerm2 not installed: its terminology cannot be resolved")
 	}
 	// Compile without running: proves the script is valid, opens nothing.
 	cmd := exec.Command("osacompile", "-o", t.TempDir()+"/out.scpt", "-e", script)

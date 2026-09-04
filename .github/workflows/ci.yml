@@ -40,9 +40,9 @@ jobs:
         with:
           go-version: stable
           cache: true
-      - uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
+      # Through the Makefile, so the version CI enforces and the version
+      # `make lint` runs are the same string in one place.
+      - run: make lint
 
   tidy:
     runs-on: ubuntu-latest

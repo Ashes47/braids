@@ -1098,9 +1098,10 @@ func TestUnreadableStaysQuietWhenNothingIsWrong(t *testing.T) {
 	}
 }
 
-// LanesIn is a prefix match on a path, which is the kind of thing that
-// silently matches a sibling: /src/app must not answer for /src/apples.
-func TestLanesInMatchesADirectoryAndNotItsNeighbour(t *testing.T) {
+// LanesWithCwd hands back every conversation that recorded where it ran, and
+// nothing else: deciding which of them is inside a given repository needs the
+// filesystem, so it is not a query's job.
+func TestLanesWithCwdReturnsOnlyThoseThatRecordedOne(t *testing.T) {
 	ctx := context.Background()
 	ix := openIndex(t)
 	src := newFixture()
@@ -1108,8 +1109,6 @@ func TestLanesInMatchesADirectoryAndNotItsNeighbour(t *testing.T) {
 	src.lanes = []model.Lane{
 		{ID: "here", Source: "fake", Path: "/t/here.jsonl", Cwd: "/src/app", Updated: now},
 		{ID: "below", Source: "fake", Path: "/t/below.jsonl", Cwd: "/src/app/internal", Updated: now},
-		{ID: "sibling", Source: "fake", Path: "/t/sib.jsonl", Cwd: "/src/apples", Updated: now},
-		{ID: "elsewhere", Source: "fake", Path: "/t/else.jsonl", Cwd: "/other", Updated: now},
 		{ID: "nowhere", Source: "fake", Path: "/t/no.jsonl", Cwd: "", Updated: now},
 	}
 	src.messages = map[string][]model.Message{}
@@ -1117,39 +1116,20 @@ func TestLanesInMatchesADirectoryAndNotItsNeighbour(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ix.LanesIn(ctx, "/src/app")
+	got, err := ix.LanesWithCwd(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := map[string]bool{}
+	if len(got) != 2 {
+		t.Fatalf("got %d lanes, want the two that recorded a directory", len(got))
+	}
 	for _, l := range got {
-		found[l.ID] = true
-	}
-	if !found["here"] || !found["below"] {
-		t.Errorf("LanesIn missed the directory or one below it: %v", found)
-	}
-	if found["sibling"] {
-		t.Error("/src/app matched /src/apples")
-	}
-	if found["elsewhere"] || found["nowhere"] {
-		t.Errorf("LanesIn reached outside the directory: %v", found)
-	}
-
-	// A trailing separator is the same directory.
-	if slashed, err := ix.LanesIn(ctx, "/src/app/"); err != nil || len(slashed) != len(got) {
-		t.Errorf("a trailing slash changed the answer: %d vs %d (%v)", len(slashed), len(got), err)
-	}
-
-	// Several names for one repository, deduped, and no query at all for none.
-	both, err := ix.LanesIn(ctx, "/src/app", "/src/app", "/other")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(both) != 3 {
-		t.Errorf("matching two directories found %d lanes, want 3", len(both))
-	}
-	if none, err := ix.LanesIn(ctx); err != nil || none != nil {
-		t.Errorf("LanesIn with no directories = %v, %v", none, err)
+		if l.Cwd == "" {
+			t.Errorf("%s came back with no working directory", l.ID)
+		}
+		if l.ID == "nowhere" {
+			t.Error("a lane with no working directory was included")
+		}
 	}
 }
 

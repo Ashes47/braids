@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -93,9 +94,15 @@ func cmdExplain(args []string, out *printer) error {
 	defer ix.Close() //nolint:errcheck // read-only
 
 	ctx := context.Background()
-	lanes, err := ix.LanesIn(ctx, repoNames(repo)...)
+	all, err := ix.LanesWithCwd(ctx)
 	if err != nil {
 		return err
+	}
+	var lanes []index.LaneInfo
+	for _, lane := range all {
+		if inTree(repo, lane.Cwd) {
+			lanes = append(lanes, lane)
+		}
 	}
 	for i := range commits {
 		commits[i].Near, err = conversationsAround(ctx, ix, lanes, commits[i].At, *window)
@@ -125,35 +132,41 @@ func repoOf(dir string) (string, error) {
 	return strings.TrimSpace(string(top)), nil
 }
 
-// repoNames is every path this repository might be recorded under.
+// inTree reports whether a session's working directory is inside a repository.
 //
-// git resolves symlinks when it reports a root and a shell does not, so the
-// same checkout is /private/tmp/x to one and /tmp/x to the other. Both are
-// offered, because a conversation is filed under whichever the session saw.
-func repoNames(repo string) []string {
-	names := []string{repo}
-	if resolved, err := filepath.EvalSymlinks(repo); err == nil && resolved != repo {
-		names = append(names, resolved)
+// The two paths come from different worlds and rarely match as written. git
+// reports a root with symlinks resolved and, on Windows, with forward slashes;
+// a transcript records whatever the shell was in, which on a mac is often
+// /tmp where git says /private/tmp, and on Windows uses backslashes and a
+// case that means nothing. So both sides are put in the same shape before
+// they are compared, and each is resolved against the filesystem where that
+// is possible. A path that no longer exists cannot be resolved and is compared
+// as written, which is the best that can be done for a directory that has been
+// deleted since.
+func inTree(repo, cwd string) bool {
+	repo, cwd = normalise(repo), normalise(cwd)
+	if repo == "" || cwd == "" {
+		return false
 	}
-	// And the other direction: git already resolved, so walk back up looking
-	// for a parent that is a symlink to what we hold.
-	if unresolved := unresolve(repo); unresolved != "" && unresolved != repo {
-		names = append(names, unresolved)
-	}
-	return names
+	return cwd == repo || strings.HasPrefix(cwd, repo+string(filepath.Separator))
 }
 
-// unresolve finds a path that resolves to repo but is spelled differently, by
-// checking the well-known places a system symlinks. It is a best effort: a
-// transcript recorded under a name nothing can rediscover simply will not
-// match, and explain says it found nothing rather than guessing.
-func unresolve(repo string) string {
-	for from, to := range map[string]string{"/private/var": "/var", "/private/tmp": "/tmp"} {
-		if rest, ok := strings.CutPrefix(repo, from); ok {
-			return to + rest
-		}
+// normalise puts a path in the one shape comparisons can use.
+func normalise(path string) string {
+	if path == "" {
+		return ""
 	}
-	return ""
+	path = filepath.Clean(filepath.FromSlash(path))
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	path = strings.TrimSuffix(path, string(filepath.Separator))
+	if runtime.GOOS == "windows" {
+		// Windows paths are case-insensitive, and a drive letter arrives in
+		// either case depending on who produced it.
+		path = strings.ToLower(path)
+	}
+	return path
 }
 
 // commitsTouching lists the commits that changed a file, newest first, and

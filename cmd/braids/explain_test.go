@@ -294,3 +294,51 @@ func TestExplainHelpers(t *testing.T) {
 		}
 	}
 }
+
+// The two paths being compared come from different worlds: git resolves
+// symlinks and uses forward slashes even on Windows, a transcript records what
+// the shell was in. Both are put in one shape before they are compared, and a
+// prefix match is the kind that silently matches a neighbour.
+func TestInTree(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "internal", "core")
+	if err := os.MkdirAll(inside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sibling := root + "-next"
+	if err := os.MkdirAll(sibling, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if !inTree(root, root) {
+		t.Error("a repository is not inside itself")
+	}
+	if !inTree(root, inside) {
+		t.Error("a session run in a subdirectory was not counted")
+	}
+	if inTree(root, sibling) {
+		t.Errorf("%s matched the neighbouring %s", root, sibling)
+	}
+	if inTree(root, filepath.Dir(root)) {
+		t.Error("the parent directory was counted as inside")
+	}
+	if inTree(root, "") || inTree("", root) {
+		t.Error("an empty path matched something")
+	}
+
+	// Forward slashes are what git hands back on every platform.
+	if !inTree(filepath.ToSlash(root), inside) {
+		t.Error("a root with forward slashes did not match")
+	}
+	// And a trailing separator is the same directory.
+	if !inTree(root+string(filepath.Separator), inside) {
+		t.Error("a trailing separator changed the answer")
+	}
+	// On a mac /tmp and /private/tmp are the same place; wherever the test
+	// runs, a path and its resolved form must agree.
+	if resolved, err := filepath.EvalSymlinks(root); err == nil && resolved != root {
+		if !inTree(resolved, inside) || !inTree(root, filepath.Join(resolved, "internal", "core")) {
+			t.Error("a path and its resolved form disagreed")
+		}
+	}
+}

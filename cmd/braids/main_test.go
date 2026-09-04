@@ -40,6 +40,18 @@ func fixtureRoot(t *testing.T) string {
 	return root
 }
 
+// setHome points os.UserHomeDir at a temporary directory.
+//
+// Setting HOME is enough on a mac and on Linux and does nothing on Windows,
+// where the home directory comes from USERPROFILE. A test that sets only HOME
+// there is a test reading the real profile of whoever is running it, which is
+// how these passed locally and failed in CI.
+func setHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
 func runCmd(t *testing.T, args ...string) string {
 	t.Helper()
 	var buf bytes.Buffer
@@ -245,7 +257,7 @@ func TestHookRefusesATerminalInsteadOfWaitingOnIt(t *testing.T) {
 	// Piped, it stays silent: a hook that fails loudly breaks the session it
 	// is reporting on.
 	stdinIsTerminal = func() bool { return false }
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	if err := run([]string{"hook"}, io.Discard); err != nil {
 		t.Errorf("piped hook = %v, want it to record quietly", err)
 	}
@@ -292,7 +304,7 @@ func TestVersionFlagsMatchTheVersionCommand(t *testing.T) {
 
 // Every command braids offers as a suggestion has to be one it answers to.
 func TestKnownCommandsAllDispatch(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	for _, name := range known {
 		err := run([]string{name, "--help"}, io.Discard)
 		if err != nil && strings.Contains(err.Error(), "unknown command") {
@@ -465,7 +477,7 @@ func TestOnlyIndexCreatesTheIndex(t *testing.T) {
 func TestBraidsDirectoryIsPrivate(t *testing.T) {
 	perms.RequirePOSIX(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	t.Setenv("BRAIDS_DB", "")
 
 	dir := filepath.Join(home, ".braids")
@@ -556,7 +568,7 @@ func TestMemoriesReportsWhatTheIndexOmits(t *testing.T) {
 	write("hidden.md", "---\nname: hidden\ndescription: not in the index\nmetadata:\n  type: feedback\n---\n\nbody\n")
 	write("MEMORY.md", "# Memory index\n\n- [Listed](listed.md) — in the index\n- [Gone](gone.md) — no file\n")
 
-	t.Setenv("HOME", root)
+	setHome(t, root)
 
 	// DefaultRoot resolves under HOME, so lay the tree out the way it expects.
 	claudeProjects := filepath.Join(root, ".claude", "projects", "-Users-me-src-alpha", "memory")

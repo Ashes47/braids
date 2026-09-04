@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -804,40 +803,20 @@ type MessageRow struct {
 	Failed bool
 }
 
-// LanesIn names the conversations that ran inside any of these directories.
+// LanesWithCwd returns every conversation that recorded a working directory.
 //
-// A lane records the working directory its session ran in, which is how braids
-// can ask what was being talked about while a repository was being changed. The
-// match is on the path prefix, so a session run in a subdirectory counts.
-//
-// It takes several directories because one repository can have several names.
-// git reports its root with symlinks resolved, and a transcript records the
-// path the shell was actually in: on macOS a repository under /tmp is
-// /private/tmp to one and /tmp to the other, and matching only one finds
-// nothing.
-func (ix *Index) LanesIn(ctx context.Context, dirs ...string) ([]LaneInfo, error) {
-	var (
-		where []string
-		args  []any
-		seen  = map[string]bool{}
-	)
-	for _, dir := range dirs {
-		dir = strings.TrimSuffix(dir, string(filepath.Separator))
-		if dir == "" || seen[dir] {
-			continue
-		}
-		seen[dir] = true
-		where = append(where, "cwd = ?", "cwd LIKE ?")
-		args = append(args, dir, dir+string(filepath.Separator)+"%")
-	}
-	if len(where) == 0 {
-		return nil, nil
-	}
+// Deciding which of them ran inside a given repository is the caller's job and
+// not a query's: git reports a root with symlinks resolved and forward slashes
+// even on Windows, while a transcript records the path the shell was in, and
+// telling those apart means resolving both against the filesystem. There are
+// tens of lanes, so reading them and comparing in Go costs nothing and is the
+// only place the comparison can be made correctly.
+func (ix *Index) LanesWithCwd(ctx context.Context) ([]LaneInfo, error) {
 	rows, err := ix.db.QueryContext(ctx,
-		`SELECT id, COALESCE(title,''), COALESCE(project,''), COALESCE(cwd,''), path
-		 FROM lanes WHERE `+strings.Join(where, " OR ")+` ORDER BY updated DESC`, args...)
+		`SELECT id, COALESCE(title,''), COALESCE(project,''), cwd, path
+		 FROM lanes WHERE cwd != '' ORDER BY updated DESC`)
 	if err != nil {
-		return nil, fmt.Errorf("find lanes in %s: %w", strings.Join(dirs, ", "), err)
+		return nil, fmt.Errorf("list lanes with a working directory: %w", err)
 	}
 	defer rows.Close() //nolint:errcheck // read-only
 

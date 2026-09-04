@@ -70,11 +70,12 @@ func Build(lanes []index.LaneInfo, overlaps []index.Overlap, timelines map[strin
 		if !ok {
 			continue
 		}
-		if _, parentExists := forest.ByID[origin.Parent]; !parentExists {
-			continue // the parent was deleted; fall back to what was inferred
+		parent, forkSeq, found := survivingAncestor(child, origin, recorded, forest.ByID)
+		if !found {
+			continue // nothing recorded survives; fall back to what was inferred
 		}
-		node.ParentID = origin.Parent
-		node.ForkSeq = origin.ForkSeq
+		node.ParentID = parent
+		node.ForkSeq = forkSeq
 	}
 
 	link(forest)
@@ -118,6 +119,34 @@ func better(a, b candidate, nodes map[string]*Node) bool {
 		return ac.Before(bc)
 	}
 	return a.parent < b.parent
+}
+
+// survivingAncestor walks a recorded chain past lanes that no longer exist.
+//
+// Deleting a conversation leaves its branches behind — they hold their own copy
+// of the shared prefix — but they have to be drawn somewhere. Inference would
+// send them to the shallowest common ancestor, because every fork of a fork
+// shares a byte-identical prefix with the whole line above it and the counts
+// tie. Following what was recorded keeps them where they belong: under the
+// nearest conversation that is still there.
+func survivingAncestor(child string, origin model.Origin, recorded map[string]model.Origin, alive map[string]*Node) (parent string, forkSeq int, found bool) {
+	seen := map[string]bool{child: true}
+	parent, forkSeq = origin.Parent, origin.ForkSeq
+	for parent != "" && !seen[parent] {
+		if _, ok := alive[parent]; ok {
+			return parent, forkSeq, true
+		}
+		seen[parent] = true
+		up, ok := recorded[parent]
+		if !ok {
+			return "", 0, false
+		}
+		// A branch cut deeper than its parent's own fork point can only be
+		// placed at the last turn they actually shared.
+		forkSeq = min(forkSeq, up.ForkSeq)
+		parent = up.Parent
+	}
+	return "", 0, false
 }
 
 // sharedPairs counts, for every pair of lanes, how many messages they share and

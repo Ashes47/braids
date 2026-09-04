@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Ashes47/braids/internal/core/index"
+	"github.com/Ashes47/braids/internal/core/model"
 )
 
 var base = time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
@@ -177,5 +178,68 @@ func TestBuildBreaksAmbiguousTiesTowardsTheShallowestAncestor(t *testing.T) {
 		if got := f.ByID["mid"].ParentID; got != "root" {
 			t.Fatalf("mid parent = %q, want root", got)
 		}
+	}
+}
+
+func TestDeletingAParentKeepsBranchesUnderTheNearestSurvivor(t *testing.T) {
+	// root → mid (forked at t5) → leaf (forked from mid at t3). Every one of
+	// these shares a byte-identical three-turn prefix, so inference alone ties
+	// and sends leaf to the root. What was recorded says otherwise.
+	recorded := map[string]model.Origin{
+		"mid":  {Parent: "root", ForkSeq: 5},
+		"leaf": {Parent: "mid", ForkSeq: 3},
+	}
+	lanes := []index.LaneInfo{
+		born(lane("root", 9, at(10)), at(-30)),
+		born(lane("mid", 6, at(20)), at(-20)),
+		born(lane("leaf", 3, at(30)), at(-10)),
+	}
+	var overlaps []index.Overlap
+	for i, id := range []string{"m1", "m2", "m3"} {
+		overlaps = append(overlaps, shared(id, "root", i+1, "mid", i+1)...)
+		overlaps = append(overlaps, shared(id, "root", i+1, "leaf", i+1)...)
+		overlaps = append(overlaps, shared(id, "mid", i+1, "leaf", i+1)...)
+	}
+	timelines := map[string][]time.Time{
+		"root": {at(0), at(1), at(2), at(3), at(4), at(5), at(6), at(7), at(8)},
+		"mid":  {at(0), at(1), at(2), at(3), at(4), at(6)},
+		"leaf": {at(0), at(1), at(2)},
+	}
+
+	full := Build(lanes, overlaps, timelines, recorded)
+	if got := full.ByID["leaf"].ParentID; got != "mid" {
+		t.Fatalf("leaf parent = %q, want mid", got)
+	}
+
+	// Now mid is deleted. leaf must move up to root, not disappear and not
+	// stay attached to something that is gone.
+	without := []index.LaneInfo{lanes[0], lanes[2]}
+	after := Build(without, overlaps, timelines, recorded)
+	leaf := after.ByID["leaf"]
+	if leaf.ParentID != "root" {
+		t.Errorf("after deleting mid, leaf parent = %q, want root", leaf.ParentID)
+	}
+	// It forked at t3, and mid itself forked at t5, so t3 is a turn root also
+	// holds: that is where it belongs.
+	if leaf.ForkSeq != 3 {
+		t.Errorf("fork point = t%d, want t3", leaf.ForkSeq)
+	}
+}
+
+func TestABranchCutDeeperThanItsParentMovesToTheirLastSharedTurn(t *testing.T) {
+	// mid forked from root at t5 and then ran on; leaf was cut from mid at t8,
+	// a turn root never had. With mid gone, the honest place for leaf is t5.
+	recorded := map[string]model.Origin{
+		"mid":  {Parent: "root", ForkSeq: 5},
+		"leaf": {Parent: "mid", ForkSeq: 8},
+	}
+	lanes := []index.LaneInfo{
+		born(lane("root", 9, at(10)), at(-30)),
+		born(lane("leaf", 8, at(30)), at(-10)),
+	}
+	f := Build(lanes, nil, map[string][]time.Time{}, recorded)
+	leaf := f.ByID["leaf"]
+	if leaf.ParentID != "root" || leaf.ForkSeq != 5 {
+		t.Errorf("leaf = %s at t%d, want root at t5", leaf.ParentID, leaf.ForkSeq)
 	}
 }

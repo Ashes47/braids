@@ -478,6 +478,13 @@ Two rules the notice states outright:
 - **It never cascades.** A fork carries its own copy of the prefix it shares, so
   deleting a parent cannot break a child. That is the fear that makes people
   hoard, and here it is simply not true.
+- **Orphans move up, not out.** A branch whose parent was deleted is redrawn
+  under the nearest conversation that is still there, following what was
+  recorded (§4). Inference cannot do this on its own: every fork of a fork
+  shares a byte-identical prefix with the whole line above it, so the counts tie
+  and the branch lands at the shallowest ancestor. Where nothing was recorded —
+  a branch made before braids, or by `/branch` — that tie is still the best
+  available answer, and it is why provenance is recorded at all.
 - **A running conversation is refused.** Deleting a session mid-turn is the one
   accident worth preventing outright; `d` from inside a conversation is
   redirected to the map, where you can see what would go.

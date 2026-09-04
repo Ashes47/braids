@@ -265,9 +265,10 @@ func cmdMap(args []string, out *printer) error {
 		LoadAgentSpine: func(laneID, agentID string) ([]graph.Segment, error) {
 			return agentSpine(ctx, ix, root, laneID, agentID)
 		},
-		Origins: provenance.All(),
-		Names:   names.All(),
-		Changes: changes,
+		Origins:   provenance.All(),
+		Names:     names.All(),
+		Changes:   changes,
+		Reporting: hooksReporting(),
 		LiveEvents: func() (map[string]hooks.Event, error) {
 			events, err := hooks.Read(filepath.Join(filepath.Dir(dbPath), "events.jsonl"))
 			if err != nil {
@@ -814,6 +815,7 @@ func cmdHooks(args []string, out *printer) error {
 			return out.Err()
 		}
 		out.printf("installed in %s for %s\n", path, strings.Join(added, ", "))
+		out.printf("  any braids hook left by another build now points here\n")
 		out.printf("  a copy of the previous file is beside it\n")
 		out.printf("  sessions already running will not report until restarted\n")
 		return out.Err()
@@ -830,18 +832,42 @@ func cmdHooks(args []string, out *printer) error {
 		return out.Err()
 	}
 
-	on, err := hooks.Installed(path, command)
+	status, err := hooks.Inspect(path, command)
 	if err != nil {
 		return err
 	}
 	out.printf("settings: %s\ncommand:  %s\n", path, command)
-	if len(on) == 0 {
+	switch {
+	case len(status.Events) == 0:
 		out.printf("status:   not installed — braids cannot tell a running tool from one\n")
 		out.printf("          waiting on you. `braids hooks --install` changes that.\n")
-		return out.Err()
+	default:
+		out.printf("status:   reporting %s\n", strings.Join(status.Events, ", "))
 	}
-	out.printf("status:   reporting %s\n", strings.Join(on, ", "))
+	for _, other := range status.Elsewhere {
+		// A hook pointing at a binary that has moved fails on every event, so
+		// say which one and how to take it over.
+		out.printf("also:     %s\n", other)
+		out.printf("          another braids owns these hooks; `braids hooks --install`\n")
+		out.printf("          points them here\n")
+	}
 	return out.Err()
+}
+
+// hooksReporting reports whether the harness has been asked to report. Hooks
+// are optional, so a settings file that cannot be read is not an error here —
+// it means the same thing as one with no braids hook in it.
+func hooksReporting() bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	command, err := hookCommand()
+	if err != nil {
+		return false
+	}
+	on, err := hooks.Installed(filepath.Join(home, ".claude", "settings.json"), command)
+	return err == nil && len(on) > 0
 }
 
 // hookCommand is what the harness will run. It is the binary's own path, so a

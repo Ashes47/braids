@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -22,33 +24,60 @@ type entry struct {
 	Command string `json:"command"`
 }
 
+// Status is what a settings file says about braids' hooks.
+type Status struct {
+	// Events braids is attached to.
+	Events []string
+	// Elsewhere are braids hooks in the file that run a different binary than
+	// the one asking: a second build, or one left behind by a binary that has
+	// since moved. Those hooks fail on every event until they are replaced.
+	Elsewhere []string
+}
+
 // Install adds braids' hook to each event it needs, leaving every other hook in
-// place. It is idempotent: running it twice adds nothing the second time.
+// place. It is idempotent: running it twice adds nothing the second time. A
+// braids hook already there under a different path is replaced rather than
+// duplicated.
 func Install(settingsPath, command string) ([]string, error) {
 	return edit(settingsPath, command, true)
 }
 
-// Remove takes braids' hook back out, leaving every other hook in place.
+// Remove takes braids' hooks back out, leaving every other hook in place —
+// including braids hooks installed by a build at some other path, which are
+// braids' own to clean up.
 func Remove(settingsPath, command string) ([]string, error) {
 	return edit(settingsPath, command, false)
 }
 
-// Installed reports which events braids' hook is currently attached to.
-func Installed(settingsPath, command string) ([]string, error) {
+// Inspect reports what the settings file says about braids' hooks.
+func Inspect(settingsPath, command string) (Status, error) {
 	_, byEvent, err := load(settingsPath)
 	if err != nil {
-		return nil, err
+		return Status{}, err
 	}
-	var on []string
-	for _, name := range Wanted() {
-		for _, group := range byEvent[name] {
-			if hasCommand(group, command) {
-				on = append(on, name)
-				break
+	var status Status
+	on, seen := map[string]bool{}, map[string]bool{}
+	for name, groups := range byEvent {
+		for _, group := range groups {
+			_, mine := splitGroup(group)
+			for _, found := range mine {
+				on[name] = true
+				if found != command && !seen[found] {
+					seen[found] = true
+					status.Elsewhere = append(status.Elsewhere, found)
+				}
 			}
 		}
 	}
-	return on, nil
+	status.Events = ordered(on)
+	sort.Strings(status.Elsewhere)
+	return status, nil
+}
+
+// Installed reports which events braids' hook is currently attached to.
+func Installed(settingsPath, command string) ([]string, error) {
+	status, err := Inspect(settingsPath, command)
+	return status.Events, err
 }
 
 func edit(settingsPath, command string, adding bool) ([]string, error) {
@@ -60,39 +89,57 @@ func edit(settingsPath, command string, adding bool) ([]string, error) {
 		byEvent = map[string][]json.RawMessage{}
 	}
 
-	var changed []string
-	for _, name := range Wanted() {
-		groups := byEvent[name]
-		present := false
+	want := map[string]bool{}
+	if adding {
+		for _, name := range Wanted() {
+			want[name] = true
+		}
+	}
+
+	changed := map[string]bool{}
+	// Every event in the file is swept, not just the ones braids wants now: an
+	// event it has stopped using, or one left behind by a build at another
+	// path, is still braids' own to take back. Nothing else is touched.
+	for name, groups := range byEvent {
 		kept := make([]json.RawMessage, 0, len(groups))
+		var had []string
 		for _, group := range groups {
-			if hasCommand(group, command) {
-				present = true
-				if adding {
-					kept = append(kept, group)
-				}
-				continue
+			rest, mine := splitGroup(group)
+			had = append(had, mine...)
+			if rest != nil {
+				kept = append(kept, rest)
 			}
-			kept = append(kept, group)
 		}
 		switch {
-		case adding && !present:
+		case want[name]:
 			ours, err := ownGroup(command)
 			if err != nil {
 				return nil, err
 			}
 			byEvent[name] = append(kept, ours)
-			changed = append(changed, name)
-		case !adding && present:
+			// Unchanged only when braids was already there exactly once, at
+			// this command. Anything else was a duplicate or a stale path.
+			if len(had) != 1 || had[0] != command {
+				changed[name] = true
+			}
+			delete(want, name)
+		case len(had) > 0:
 			if len(kept) == 0 {
 				delete(byEvent, name)
 			} else {
 				byEvent[name] = kept
 			}
-			changed = append(changed, name)
-		default:
-			byEvent[name] = groups
+			changed[name] = true
 		}
+	}
+	// Events braids wants that the file carried nothing for.
+	for name := range want {
+		ours, err := ownGroup(command)
+		if err != nil {
+			return nil, err
+		}
+		byEvent[name] = append(byEvent[name], ours)
+		changed[name] = true
 	}
 	if len(changed) == 0 {
 		return nil, nil
@@ -106,7 +153,7 @@ func edit(settingsPath, command string, adding bool) ([]string, error) {
 	if err := write(settingsPath, settings); err != nil {
 		return nil, err
 	}
-	return changed, nil
+	return ordered(changed), nil
 }
 
 // load reads a settings file, keeping every key it does not understand as raw
@@ -178,18 +225,84 @@ func ownGroup(command string) (json.RawMessage, error) {
 	return encoded, nil
 }
 
-// hasCommand reports whether a group runs the given command.
-func hasCommand(group json.RawMessage, command string) bool {
-	var parsed struct {
-		Hooks []entry `json:"hooks"`
+// mine reports whether a hook entry runs braids, whatever path the binary sits
+// at. Identity is the program, not the path it happens to occupy today: a
+// second build in another directory is the same tool, and matching on the exact
+// path makes it look like a different one — which is how a settings file ends
+// up with two braids hooks, one of them pointing at a binary that is gone.
+func mine(raw json.RawMessage) (string, bool) {
+	var hook entry
+	if json.Unmarshal(raw, &hook) != nil {
+		return "", false
 	}
-	if json.Unmarshal(group, &parsed) != nil {
-		return false
+	bin, ok := strings.CutSuffix(strings.TrimSpace(hook.Command), " hook")
+	if !ok {
+		return hook.Command, false
 	}
-	for _, h := range parsed.Hooks {
-		if h.Command == command {
-			return true
+	// Trimmed rather than split on spaces: an installed path may contain them.
+	bin = strings.Trim(bin, `"'`)
+	name := strings.TrimSuffix(filepath.Base(bin), ".exe")
+	return hook.Command, strings.EqualFold(name, "braids")
+}
+
+// splitGroup separates braids' entries from the rest of a hook group. It
+// returns the group without them — nil when nothing else was in it — and the
+// commands they ran. Groups are edited entry by entry rather than dropped
+// whole, so a group someone has added braids to alongside their own hook keeps
+// that hook.
+func splitGroup(group json.RawMessage) (json.RawMessage, []string) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(group, &fields) != nil {
+		return group, nil
+	}
+	var list []json.RawMessage
+	if json.Unmarshal(fields["hooks"], &list) != nil {
+		return group, nil
+	}
+	var found []string
+	kept := make([]json.RawMessage, 0, len(list))
+	for _, raw := range list {
+		if command, ours := mine(raw); ours {
+			found = append(found, command)
+			continue
+		}
+		kept = append(kept, raw)
+	}
+	switch {
+	case len(found) == 0:
+		return group, nil
+	case len(kept) == 0:
+		return nil, found
+	}
+	encoded, err := json.Marshal(kept)
+	if err != nil {
+		return group, nil
+	}
+	fields["hooks"] = encoded
+	rebuilt, err := json.Marshal(fields)
+	if err != nil {
+		return group, nil
+	}
+	return rebuilt, found
+}
+
+// ordered lists event names in the order braids wants them, so its own events
+// read the same way everywhere, with anything unrecognised after them.
+func ordered(set map[string]bool) []string {
+	names := make([]string, 0, len(set))
+	seen := map[string]bool{}
+	for _, name := range Wanted() {
+		if set[name] {
+			names = append(names, name)
+			seen[name] = true
 		}
 	}
-	return false
+	var extra []string
+	for name := range set {
+		if !seen[name] {
+			extra = append(extra, name)
+		}
+	}
+	sort.Strings(extra)
+	return append(names, extra...)
 }

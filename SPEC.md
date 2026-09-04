@@ -436,6 +436,30 @@ is running: events that arrive while it is closed are still there when it opens.
 Only the fields braids acts on are modelled — the rest of a payload differs per
 event and per version, and guessing at it would age badly.
 
+**Hooks are opt-in and stay that way.** Installing braids does not install them:
+`go install` places a binary, and a binary that edits the user's settings file as
+a side effect of being installed is a binary that cannot be trusted. They are one
+explicit command — `braids hooks --install` — with `braids hooks` reporting status
+and `--remove` taking them back, and `--settings` pointing all three at a file
+other than `~/.claude/settings.json`.
+
+Everything else works without them. State falls back to what the transcript says
+(`working`, `thinking`, `your turn`, `stopped`, `unanswered`); only the one
+distinction files cannot make is missing. So the map states which of the two it is
+looking at — `Hooks: reporting`, or `off · see braids hooks` — because a
+capability that is absent should be visible rather than silently degraded.
+
+**A hook belongs to braids because it *is* braids**, not because it matches the
+path braids happens to occupy today. Matching the exact path means a second build
+in another directory reads the file as empty, installs a duplicate, and leaves an
+entry pointing at a binary that may be gone — which fails on every event, six
+times a session. So the entry is recognised by its program name and subcommand:
+`--install` from anywhere takes over whatever braids was there before, `--remove`
+takes back another build's entries too, and status names the other path rather
+than claiming nothing is installed. Entries are edited one at a time, never by
+dropping the group they sit in, so a hook a user has placed beside braids' own
+survives.
+
 ### 6.5 Branch — inline at the junction, never a modal
 
 ```

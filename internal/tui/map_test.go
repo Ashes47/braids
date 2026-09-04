@@ -778,3 +778,27 @@ func TestEveryBindingIsListedBeforeTheGlyphKey(t *testing.T) {
 		}
 	}
 }
+
+// Hooks are optional, so whether they are on has to be visible: without them
+// the state column is inferred from the files and cannot tell a tool that is
+// working from one that is waiting on a person.
+func TestHooksFactSaysWhichModeItIsIn(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("root", "main work", "app", 100, time.Hour)}
+	f := forestOf(lanes, nil)
+
+	for _, tc := range []struct {
+		reporting bool
+		want      string
+	}{
+		{true, "reporting"},
+		{false, "off · see braids hooks"},
+	} {
+		m := NewModel(f, Options{ASCII: true, Source: "claudecode", Reporting: tc.reporting})
+		m.now = func() time.Time { return now }
+		m.width, m.height = 90, 24
+		line := rowFor(t, plain(m.render()), "Hooks")
+		if !strings.Contains(line, tc.want) {
+			t.Errorf("reporting=%v shows %q, want it to mention %q", tc.reporting, line, tc.want)
+		}
+	}
+}

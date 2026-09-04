@@ -100,6 +100,11 @@ type Options struct {
 	// session. Without it braids reads state from the files alone, which
 	// cannot tell a running tool from one waiting on a person.
 	LiveEvents func() (map[string]hooks.Event, error)
+	// Reporting is whether the harness has been asked to report. It changes
+	// nothing about how the map works — braids reads state from the files
+	// either way — but a missing capability should be visible rather than
+	// silent, so the map says which of the two it is looking at.
+	Reporting bool
 	// Changes signals that transcripts moved on disk. With it the map follows
 	// live sessions; without it the map is a snapshot.
 	Changes <-chan struct{}
@@ -149,6 +154,7 @@ type Model struct {
 	refresh        func() (*graph.Forest, error)
 	changes        <-chan struct{}
 	liveFn         func() (map[string]hooks.Event, error)
+	reporting      bool
 	live           map[string]hooks.Event
 	resumeCmd      func(string) (string, error)
 	spawn          func(string) error
@@ -220,6 +226,7 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		refresh:        opts.Refresh,
 		changes:        opts.Changes,
 		liveFn:         opts.LiveEvents,
+		reporting:      opts.Reporting,
 		resumeCmd:      opts.ResumeCommand,
 		spawn:          opts.Spawn,
 		terminal:       opts.Terminal,

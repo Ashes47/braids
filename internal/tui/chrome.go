@@ -43,11 +43,19 @@ func (m Model) facts() []fact {
 	if m.changes != nil {
 		source += " · live"
 	}
+	// Said plainly, because it decides how much the state column can know:
+	// with hooks a session reports that it is blocked, without them braids
+	// infers from the transcript and cannot tell working from waiting.
+	reporting := "off · see braids hooks"
+	if m.reporting {
+		reporting = "reporting"
+	}
 	return []fact{
 		{"Source", source},
 		{"Index", shorten(m.indexPath)},
 		{"Lanes", fmt.Sprintf("%d", len(m.all))},
 		{"Waiting on you", fmt.Sprintf("%d", m.waitingCount())},
+		{"Hooks", reporting},
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -174,4 +175,146 @@ func TestInstallCreatesASettingsFileThatIsNotThere(t *testing.T) {
 	if on, err := Installed(path, "/bin/braids hook"); err != nil || len(on) != len(Wanted()) {
 		t.Errorf("Installed = %v, %v", on, err)
 	}
+}
+
+// A braids installed at one path must recognise the hooks of a braids at
+// another: they are the same tool, and a second entry means every event runs a
+// binary that may not be there any more.
+func TestInstallTakesOverAnotherBuild(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if _, err := Install(path, "/one/braids hook"); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	status, err := Inspect(path, "/two/braids hook")
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if len(status.Events) != len(Wanted()) {
+		t.Errorf("events = %v, want all of %v", status.Events, Wanted())
+	}
+	if want := []string{"/one/braids hook"}; !reflect.DeepEqual(status.Elsewhere, want) {
+		t.Errorf("elsewhere = %v, want %v", status.Elsewhere, want)
+	}
+
+	changed, err := Install(path, "/two/braids hook")
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if len(changed) != len(Wanted()) {
+		t.Errorf("changed = %v, want all of %v", changed, Wanted())
+	}
+	status, err = Inspect(path, "/two/braids hook")
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if len(status.Elsewhere) != 0 {
+		t.Errorf("elsewhere = %v, want the stale hook replaced", status.Elsewhere)
+	}
+	for _, name := range Wanted() {
+		if got := commandsFor(t, path, name); len(got) != 1 || got[0] != "/two/braids hook" {
+			t.Errorf("%s runs %v, want exactly the new command", name, got)
+		}
+	}
+}
+
+// Removing takes back braids' hooks whatever path installed them, so a binary
+// that has moved does not leave the file quietly broken.
+func TestRemoveTakesBackAnotherBuild(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if _, err := Install(path, "/one/braids hook"); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if _, err := Remove(path, "/two/braids hook"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	status, err := Inspect(path, "/two/braids hook")
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if len(status.Events) != 0 || len(status.Elsewhere) != 0 {
+		t.Errorf("status = %+v, want nothing left", status)
+	}
+}
+
+// A group someone has added braids to alongside their own hook must keep that
+// hook: braids removes its own entry, not the group it was put in.
+func TestRemoveKeepsCompanyInTheSameGroup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	shared := `{"hooks":{"Stop":[{"matcher":"*","hooks":[` +
+		`{"type":"command","command":"/bin/braids hook"},` +
+		`{"type":"command","command":"/theirs/notify.sh"}]}]}}`
+	if err := os.WriteFile(path, []byte(shared), 0o600); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+	if _, err := Remove(path, "/bin/braids hook"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if got := commandsFor(t, path, Stop); !reflect.DeepEqual(got, []string{"/theirs/notify.sh"}) {
+		t.Errorf("Stop runs %v, want only their hook", got)
+	}
+	// The matcher is theirs too, and survives the edit.
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if !strings.Contains(string(body), `"matcher"`) {
+		t.Errorf("settings lost the matcher:\n%s", body)
+	}
+}
+
+// A hook that merely mentions braids is not braids': the command has to be the
+// braids binary running its own subcommand.
+func TestOnlyBraidsOwnHookIsClaimed(t *testing.T) {
+	for _, command := range []string{
+		"/bin/braids hook",
+		"/opt/my braids/braids hook",
+		"braids hook",
+	} {
+		if _, ok := mine(raw(t, command)); !ok {
+			t.Errorf("mine(%q) = false, want true", command)
+		}
+	}
+	for _, command := range []string{
+		"/bin/braids index",
+		"/bin/braidsy hook",
+		"/bin/notify.sh --braids hook --now",
+		"/bin/other hook",
+		"",
+	} {
+		if _, ok := mine(raw(t, command)); ok {
+			t.Errorf("mine(%q) = true, want false", command)
+		}
+	}
+}
+
+func raw(t *testing.T, command string) json.RawMessage {
+	t.Helper()
+	encoded, err := json.Marshal(entry{Type: "command", Command: command})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	return encoded
+}
+
+// commandsFor lists every command an event runs, braids' or not.
+func commandsFor(t *testing.T, path, event string) []string {
+	t.Helper()
+	_, byEvent, err := load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	var commands []string
+	for _, group := range byEvent[event] {
+		var parsed struct {
+			Hooks []entry `json:"hooks"`
+		}
+		if err := json.Unmarshal(group, &parsed); err != nil {
+			t.Fatalf("parse group: %v", err)
+		}
+		for _, h := range parsed.Hooks {
+			commands = append(commands, h.Command)
+		}
+	}
+	return commands
 }

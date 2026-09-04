@@ -543,7 +543,7 @@ func TestPasteGoesToWhicheverFieldIsOpen(t *testing.T) {
 			LoadSpine: func(string) ([]graph.Segment, error) {
 				return []graph.Segment{{Kind: graph.SegTurn, Seq: 1, Preview: "schema work"}}, nil
 			},
-			Branch: func(string, int, string) (string, error) { return "x", nil },
+			Branch: func(string, int, string, bool) (string, error) { return "x", nil },
 		})
 		m.now = func() time.Time { return now }
 		m.width, m.height = 90, 20

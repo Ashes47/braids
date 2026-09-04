@@ -54,9 +54,12 @@ type Options struct {
 	LoadAgentSpine func(laneID, agentID string) ([]graph.Segment, error)
 	// Branch cuts a new conversation from a lane at a turn, returning the new
 	// lane's ID. Nil disables branching, which is what a read-only Source gets.
-	Branch func(laneID string, turn int, name string) (string, error)
+	Branch func(laneID string, turn int, name string, workspace bool) (string, error)
 	// Origins is recorded branch provenance, preferred over inference.
 	Origins map[string]model.Origin
+	// Names are the names the user has given conversations, which replace
+	// whatever the harness called them.
+	Names map[string]string
 	// Refresh brings the index up to date and rebuilds the forest. Called
 	// after a branch so the new lane appears at once instead of after a
 	// remembered command.
@@ -66,6 +69,9 @@ type Options struct {
 	Archived map[string]bool
 	// Archive puts a conversation out of the way, or brings it back.
 	Archive func(laneID string, archived bool) error
+	// Rename gives a conversation a name of your own. An empty name restores
+	// whatever the harness called it.
+	Rename func(laneID, name string) error
 	// Delete moves a conversation's files to the bin, returning how much was
 	// reclaimed. Nil disables deleting.
 	Delete func(laneID string) (int64, error)
@@ -120,7 +126,7 @@ type Model struct {
 	loadSeams      func(string) ([]index.CompactionRow, error)
 	promote        func(string, string) (string, error)
 	loadAgentSpine func(string, string) ([]graph.Segment, error)
-	branch         func(string, int, string) (string, error)
+	branch         func(string, int, string, bool) (string, error)
 	refresh        func() (*graph.Forest, error)
 	changes        <-chan struct{}
 	resumeCmd      func(string) (string, error)
@@ -129,11 +135,14 @@ type Model struct {
 	searchFn       func(string, string) ([]index.Hit, error)
 	archived       map[string]bool
 	archiveFn      func(string, bool) error
-	deleteFn       func(string) (int64, error)
-	deleteWorkFn   func(string) (int64, error)
-	loadBin        func() ([]trash.Entry, error)
-	restoreFn      func(string) error
-	purgeFn        func(string) error
+	renameFn       func(string, string) error
+	// naming is the rename field, opened with r on a conversation.
+	naming       filterInput
+	deleteFn     func(string) (int64, error)
+	deleteWorkFn func(string) (int64, error)
+	loadBin      func() ([]trash.Entry, error)
+	restoreFn    func(string) error
+	purgeFn      func(string) error
 	// showArchived reveals what has been put away, so it can be brought back.
 	showArchived bool
 
@@ -192,6 +201,7 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		searchFn:       opts.Search,
 		archived:       opts.Archived,
 		archiveFn:      opts.Archive,
+		renameFn:       opts.Rename,
 		deleteFn:       opts.Delete,
 		deleteWorkFn:   opts.DeleteWork,
 		loadBin:        opts.LoadBin,
@@ -322,6 +332,8 @@ func (m Model) pasted(text string) Model {
 		m.spine.filter.paste(text)
 		m.spine.apply()
 		m.clampSpine()
+	case m.mode == mapMode && m.naming.active:
+		m.naming.paste(text)
 	case m.filter.active:
 		m.filter.paste(text)
 		m.apply()
@@ -382,6 +394,9 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode == binMode {
 		return m.binKey(key), nil
 	}
+	if m.mode == mapMode && m.naming.active {
+		return m.renameKey(key), nil
+	}
 	if key == "u" && m.loadBin != nil {
 		return m.openBin(), nil
 	}
@@ -401,6 +416,8 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.openSpine(), nil
 	case "f":
 		m.filter.active = true
+	case "r":
+		return m.startRename(), nil
 	case "a":
 		return m.toggleArchive(), nil
 	case "A":
@@ -434,6 +451,45 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	m.clamp()
 	return m, nil
+}
+
+// startRename opens the name field on the selected conversation. Names live in
+// braids' own sidecar, so renaming never touches a transcript and can always be
+// undone by clearing the field.
+func (m Model) startRename() Model {
+	if m.renameFn == nil || m.cursor >= len(m.visible) {
+		return m.withNotice("nothing to rename here", true)
+	}
+	m.naming = filterInput{active: true, text: m.visible[m.cursor].node.Lane.Title}
+	m.notice = ""
+	return m
+}
+
+func (m Model) renameKey(key string) Model {
+	switch key {
+	case "esc":
+		m.naming = filterInput{}
+	case "enter":
+		return m.commitRename()
+	default:
+		m.naming.edit(key)
+	}
+	return m
+}
+
+func (m Model) commitRename() Model {
+	lane := m.visible[m.cursor].node.Lane.ID
+	name := strings.TrimSpace(m.naming.text)
+	m.naming = filterInput{}
+
+	if err := m.renameFn(lane, name); err != nil {
+		return m.withNotice(err.Error(), true)
+	}
+	m = m.catchUp()
+	if name == "" {
+		return m.withNotice("name cleared · back to what the harness called it", false)
+	}
+	return m.withNotice("renamed to "+name, false)
 }
 
 // toggleArchive puts a conversation out of the way, or brings it back.
@@ -572,6 +628,8 @@ func (m Model) editing() bool {
 		return true
 	case m.mode == binMode:
 		return false
+	case m.mode == mapMode && m.naming.active:
+		return true
 	case m.mode == spineMode && m.spine != nil:
 		return m.spine.filter.active || m.spine.naming.active
 	default:
@@ -686,12 +744,21 @@ func (m Model) render() string {
 			b.WriteString(m.framed(blank) + "\n")
 		}
 	} else {
+		drawn := 0
 		end := min(m.offset+m.bodyHeight(), len(m.visible))
-		for i := m.offset; i < end; i++ {
+		for i := m.offset; i < end && drawn < m.bodyHeight(); i++ {
 			b.WriteString(m.framed(m.renderRow(m.visible[i], i == m.cursor)))
 			b.WriteString("\n")
+			drawn++
+			// The name field opens on the conversation it renames, not in a
+			// corner of the screen.
+			if m.naming.active && i == m.cursor && drawn < m.bodyHeight() {
+				b.WriteString(m.framed(m.renamePrompt()))
+				b.WriteString("\n")
+				drawn++
+			}
 		}
-		for range m.bodyHeight() - (end - m.offset) {
+		for range m.bodyHeight() - drawn {
 			b.WriteString(m.framed(blank) + "\n")
 		}
 	}
@@ -771,6 +838,22 @@ func (m Model) layoutFor() rowLayout {
 // minTitleWidth is the least a conversation's name may be squeezed to before
 // columns start being dropped instead.
 const minTitleWidth = 16
+
+// renamePrompt is the inline name field, drawn under the conversation it names.
+func (m Model) renamePrompt() string {
+	g := m.theme.Glyphs
+	label := "name: "
+	hint := "enter save · empty to clear · esc cancel"
+	width := m.contentWidth() - 4 - lipgloss.Width(g.Last) - lipgloss.Width(label) -
+		lipgloss.Width(hint) - 2
+	if width < 8 {
+		width = 8
+	}
+	return " " + m.theme.Rail.Render("  "+g.Last) + " " +
+		m.theme.Accent.Render(label) +
+		m.theme.Value.Render(padRight(truncate(m.naming.text, width)+"▏", width+1)) + " " +
+		m.theme.Label.Render(hint)
+}
 
 // renderRow draws one lane. A selected row is painted as a single flat band so
 // that no nested style can tear the background; an unselected row gets the

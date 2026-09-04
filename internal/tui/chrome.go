@@ -57,7 +57,8 @@ func hints() []hint {
 		// narrow terminal: moving, opening, searching and quitting.
 		{"j/k", "down / up"}, {"↵", "open spine"},
 		{"/", "search"}, {"f", "filter list"},
-		{"a", "toggle archive"}, {"q", "quit"},
+		{"a", "toggle archive"}, {"r", "rename"},
+		{"q", "quit"},
 		{"n / N", "next / prev waiting"}, {"d", "delete"},
 		{"D", "delete work products"},
 		{"u", "deleted / recover"}, {"A", "show archived"},
@@ -279,6 +280,9 @@ func (m Model) framed(content string) string {
 
 // statusLine is the bottom line: what is being typed, or what is selected.
 func (m Model) statusLine() string {
+	if m.naming.active {
+		return " " + m.theme.Label.Render("renaming — enter saves, esc cancels")
+	}
 	if m.filter.active {
 		return m.typingLine(m.filter)
 	}

@@ -18,7 +18,7 @@ func Run(ctx context.Context, ix *index.Index, opts Options) error {
 	if opts.LoadSpine == nil {
 		opts.LoadSpine = SpineLoader(ctx, ix)
 	}
-	forest, err := Forest(ctx, ix, opts.Origins)
+	forest, err := Forest(ctx, ix, opts.Origins, opts.Names)
 	if err != nil {
 		return err
 	}
@@ -74,10 +74,17 @@ func SpineLoader(ctx context.Context, ix *index.Index) func(string) ([]graph.Seg
 
 // Forest reads everything the map needs and arranges it. Kept exported and
 // separate from Run so the same assembly is reusable by a future web frontend.
-func Forest(ctx context.Context, ix *index.Index, recorded map[string]model.Origin) (*graph.Forest, error) {
+func Forest(ctx context.Context, ix *index.Index, recorded map[string]model.Origin, names map[string]string) (*graph.Forest, error) {
 	lanes, err := ix.Lanes(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// A name the user chose replaces whatever the harness called it, before
+	// anything downstream — the map, the spine, search results — sees the lane.
+	for i, l := range lanes {
+		if name, ok := names[l.ID]; ok && name != "" {
+			lanes[i].Title = name
+		}
 	}
 	overlaps, err := ix.Overlaps(ctx)
 	if err != nil {

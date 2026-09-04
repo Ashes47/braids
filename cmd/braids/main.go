@@ -201,8 +201,16 @@ func cmdMap(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
+	names, err := sidecar.Load[string](sidecarPath(dbPath, "names.json"))
+	if err != nil {
+		return err
+	}
+	kinds, err := sidecar.Load[string](sidecarPath(dbPath, "kinds.json"))
+	if err != nil {
+		return err
+	}
 	bin := trash.New(filepath.Join(filepath.Dir(dbPath), "trash"))
-	spawn, terminal := spawner(ctx, ix)
+	spawn, terminal := spawner(ctx, ix, kinds)
 	opts := tui.Options{
 		ASCII:     *ascii,
 		Source:    "claudecode",
@@ -221,8 +229,15 @@ func cmdMap(args []string, out *printer) error {
 			return agentSpine(ctx, ix, root, laneID, agentID)
 		},
 		Origins:  provenance.All(),
+		Names:    names.All(),
 		Changes:  changes,
 		Archived: shelf.All(),
+		Rename: func(laneID, name string) error {
+			if name == "" {
+				return names.Delete(laneID)
+			}
+			return names.Set(laneID, name)
+		},
 		Archive: func(laneID string, archived bool) error {
 			if archived {
 				return shelf.Set(laneID, true)
@@ -248,27 +263,38 @@ func cmdMap(args []string, out *printer) error {
 		},
 		Purge: bin.Purge,
 		ResumeCommand: func(laneID string) (string, error) {
-			return resumeCommand(ctx, ix, laneID)
+			return resumeCommand(ctx, ix, kinds, laneID)
 		},
 		Spawn:    spawn,
 		Terminal: terminal,
 		Search: func(query, scope string) ([]index.Hit, error) {
 			return ix.Search(ctx, index.Query{Text: query, Lane: scope, Limit: 200})
 		},
-		Branch: func(laneID string, turn int, name string) (string, error) {
-			return branchAt(ctx, ix, provenance, laneID, turn, name)
+		Branch: func(laneID string, turn int, name string, workspace bool) (string, error) {
+			id, err := branchAt(ctx, ix, provenance, laneID, turn, name)
+			if err != nil {
+				return "", err
+			}
+			if workspace {
+				// Recorded rather than acted on: braids does not create the
+				// worktree, it asks the harness to when the branch is resumed.
+				if err := kinds.Set(id, workspaceKind); err != nil {
+					return "", err
+				}
+			}
+			return id, nil
 		},
 		Refresh: func() (*graph.Forest, error) {
 			if _, err := ix.Sync(ctx, claudecode.New(root)); err != nil {
 				return nil, err
 			}
-			return tui.Forest(ctx, ix, provenance.All())
+			return tui.Forest(ctx, ix, provenance.All(), names.All())
 		},
 	}
 	if !*print {
 		return tui.Run(ctx, ix, opts)
 	}
-	forest, err := tui.Forest(ctx, ix, provenance.All())
+	forest, err := tui.Forest(ctx, ix, provenance.All(), names.All())
 	if err != nil {
 		return err
 	}
@@ -674,7 +700,10 @@ func discardWork(ctx context.Context, ix *index.Index, bin *trash.Bin, laneID st
 }
 
 // resumeCommand is what the user would type to continue a conversation.
-func resumeCommand(ctx context.Context, ix *index.Index, laneID string) (string, error) {
+// workspaceKind marks a branch that should get a git worktree of its own.
+const workspaceKind = "workspace"
+
+func resumeCommand(ctx context.Context, ix *index.Index, kinds *sidecar.Store[string], laneID string) (string, error) {
 	lane, err := findLane(ctx, ix, laneID)
 	if err != nil {
 		return "", err
@@ -683,12 +712,36 @@ func resumeCommand(ctx context.Context, ix *index.Index, laneID string) (string,
 	if lane.Title != "" {
 		command += fmt.Sprintf(" --name %q", lane.Title)
 	}
+	// A workspace branch asks the harness for a worktree of its own, so two
+	// branches that both write to the repo cannot collide. braids does not
+	// create it: --worktree is the harness's own flag and its own job.
+	if kind, _ := kinds.Get(lane.ID); kind == workspaceKind {
+		command += " --worktree " + slug(lane.Title, lane.ID)
+	}
 	return command, nil
+}
+
+// slug turns a branch name into something a worktree directory can be called.
+func slug(name, fallback string) string {
+	var out []rune
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			out = append(out, r)
+		case len(out) > 0 && out[len(out)-1] != '-':
+			out = append(out, '-')
+		}
+	}
+	trimmed := strings.Trim(string(out), "-")
+	if trimmed == "" {
+		return shortID(fallback)
+	}
+	return trimmed
 }
 
 // spawner opens a terminal for a lane, or reports that this terminal cannot be
 // driven. The name it goes by is reported too, so the map can say what it used.
-func spawner(ctx context.Context, ix *index.Index) (func(string) error, string) {
+func spawner(ctx context.Context, ix *index.Index, kinds *sidecar.Store[string]) (func(string) error, string) {
 	open, terminal := launch.Detect(launch.Env)
 	if open == nil {
 		return nil, ""
@@ -698,7 +751,7 @@ func spawner(ctx context.Context, ix *index.Index) (func(string) error, string) 
 		if err != nil {
 			return err
 		}
-		command, err := resumeCommand(ctx, ix, laneID)
+		command, err := resumeCommand(ctx, ix, kinds, laneID)
 		if err != nil {
 			return err
 		}

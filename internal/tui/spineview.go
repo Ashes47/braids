@@ -37,6 +37,10 @@ type spineState struct {
 	filter  filterInput
 	// naming is the branch-name field, opened with `b` on a turn.
 	naming filterInput
+	// workspace is the kind of branch being made. A thought shares the working
+	// directory and is for exploring; a workspace gets a git worktree of its
+	// own and can be written in while its siblings run.
+	workspace bool
 	// agentOf names the conversation this spine belongs to when it is a
 	// subagent being read. A subagent is not a session the harness can resume,
 	// so the actions that assume one are refused while reading it.
@@ -365,18 +369,23 @@ func (m Model) renderSpine() string {
 // namePrompt is the inline branch-name field, drawn under the turn it will cut.
 func (m Model) namePrompt() string {
 	g := m.theme.Glyphs
-	label := "branch from t" + fmt.Sprintf("%d", m.spine.current().seg.Seq) + ": "
-	hint := "enter create · esc cancel"
-	field := m.spine.naming.text
+	s := m.spine
+	label := fmt.Sprintf("branch from t%d as %s: ", s.current().seg.Seq, branchKind(s.workspace))
+	hint := "tab switches kind · enter create · esc cancel"
 
 	width := m.contentWidth() - 4 - lipgloss.Width(g.Last) - lipgloss.Width(label) -
 		lipgloss.Width(hint) - 2
 	if width < 8 {
 		width = 8
 	}
+	kind := m.theme.Dim
+	if s.workspace {
+		// A workspace writes files, so it should not be entered absent-mindedly.
+		kind = m.theme.Accent
+	}
 	return " " + m.theme.Rail.Render("  "+g.Last) + " " +
-		m.theme.Accent.Render(label) +
-		m.theme.Value.Render(padRight(truncate(field, width)+"▏", width+1)) + " " +
+		kind.Render(label) +
+		m.theme.Value.Render(padRight(truncate(s.naming.text, width)+"▏", width+1)) + " " +
 		m.theme.Label.Render(hint)
 }
 
@@ -697,6 +706,8 @@ func (m Model) namingKey(key string) Model {
 		s.naming = filterInput{}
 	case "enter":
 		return m.commitBranch()
+	case "tab":
+		s.workspace = !s.workspace
 	default:
 		s.naming.edit(key)
 	}
@@ -712,12 +723,15 @@ func (m Model) commitBranch() Model {
 	name := strings.TrimSpace(s.naming.text)
 	s.naming = filterInput{}
 
-	id, err := m.branch(s.lane.ID, seg.Seq, name)
+	workspace := s.workspace
+	s.workspace = false
+
+	id, err := m.branch(s.lane.ID, seg.Seq, name, workspace)
 	if err != nil {
 		s.notice, s.failed = err.Error(), true
 		return m
 	}
-	notice := fmt.Sprintf("branched at t%d → %s", seg.Seq, shortID(id))
+	notice := fmt.Sprintf("branched at t%d → %s (%s)", seg.Seq, shortID(id), branchKind(workspace))
 	if m.refresh != nil {
 		forest, err := m.refresh()
 		if err != nil {
@@ -728,6 +742,15 @@ func (m Model) commitBranch() Model {
 	}
 	m.spine.notice, m.spine.failed = notice, false
 	return m
+}
+
+// branchKind names what was made, since the two behave differently once
+// resumed.
+func branchKind(workspace bool) string {
+	if workspace {
+		return "workspace"
+	}
+	return "thought"
 }
 
 // suggestName proposes a branch name from the turn's own words. It is only a

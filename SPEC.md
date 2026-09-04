@@ -406,18 +406,26 @@ ordered queue below, is what remains of this screen.
 ### 6.5 Branch — inline at the junction, never a modal
 
 ```
-│ ▓● t412  you     NULLS LAST starved the unstamped backlog — try option C      │
-│  ├─┬ branch from turn 412                                                     │
-│  │ │   name   try-option-c▏                                                   │
-│  │ │   kind   ( ) thought      shares /Users/averma/Desktop/microagi          │
-│  │ │          (•) workspace    git worktree ../microagi-try-option-c          │
-│  │ │   open   (•) new terminal window      ( ) just create                    │
-│  │ └   ↵ create      esc cancel                                               │
+│ ●   t5 you     Give one command to create a worktree.                          │
+│   └─ branch from t5 as thought: create-worktree▏  tab switches kind · enter ·  │
 ```
 
-On create the new lane animates out of the junction and the terminal opens
-already resumed. **thought** = shared cwd, exploratory. **workspace** = its own
-worktree, safe to write, runs concurrently with siblings.
+The field opens on the turn it will cut, pre-filled from that turn's own words
+(§8), and `tab` chooses what kind of branch it is:
+
+- **thought** — shares the working directory. Exploring, reading, planning.
+  The cheap default, because most branches never write anything.
+- **workspace** — asks the harness for a git worktree of its own, so two
+  branches that both write to the repo cannot collide.
+
+braids does not create the worktree. `--worktree` is the harness's own flag and
+its own job; braids records the choice and puts the flag in the resume command,
+so `y` and `o` carry it. The kind is chosen fresh each time rather than
+remembered — a workspace writes files, and that should be a decision.
+
+`r` renames a conversation on the map, pre-filled with what it is called now.
+Names live in braids' sidecar, so renaming never touches a transcript, and
+emptying the field restores whatever the harness called it.
 
 ### 6.6 Subagent — in the conversation that spawned it
 
@@ -710,9 +718,9 @@ needs-you — are declared as optional `Capabilities`, never assumed.
    from mtime, k9s-style chrome.
 3. ~~**The Spine.**~~ **Done** for runs and junctions; compaction seams,
    subagent lanes and error marks still to come.
-4. ~~**Branch.**~~ **Done**: file synthesis, naming, the `b` key, navigating
-   into a branch from its parent, recorded provenance, and an immediate
-   in-place refresh. `--worktree` and spawning a terminal still to come.
+4. ~~**Branch.**~~ **Done**: file synthesis, naming, renaming, the `b` key,
+   thought-versus-workspace, navigating into a branch from its parent, recorded
+   provenance, and an immediate in-place refresh.
 5. ~~**Live.**~~ **Done** for the watcher and in-place refresh: the map follows
    sessions as they are written, and a branch appears without any command.
    Hooks and the needs-you queue still to come. ← *next*

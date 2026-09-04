@@ -212,7 +212,7 @@ func TestBranchFromASpineTurn(t *testing.T) {
 	var gotLane, gotName string
 	var gotTurn int
 	m := spineModel(t, demoSegments(), nil)
-	m.branch = func(lane string, turn int, name string) (string, error) {
+	m.branch = func(lane string, turn int, name string, _ bool) (string, error) {
 		gotLane, gotTurn, gotName = lane, turn, name
 		return "newlane01234", nil
 	}
@@ -248,7 +248,7 @@ func TestBranchFromASpineTurn(t *testing.T) {
 
 func TestBranchFailureIsShown(t *testing.T) {
 	m := spineModel(t, demoSegments(), nil)
-	m.branch = func(string, int, string) (string, error) { return "", errors.New("disk is full") }
+	m.branch = func(string, int, string, bool) (string, error) { return "", errors.New("disk is full") }
 	m = m.openSpine()
 	m, _ = m.spineKey("b")
 	m, _ = m.spineKey("enter")
@@ -358,7 +358,7 @@ func TestEnterDescendsIntoABranchAndEscapeComesBack(t *testing.T) {
 func TestBranchingFromAForkRowExplainsItself(t *testing.T) {
 	m := spineModel(t, demoSegments(), nil)
 	forkChild(m.visible[0].node, "kid00000001", "the branch", 9, 1)
-	m.branch = func(string, int, string) (string, error) { return "x", nil }
+	m.branch = func(string, int, string, bool) (string, error) { return "x", nil }
 
 	m = m.openSpine()
 	m, _ = m.spineKey("j")
@@ -592,7 +592,7 @@ func seamModel(t *testing.T) (Model, *[]string) {
 				},
 			}}, nil
 		},
-		Branch: func(lane string, turn int, name string) (string, error) {
+		Branch: func(lane string, turn int, name string, _ bool) (string, error) {
 			*branched = append(*branched, fmt.Sprintf("%s@t%d:%s", lane, turn, name))
 			return "newlane0001", nil
 		},
@@ -672,5 +672,51 @@ func TestCommas(t *testing.T) {
 		if got := commas(in); got != want {
 			t.Errorf("commas(%d) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestBranchKindIsChosenBeforeItIsMade(t *testing.T) {
+	type call struct {
+		turn      int
+		name      string
+		workspace bool
+	}
+	var calls []call
+	m := spineModel(t, demoSegments(), nil)
+	m.branch = func(_ string, turn int, name string, workspace bool) (string, error) {
+		calls = append(calls, call{turn, name, workspace})
+		return "newlane0001", nil
+	}
+	m = m.openSpine()
+	m, _ = m.spineKey("b")
+
+	// It opens as a thought: exploring should be the cheap default.
+	if m.spine.workspace {
+		t.Error("a branch should start as a thought")
+	}
+	if out := plain(m.renderSpine()); !strings.Contains(out, "as thought") {
+		t.Errorf("the prompt should name the kind:\n%s", out)
+	}
+
+	m, _ = m.spineKey("tab")
+	if !m.spine.workspace {
+		t.Fatal("tab should switch to a workspace")
+	}
+	if out := plain(m.renderSpine()); !strings.Contains(out, "as workspace") {
+		t.Error("the prompt should follow the switch")
+	}
+	m, _ = m.spineKey("enter")
+
+	if len(calls) != 1 || !calls[0].workspace {
+		t.Fatalf("branch called with %+v, want a workspace", calls)
+	}
+	if !strings.Contains(plain(m.renderSpine()), "(workspace)") {
+		t.Error("the confirmation should say which kind was made")
+	}
+
+	// The choice does not persist into the next branch.
+	m, _ = m.spineKey("b")
+	if m.spine.workspace {
+		t.Error("the next branch should start as a thought again")
 	}
 }

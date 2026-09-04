@@ -334,3 +334,62 @@ func TestNoWorkColumnWithoutWorkProducts(t *testing.T) {
 		t.Error("the column should not appear when nothing has work products")
 	}
 }
+
+func TestRenameGivesAConversationYourOwnName(t *testing.T) {
+	var renamed [][2]string
+	lanes := []index.LaneInfo{laneInfo("a", "Debug annotation pipeline dataset issue", "app", 5, time.Hour)}
+	m, _ := keepingModel(t, lanes)
+	m.renameFn = func(id, name string) error {
+		renamed = append(renamed, [2]string{id, name})
+		return nil
+	}
+
+	m = press(m, "r")
+	if !m.naming.active {
+		t.Fatal("r should open the name field")
+	}
+	// Pre-filled with what it is called now, so a tweak is a tweak.
+	if m.naming.text != "Debug annotation pipeline dataset issue" {
+		t.Errorf("field = %q, want the current name", m.naming.text)
+	}
+	if out := plain(m.render()); !strings.Contains(out, "name:") || !strings.Contains(out, "esc cancel") {
+		t.Errorf("expected an inline field under the row:\n%s", out)
+	}
+
+	m = m.renameKey("esc")
+	if m.naming.active {
+		t.Fatal("esc should close the field")
+	}
+	if len(renamed) != 0 {
+		t.Error("cancelling must not rename")
+	}
+
+	m = press(m, "r")
+	m.naming.text = "gcsfuse density"
+	m = m.renameKey("enter")
+	if len(renamed) != 1 || renamed[0][1] != "gcsfuse density" {
+		t.Fatalf("renamed = %v", renamed)
+	}
+	if !strings.Contains(plain(m.render()), "renamed to gcsfuse density") {
+		t.Error("expected confirmation")
+	}
+}
+
+func TestClearingANameRestoresTheOriginal(t *testing.T) {
+	var renamed [][2]string
+	m, _ := keepingModel(t, []index.LaneInfo{laneInfo("a", "my own name", "app", 5, time.Hour)})
+	m.renameFn = func(id, name string) error {
+		renamed = append(renamed, [2]string{id, name})
+		return nil
+	}
+	m = press(m, "r")
+	m.naming.text = "   "
+	m = m.renameKey("enter")
+
+	if len(renamed) != 1 || renamed[0][1] != "" {
+		t.Fatalf("an emptied field should clear the name, got %v", renamed)
+	}
+	if !strings.Contains(plain(m.render()), "back to what the harness called it") {
+		t.Error("expected the effect to be stated")
+	}
+}

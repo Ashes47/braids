@@ -883,14 +883,14 @@ needs-you — are declared as optional `Capabilities`, never assumed.
 1. ~~**Index + search.**~~ **Done.** Parse, FTS5, `braids search`.
 2. ~~**The Map.**~~ **Done.** Lanes, fork detection by shared uuid, statuses
    from mtime, k9s-style chrome.
-3. ~~**The Spine.**~~ **Done**: runs, junctions, compaction seams,
-   subagent lanes and error marks still to come.
+3. ~~**The Spine.**~~ **Done**: runs, junctions, compaction seams, subagent
+   lanes and the marks for failed tool calls.
 4. ~~**Branch.**~~ **Done**: file synthesis, naming, renaming, the `b` key,
    thought-versus-workspace, navigating into a branch from its parent, recorded
    provenance, and an immediate in-place refresh.
-5. ~~**Live.**~~ **Done** for the watcher and in-place refresh: the map follows
-   sessions as they are written, and a branch appears without any command.
-   Hooks and the needs-you queue still to come. ← *next*
+5. ~~**Live.**~~ **Done**: the watcher and in-place refresh, so the map follows
+   sessions as they are written and a branch appears without any command; plus
+   optional hooks and the needs-you queue built on them.
 6. ~~**Search screen.**~~ **Done**: full text across every conversation, with
    `↵` jumping to the turn it found.
 7. ~~**Lane state.**~~ **Done** from files: working, thinking, your turn,
@@ -905,7 +905,9 @@ needs-you — are declared as optional `Capabilities`, never assumed.
     behind a preview of what it would carry over, and refused where it would
     only duplicate a branch.
 
-Steps 1–2 are already a tool worth opening.
+All ten are done. What remains is listed as it comes up rather than planned
+here: multi-select and the filtered sweep (§9), reclaiming job artifacts, a
+16-pixel mark, and the web frontend below.
 
 ---
 

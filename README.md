@@ -181,16 +181,20 @@ braids reads your transcripts, so this matters more than usual:
 
 ## Numbers
 
-Measured on one real machine, 28 conversations, 62,169 messages, 359 MB of
-transcripts:
+Measured on one laptop against a real corpus — 28 conversations, ~62,000
+messages, ~360 MB of transcripts. Rounded, because a corpus you are still
+working in never sits still:
 
 | | |
 |---|---|
-| Full index | ~6 s |
-| Incremental index (a few lanes changed) | ~280 ms |
-| Incremental index (nothing changed) | ~0 ms |
-| Search across 62k units | 0.7–1.7 ms |
-| Index on disk | 192 MB |
+| First index, from nothing | ~8 s |
+| Re-index, a few conversations changed | ~300 ms |
+| Re-index, nothing changed | under 1 ms |
+| Search, across ~62,000 indexed units | 1–6 ms |
+| Index on disk | ~190 MB |
+
+The last row is the honest cost: the index is roughly half the size of the
+transcripts it was built from, because it stores the text again to search it.
 
 ## Principles
 

@@ -208,6 +208,9 @@ func cmdMap(args []string, out *printer) error {
 		Promote: func(laneID, agentID string) (string, error) {
 			return promoteAgent(ctx, ix, provenance, laneID, agentID)
 		},
+		LoadAgentSpine: func(laneID, agentID string) ([]graph.Segment, error) {
+			return agentSpine(ctx, ix, root, laneID, agentID)
+		},
 		Origins: provenance.All(),
 		Changes: changes,
 		ResumeCommand: func(laneID string) (string, error) {
@@ -534,6 +537,27 @@ func cmdAgents(args []string, out *printer) error {
 		return fmt.Errorf("write agents: %w", err)
 	}
 	return out.Err()
+}
+
+// agentSpine reads a subagent's own transcript so it can be looked at before
+// anything is decided about it. Nothing is written and nothing is indexed.
+func agentSpine(ctx context.Context, ix *index.Index, root, laneID, agentID string) ([]graph.Segment, error) {
+	agents, err := ix.LaneSubagents(ctx, laneID)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range agents {
+		if a.ID != agentID {
+			continue
+		}
+		rows, err := index.RowsFrom(ctx, claudecode.New(root),
+			model.Lane{ID: a.ID, Path: a.Path})
+		if err != nil {
+			return nil, err
+		}
+		return graph.Spine(rows), nil
+	}
+	return nil, fmt.Errorf("no subagent %s in %s", shortID(agentID), shortID(laneID))
 }
 
 // promoteAgent turns a subagent into a conversation of its own and records

@@ -34,11 +34,15 @@ type spineState struct {
 	filter  filterInput
 	// naming is the branch-name field, opened with `b` on a turn.
 	naming filterInput
-	notice string
-	failed bool
-	cursor int
-	offset int
-	err    error
+	// agentOf names the conversation this spine belongs to when it is a
+	// subagent being read. A subagent is not a session the harness can resume,
+	// so the actions that assume one are refused while reading it.
+	agentOf string
+	notice  string
+	failed  bool
+	cursor  int
+	offset  int
+	err     error
 }
 
 // build interleaves the lane's turns with the branches that left it, each at the
@@ -212,8 +216,7 @@ func (m Model) spineKey(key string) (Model, tea.Cmd) {
 	case "enter", "l", "right":
 		row := s.current()
 		if row.agent != nil {
-			s.notice, s.failed = "press p to promote this agent into a conversation you can open", true
-			return m, nil
+			return m.openAgent(row.agent), nil
 		}
 		if row.fork == nil {
 			s.notice, s.failed = "no branch on this line — press b to make one, or n to find the next split", true
@@ -389,8 +392,12 @@ func (m Model) spineInfo() string {
 	}
 	forks := len(childrenOf(m.spine.node))
 	agents := len(m.spine.agents)
+	label := "Lane"
+	if m.spine.agentOf != "" {
+		label = "Agent"
+	}
 	facts := []fact{
-		{"Lane", shortID(m.spine.lane.ID)},
+		{label, shortID(m.spine.lane.ID)},
 		{"Turns", fmt.Sprintf("%d", m.spine.lane.Messages)},
 		{"Branches", describeBranches(alternates, forks)},
 		{"Agents", fmt.Sprintf("%d", agents)},
@@ -398,7 +405,7 @@ func (m Model) spineInfo() string {
 	keys := []hint{
 		{"j/k", "move"}, {"b", "branch here"},
 		{"p", "promote agent"}, {"/", "search"},
-		{"↵", "open branch"}, {"n/N", "next marker"},
+		{"↵", "open branch/agent"}, {"n/N", "next marker"},
 		{"y/o", "copy / open"}, {"esc", "back"},
 	}
 	return m.factsBlock(facts, keys)
@@ -549,6 +556,12 @@ func (m Model) segmentParts(seg graph.Segment) (plain, styled string) {
 // startBranch opens the name field, pre-filled from the turn being branched.
 func (m Model) startBranch() Model {
 	s := m.spine
+	// The specific reason first: while reading an agent, that is why branching
+	// is refused, whatever else is or is not configured.
+	if s.agentOf != "" {
+		s.notice, s.failed = "this is an agent's transcript — press p to promote it, then branch from it", true
+		return m
+	}
 	if m.branch == nil || len(s.visible) == 0 {
 		s.notice, s.failed = "branching is unavailable for this source", true
 		return m
@@ -639,11 +652,50 @@ var stopWords = map[string]bool{
 	"from": true, "into": true, "your": true, "than": true, "then": true,
 }
 
-// promoteAgent turns the selected subagent into a conversation of its own.
+// openAgent reads a subagent's transcript in place. Nothing is written: a
+// decision about promoting it should follow reading it, not precede it.
+func (m Model) openAgent(a *index.SubagentRow) Model {
+	if m.loadAgentSpine == nil {
+		m.spine.notice, m.spine.failed = "reading agents is unavailable for this source", true
+		return m
+	}
+	segs, err := m.loadAgentSpine(m.spine.lane.ID, a.ID)
+	lane := index.LaneInfo{Messages: a.Messages}
+	lane.ID = a.ID
+	lane.Title = promotedName(a)
+	lane.Project = m.spine.lane.Project
+
+	next := &spineState{lane: lane, segs: segs, err: err, agentOf: m.spine.lane.ID}
+	next.build()
+	m.stack = append(m.stack, m.spine)
+	m.spine = next
+	m.clampSpine()
+	return m
+}
+
+// promotedName is what a subagent is called once it stands on its own.
+func promotedName(a *index.SubagentRow) string {
+	switch {
+	case a.Type != "" && a.Task != "":
+		return a.Type + ": " + a.Task
+	case a.Task != "":
+		return a.Task
+	default:
+		return a.Type
+	}
+}
+
+// promoteAgent turns the selected subagent into a conversation of its own,
+// from the parent's spine or from inside the agent being read.
 func (m Model) promoteAgent() Model {
 	s := m.spine
-	row := s.current()
-	if row.agent == nil {
+	laneID, agentID := s.lane.ID, ""
+	if s.agentOf != "" {
+		laneID, agentID = s.agentOf, s.lane.ID
+	} else if row := s.current(); row.agent != nil {
+		agentID = row.agent.ID
+	}
+	if agentID == "" {
 		s.notice, s.failed = "p promotes a subagent — none is selected", true
 		return m
 	}
@@ -651,12 +703,12 @@ func (m Model) promoteAgent() Model {
 		s.notice, s.failed = "promoting is unavailable for this source", true
 		return m
 	}
-	id, err := m.promote(s.lane.ID, row.agent.ID)
+	id, err := m.promote(laneID, agentID)
 	if err != nil {
 		s.notice, s.failed = err.Error(), true
 		return m
 	}
-	notice := fmt.Sprintf("promoted %s → %s", row.agent.Type, shortID(id))
+	notice := fmt.Sprintf("promoted → %s · open it from the map", shortID(id))
 	if m.refresh != nil {
 		forest, refreshErr := m.refresh()
 		if refreshErr != nil {

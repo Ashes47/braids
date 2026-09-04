@@ -462,3 +462,96 @@ func TestSpineMovementWrapsAround(t *testing.T) {
 		t.Errorf("j from the bottom = %d, want the first row", m.spine.cursor)
 	}
 }
+
+func agentModel(t *testing.T, agentSegs []graph.Segment) (Model, *[]string) {
+	t.Helper()
+	promoted := &[]string{}
+	lanes := []index.LaneInfo{laneInfo("lane1234abcd", "queue stall", "app", 40, time.Hour)}
+	m := NewModel(forestOf(lanes, nil), Options{
+		ASCII:     true,
+		LoadSpine: func(string) ([]graph.Segment, error) { return demoSegments(), nil },
+		LoadSubagents: func(string) ([]index.SubagentRow, error) {
+			return []index.SubagentRow{{
+				Subagent:  model.Subagent{ID: "agent-abc", Type: "Explore", Task: "look around", Messages: 42},
+				ParentSeq: 1,
+			}}, nil
+		},
+		LoadAgentSpine: func(lane, agent string) ([]graph.Segment, error) {
+			*promoted = append(*promoted, "read:"+lane+"/"+agent)
+			return agentSegs, nil
+		},
+		Promote: func(lane, agent string) (string, error) {
+			*promoted = append(*promoted, "promote:"+lane+"/"+agent)
+			return "newlane0001", nil
+		},
+		ResumeCommand: func(id string) (string, error) { return "claude --resume " + id, nil },
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 92, 20
+	return m, promoted
+}
+
+func TestEnterReadsAnAgentWithoutPromotingIt(t *testing.T) {
+	agentSegs := []graph.Segment{
+		{Kind: graph.SegTurn, Seq: 1, Role: model.RoleUser, Preview: "count the files"},
+		{Kind: graph.SegTurn, Seq: 2, Role: model.RoleAssistant, Preview: "there are four"},
+	}
+	m, calls := agentModel(t, agentSegs)
+	m = m.openSpine()
+	m, _ = m.spineKey("j") // onto the agent row
+
+	m, _ = m.spineKey("enter")
+	if len(*calls) != 1 || (*calls)[0] != "read:lane1234abcd/agent-abc" {
+		t.Fatalf("enter should read the agent, not promote it: %v", *calls)
+	}
+	out := plain(m.renderSpine())
+	for _, want := range []string{"Agent:", "Explore: look around", "count the files", "there are four"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("agent transcript missing %q:\n%s", want, out)
+		}
+	}
+
+	// esc walks back to the conversation that spawned it.
+	m, _ = m.spineKey("esc")
+	if m.spine.agentOf != "" || m.spine.lane.ID != "lane1234abcd" {
+		t.Error("esc should return to the parent conversation")
+	}
+}
+
+func TestActionsThatNeedASessionAreRefusedWhileReadingAnAgent(t *testing.T) {
+	m, _ := agentModel(t, []graph.Segment{{Kind: graph.SegTurn, Seq: 1, Preview: "x"}})
+	m = m.openSpine()
+	m, _ = m.spineKey("j")
+	m, _ = m.spineKey("enter")
+
+	m, _ = m.spineKey("b")
+	if m.spine.naming.active {
+		t.Error("branching an agent transcript should be refused until it is promoted")
+	}
+	if !strings.Contains(plain(m.renderSpine()), "promote it") {
+		t.Error("expected guidance towards promoting")
+	}
+
+	m, cmd := m.spineKey("y")
+	if cmd != nil {
+		t.Error("an agent is not a session; there is nothing to resume")
+	}
+	if !strings.Contains(plain(m.renderSpine()), "promote the agent first") {
+		t.Error("expected an explanation instead of a copied command")
+	}
+}
+
+func TestPromotingFromInsideTheAgentBeingRead(t *testing.T) {
+	m, calls := agentModel(t, []graph.Segment{{Kind: graph.SegTurn, Seq: 1, Preview: "x"}})
+	m = m.openSpine()
+	m, _ = m.spineKey("j")
+	m, _ = m.spineKey("enter")
+
+	m, _ = m.spineKey("p")
+	if len(*calls) != 2 || (*calls)[1] != "promote:lane1234abcd/agent-abc" {
+		t.Fatalf("p inside an agent should promote that agent: %v", *calls)
+	}
+	if !strings.Contains(plain(m.renderSpine()), "promoted →") {
+		t.Error("expected confirmation")
+	}
+}

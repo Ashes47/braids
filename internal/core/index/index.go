@@ -413,6 +413,29 @@ type SubagentRow struct {
 	ParentSeq int
 }
 
+// RowsFrom reads a transcript into the rows a spine is built from, without
+// touching the index. It is how a subagent can be read before any decision is
+// made about it: looking should never require writing.
+func RowsFrom(ctx context.Context, src store.Source, lane model.Lane) ([]MessageRow, error) {
+	var rows []MessageRow
+	err := src.Messages(ctx, lane, func(m model.Message) error {
+		rows = append(rows, MessageRow{
+			Seq:      len(rows) + 1,
+			ID:       m.ID,
+			ParentID: m.ParentID,
+			Role:     m.Role,
+			At:       m.At,
+			Preview:  previewOf(m),
+			Tools:    toolsOf(m),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", lane.ID, err)
+	}
+	return rows, nil
+}
+
 // LaneSubagents returns the conversations a lane spawned, in turn order.
 func (ix *Index) LaneSubagents(ctx context.Context, laneID string) ([]SubagentRow, error) {
 	rows, err := ix.db.QueryContext(ctx,

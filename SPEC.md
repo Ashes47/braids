@@ -411,7 +411,16 @@ one `tool_result`. One real lane here hides **ten of them, 409 turns in total**,
 none of which Claude Code offers any way to read.
 
 They are drawn against the turn that spawned them, joined by the `toolUseId` in
-each agent's meta file, and `p` promotes one into a conversation of its own:
+each agent's meta file.
+
+**`↵` reads one in place**, from its own transcript, writing nothing. Deciding
+whether an agent is worth keeping should follow reading it, not precede it — and
+promoting first would have meant a file on disk for every agent you merely
+glanced at. While reading one, the actions that assume a resumable session — `b`,
+`y`, `o` — say so rather than half-working: a subagent is not a session until it
+is promoted.
+
+**`p` promotes it**, from the parent's spine or from inside the agent being read:
 clearing the sidechain mark and giving it a session ID is enough for the harness
 to resume it. Verified end to end — a promoted agent answered a question about
 its own earlier work.

@@ -45,6 +45,9 @@ type Options struct {
 	// Promote turns a subagent into a conversation of its own, returning the
 	// new lane's ID.
 	Promote func(laneID, agentID string) (string, error)
+	// LoadAgentSpine reads a subagent's own transcript, so it can be looked at
+	// before any decision is made about it.
+	LoadAgentSpine func(laneID, agentID string) ([]graph.Segment, error)
 	// Branch cuts a new conversation from a lane at a turn, returning the new
 	// lane's ID. Nil disables branching, which is what a read-only Source gets.
 	Branch func(laneID string, turn int, name string) (string, error)
@@ -85,21 +88,22 @@ const (
 
 // Model is the Map: every conversation and every branch as a single forest.
 type Model struct {
-	theme      Theme
-	ascii      bool
-	source     string
-	indexPath  string
-	now        func() time.Time
-	loadSpine  func(string) ([]graph.Segment, error)
-	loadAgents func(string) ([]index.SubagentRow, error)
-	promote    func(string, string) (string, error)
-	branch     func(string, int, string) (string, error)
-	refresh    func() (*graph.Forest, error)
-	changes    <-chan struct{}
-	resumeCmd  func(string) (string, error)
-	spawn      func(string) error
-	terminal   string
-	searchFn   func(string, string) ([]index.Hit, error)
+	theme          Theme
+	ascii          bool
+	source         string
+	indexPath      string
+	now            func() time.Time
+	loadSpine      func(string) ([]graph.Segment, error)
+	loadAgents     func(string) ([]index.SubagentRow, error)
+	promote        func(string, string) (string, error)
+	loadAgentSpine func(string, string) ([]graph.Segment, error)
+	branch         func(string, int, string) (string, error)
+	refresh        func() (*graph.Forest, error)
+	changes        <-chan struct{}
+	resumeCmd      func(string) (string, error)
+	spawn          func(string) error
+	terminal       string
+	searchFn       func(string, string) ([]index.Hit, error)
 
 	notice string
 	failed bool
@@ -131,23 +135,24 @@ type Model struct {
 // as soon as the terminal reports its real background.
 func NewModel(f *graph.Forest, opts Options) Model {
 	m := Model{
-		theme:      NewTheme(true, opts.ASCII),
-		ascii:      opts.ASCII,
-		source:     opts.Source,
-		indexPath:  opts.IndexPath,
-		loadSpine:  opts.LoadSpine,
-		loadAgents: opts.LoadSubagents,
-		promote:    opts.Promote,
-		branch:     opts.Branch,
-		refresh:    opts.Refresh,
-		changes:    opts.Changes,
-		resumeCmd:  opts.ResumeCommand,
-		spawn:      opts.Spawn,
-		terminal:   opts.Terminal,
-		searchFn:   opts.Search,
-		now:        time.Now,
-		width:      80,
-		height:     24,
+		theme:          NewTheme(true, opts.ASCII),
+		ascii:          opts.ASCII,
+		source:         opts.Source,
+		indexPath:      opts.IndexPath,
+		loadSpine:      opts.LoadSpine,
+		loadAgents:     opts.LoadSubagents,
+		promote:        opts.Promote,
+		loadAgentSpine: opts.LoadAgentSpine,
+		branch:         opts.Branch,
+		refresh:        opts.Refresh,
+		changes:        opts.Changes,
+		resumeCmd:      opts.ResumeCommand,
+		spawn:          opts.Spawn,
+		terminal:       opts.Terminal,
+		searchFn:       opts.Search,
+		now:            time.Now,
+		width:          80,
+		height:         24,
 	}
 	m.all = layout(f, m.theme.Glyphs)
 	m.visible = m.all
@@ -356,6 +361,11 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // selectedLane is the conversation under the cursor on whichever screen is up.
 func (m Model) selectedLane() (string, bool) {
 	if m.mode == spineMode && m.spine != nil {
+		if m.spine.agentOf != "" {
+			// A subagent is not a session; there is nothing to resume until it
+			// has been promoted.
+			return "", false
+		}
 		return m.spine.lane.ID, true
 	}
 	if m.cursor < len(m.visible) {
@@ -369,7 +379,7 @@ func (m Model) selectedLane() (string, bool) {
 func (m Model) copyResume() (tea.Model, tea.Cmd) {
 	lane, ok := m.selectedLane()
 	if !ok || m.resumeCmd == nil {
-		return m.withNotice("nothing to copy", true), nil
+		return m.withNotice("nothing to resume here — promote the agent first", true), nil
 	}
 	command, err := m.resumeCmd(lane)
 	if err != nil {

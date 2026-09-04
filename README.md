@@ -130,7 +130,9 @@ of its own and carry on from where it left off.
 against 363 MB here, with nine files holding 1.3 GB of it. `w` opens it as a
 size browser: heaviest first, directories weighed by what is under them, `↵` to
 descend. So you can bin one 231 MB dump and keep the rest. `↵` on a file shows
-its head, `y` copies its path, and a binary is named rather than spewed. The harness's own
+its head, `y` copies its path, and a binary is named rather than spewed.
+
+<img src="assets/frames/file.png" alt="braids: peeking at the head of a file a session wrote" width="100%"> The harness's own
 record of a job is shown and refused. `braids work --orphans` finds the sets
 whose conversation is gone.
 
@@ -139,7 +141,9 @@ whose conversation is gone.
 **Memories.** What a project has told the harness to remember, with the two
 things you cannot see from inside a session: a memory the index omits, which is
 therefore loaded by nothing, and a link pointing at a memory that is gone. `↵`
-reads it as markdown, `c` opens the conversation that wrote it. `d` deletes one
+reads it as markdown, `c` opens the conversation that wrote it.
+
+<img src="assets/frames/memory.png" alt="braids: reading a memory with its markdown rendered" width="100%"> `d` deletes one
 to the bin, `r` renames it and follows the name through every link, and `i`
 repairs the index. Each of them changes the index in the same breath as the
 file, and is refused while a session in that project is running.

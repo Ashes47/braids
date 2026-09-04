@@ -50,10 +50,8 @@ def ansi_to_html(text: str) -> str:
     of leaking escape codes into the page.
     """
     out, style, pos = [], {}, 0
-    open_span = False
 
     def push(chunk: str) -> None:
-        nonlocal open_span
         if not chunk:
             return
         css = ""
@@ -67,7 +65,6 @@ def ansi_to_html(text: str) -> str:
             css += "opacity:.62;"
         if css:
             out.append(f'<span style="{css}">{html.escape(chunk)}</span>')
-            open_span = True
         else:
             out.append(html.escape(chunk))
 
@@ -102,12 +99,10 @@ def ansi_to_html(text: str) -> str:
                     i += 2
             i += 1
     push(text[pos:])
-    del open_span
     return "".join(out)
 
 
-def frame(name: str, caption: str = "", cmd: str = "", then: str = "",
-          plain: bool = False) -> str:
+def frame(name: str, caption: str = "", cmd: str = "", then: str = "") -> str:
     """A verbatim braids screenshot, as produced by scripts/demo.py.
 
     The .ans capture keeps braids' colours; .txt is the same frame with the
@@ -116,7 +111,7 @@ def frame(name: str, caption: str = "", cmd: str = "", then: str = "",
     know and the one thing a screenshot cannot show.
     """
     coloured = FRAMES / f"{name}.ans"
-    if coloured.exists() and not plain:
+    if coloured.exists():
         body = ansi_to_html(coloured.read_text().rstrip("\n"))
     else:
         body = html.escape((FRAMES / f"{name}.txt").read_text().rstrip("\n"))
@@ -336,6 +331,8 @@ p.sub { color:var(--dim); margin-top:0; }
 figure.frame {
   margin:26px 0 0; width:min(1400px, calc(100vw - 40px));
   margin-left:50%; transform:translateX(-50%);
+  /* So the size above is worked out from this box rather than the window. */
+  container-type:inline-size;
 }
 figure.frame .shell {
   background:var(--panel); border:1px solid var(--line); border-radius:11px;
@@ -352,15 +349,21 @@ figure.frame .cmdbar b { color:var(--ink); font-weight:600; }
 figure.frame .cmdbar .then { color:var(--faint); }
 figure.frame .cmdbar kbd { font-size:11px; padding:0 5px; }
 figure.frame pre {
-  font-family:var(--mono); line-height:1.5; margin:0;
+  font-family:var(--mono); margin:0;
   padding:15px 16px; overflow-x:auto; color:var(--ink);
   -webkit-overflow-scrolling:touch;
-  /* A frame is exactly FRAME_COLS columns wide and it has to fit the box, or
-     the panel border falls off the right-hand edge. One column is 0.6em in
-     every face in --mono, so the size is derived from the width the figure
-     actually gets rather than guessed at and then clamped. The divisor carries
-     a little slack for faces that run slightly wider. */
+  /* A terminal has no gap between its rows, and braids draws boxes. At 1.5
+     the vertical rules stop touching and every panel border reads as a dashed
+     line, which is what "the screens look misaligned" turned out to mean. */
+  line-height:1.15;
+  /* A frame is 195 columns and has to fit its box, or the panel border
+     scrolls off the right. One column is 0.6em in every face in --mono, so
+     the size comes from the width the figure actually gets. The first value
+     is the fallback for browsers without container queries; the second is
+     exact, because 100cqw is this figure, which inside the docs layout is not
+     the window. */
   font-size:min(11.5px, calc((min(1400px, 100vw - 40px) - 34px) / 121));
+  font-size:min(11.5px, calc((100cqw - 34px) / 121));
 }
 @media (max-width:700px) {
   /* On a phone 195 columns cannot both fit and be legible. Pick legible and

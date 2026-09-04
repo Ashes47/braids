@@ -24,8 +24,15 @@ OUT = HERE / "docs"
 HOME = "/"
 
 DOCS_CSS = CSS + """
-/* ---- docs layout ---- */
-.docs { display:grid; grid-template-columns:216px minmax(0,1fr); gap:44px; padding:38px 0 72px; }
+/* ---- docs layout ----
+   Wider than the landing page, because a frame is 195 columns and the sidebar
+   takes 224 of the window before the article gets any. */
+.wrap.wide { max-width:1440px; }
+.docs { display:grid; grid-template-columns:224px minmax(0,1fr); gap:48px; padding:38px 0 72px; }
+/* A frame breaks out of the prose column on the landing page. Here that would
+   put it on top of the sidebar, so inside the docs it stays in its column and
+   sizes itself from that instead. */
+.docs figure.frame { width:auto; margin-left:0; transform:none; }
 .side { position:sticky; top:78px; align-self:start; max-height:calc(100vh - 100px); overflow-y:auto; }
 .side h6 {
   margin:0 0 8px; font-family:var(--mono); font-size:11px; font-weight:500;
@@ -39,6 +46,17 @@ DOCS_CSS = CSS + """
 .side .group { margin-bottom:24px; }
 .side .onthis a { font-size:13.5px; color:var(--faint); }
 .side .onthis a:hover { color:var(--ink); }
+.side .onthis a.here { color:var(--accent); border-left-color:var(--accent); }
+
+/* ---- the docs index ---- */
+.cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:18px; margin:26px 0 0; }
+.cards a {
+  border:1px solid var(--line); border-radius:11px; padding:16px 18px;
+  background:var(--panel); color:var(--ink);
+}
+.cards a:hover { border-color:var(--faint); text-decoration:none; }
+.cards a b { display:block; font-size:15.5px; margin-bottom:5px; }
+.cards a span { color:var(--dim); font-size:14px; }
 
 article h1 { font-size:clamp(26px,3.4vw,36px); margin:0 0 8px; letter-spacing:-.02em; }
 article > p.lede { font-size:17px; margin:0 0 6px; }
@@ -214,6 +232,10 @@ braids search anything --db /nope/absent.db
   lists every key that screen takes, and the glyph key next to it names every
   mark on the screen.
 </p>
+
+<h2 id="pages">Everything else</h2>
+<p class="sub">Nine more pages, in the order they make sense in.</p>
+{{INDEX_CARDS}}
 
 <h2 id="where">Where things live</h2>
 {table(["Path", "What it is", "Who owns it"], [
@@ -931,6 +953,14 @@ PAGES = [
 HEADING = re.compile(r'<h2 id="([^"]+)">(.*?)</h2>', re.S)
 
 
+def index_cards() -> str:
+    """Every page but the first, as cards on the docs home."""
+    out = ""
+    for slug, label, _, description, _ in PAGES[1:]:
+        out += f'<a href="/docs/{slug}/"><b>{label}</b><span>{description}</span></a>'
+    return f'<div class="cards">{out}</div>'
+
+
 def sidebar(active: str, body: str) -> str:
     """Every page, plus the headings of the one you are on."""
     pages = ""
@@ -960,15 +990,57 @@ def pager(index: int) -> str:
     return f'<div class="pager">{out}</div>' if out else ""
 
 
+# SPY keeps the sidebar in step with the reader. Written out rather than
+# pulled in, because a docs page that fetches a library to underline a heading
+# is a page that phones home to underline a heading.
+SPY = """
+<script>
+(function () {
+  var heads = [].slice.call(document.querySelectorAll('article h2[id]'));
+  var links = {};
+  [].slice.call(document.querySelectorAll('.onthis a')).forEach(function (a) {
+    links[a.getAttribute('href').slice(1)] = a;
+  });
+  if (!heads.length) { return; }
+  var queued = false;
+  function update() {
+    queued = false;
+    // The heading nearest above the top of the window, which is the one you
+    // are reading. The last one wins outright at the bottom of the page,
+    // where nothing new can come into view.
+    var current = heads[0].id;
+    heads.forEach(function (h) {
+      if (h.getBoundingClientRect().top <= 120) { current = h.id; }
+    });
+    if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) {
+      current = heads[heads.length - 1].id;
+    }
+    Object.keys(links).forEach(function (id) {
+      links[id].classList.toggle('here', id === current);
+    });
+  }
+  function queue() {
+    if (!queued) { queued = true; requestAnimationFrame(update); }
+  }
+  window.addEventListener('scroll', queue, { passive: true });
+  window.addEventListener('resize', queue);
+  update();
+})();
+</script>
+"""
+
+
 def build() -> None:
     for i, (slug, label, title, description, body) in enumerate(PAGES):
+        body = body.replace("{INDEX_CARDS}", index_cards())
         html_body = (
             nav(HOME, active="/docs/")
-            + '<div class="wrap"><div class="docs">'
+            + '<div class="wrap wide"><div class="docs">'
             + sidebar(slug, body)
             + f"<article>{body}{pager(i)}</article>"
             + "</div></div>"
             + footer(HOME)
+            + SPY
         )
         out = OUT / slug / "index.html" if slug else OUT / "index.html"
         out.parent.mkdir(parents=True, exist_ok=True)

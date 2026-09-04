@@ -23,7 +23,7 @@ about what it does with them.
 
 ## Reporting a vulnerability
 
-Open a GitHub issue for anything that is not exploitable — a wrong permission,
+Open a GitHub issue for anything that is not exploitable: a wrong permission,
 a path that is not validated, a claim above that turns out to be false.
 
 For anything exploitable, email the address on the commits in `git log` rather
@@ -37,7 +37,7 @@ against and does not claim to.
 
 ## Things worth knowing
 
-**`BRAIDS_SPAWN` runs through a shell.** That is the point of it — a template
+**`BRAIDS_SPAWN` runs through a shell.** That is the point of it, since a template
 is only useful if it can use shell syntax. Every value braids substitutes into
 it is shell-quoted first, because a conversation's title and directory are data
 read out of a transcript and a conversation called `x; rm -rf ~ #` must be a

@@ -7,7 +7,7 @@ a change merged is to know which of those two you are up against.
 
 ```sh
 git clone https://github.com/Ashes47/braids && cd braids
-make ci        # fmt, vet, lint, test, race, cover — the same gate CI runs
+make ci        # fmt, vet, lint, test, race, cover: the same gate CI runs
 make run       # build and open the map against your own ~/.claude
 ```
 
@@ -19,7 +19,7 @@ is green, your push is green.
 
 Some of these look like missing features and are decisions. Please read them
 before proposing one of them, and please do argue if you think a decision is
-wrong — with a case, not a patch.
+wrong, with a case rather than a patch.
 
 - **braids never talks to a model.** It arranges the conversations you have
   with a harness. No proxying, no wrapping, no protocol of its own.
@@ -30,7 +30,7 @@ wrong — with a case, not a patch.
   harness already wrote. Delete braids and you lose a view, never a
   conversation.
 - **One writer per file, always.** braids writes its own files. Where it edits
-  a harness file — the memory index — it does so atomically, keeps the mode it
+  a harness file, the memory index, it does so atomically, keeps the mode it
   found, and refuses while a session in that project is running.
 - **Deletion is recoverable.** Everything braids deletes goes to a bin with a
   manifest and a retention window.
@@ -64,6 +64,8 @@ internal/core/memory  reading and curating what a project remembers
 internal/core/…       artifacts, hooks, trash, sidecar, watch
 internal/tui          the screens
 internal/brand        the ASCII mark, so the CLI and the TUI agree on it
+scripts/              the tooling: the demo corpus, the screenshots, the PNGs
+site/                 braids.chat and its docs, generated from the frames
 ```
 
 `internal/core` knows nothing about the terminal, and nothing in `core` imports
@@ -71,12 +73,44 @@ internal/brand        the ASCII mark, so the CLI and the TUI agree on it
 with optional capability interfaces, so one that cannot branch still gets the
 map and search.
 
+## Screenshots and the site
+
+Every screenshot in the README and on braids.chat is real braids output. None
+of it is drawn by hand, because a hand-drawn frame drifts from the program the
+moment either changes, and a box whose borders do not line up is the first
+thing a reader notices.
+
+```sh
+make frames   # rebuild the captures and the PNGs (needs the binary)
+make pages    # regenerate the landing page and the docs from those captures
+make site     # both, then serve it on http://localhost:8787
+```
+
+`scripts/demo.py` writes a fake `~/.claude` under `/tmp`, indexes it, and
+captures each screen at 195 columns, which is the width where the header draws
+the facts, the glyph key, every binding and the full mark. It never reads your
+own transcripts. Frames land in `site/frames` as `.ans`, which keeps braids'
+colours, and `.txt`, which is the same frame with the escapes removed so a diff
+is readable.
+
+The map, a spine and search come from `braids --print`. The other screens are
+reached with keys, and braids does not have a flag for them, so
+`scripts/shots` presses the keys instead: it drives the same router and the
+same `View` the running program does. It is a tool, not part of the binary.
+
+`scripts/ansi2png.py` redraws a capture as a PNG for the README, because
+GitHub strips `style` attributes and will not render either ANSI or CSS.
+
+Nothing generated is committed twice: `site/index.html`, `site/docs/` and
+`site/assets/` are all built, and the Pages workflow builds them before it
+deploys.
+
 ## Adding a harness
 
 Implement `store.Source`, plus whichever of `Enricher`, `Sidechains`,
 `Brancher`, `Promoter`, `Merger`, `Tailer`, `Measurer` and `Rememberer` you can
 honestly support. braids hides what a source cannot do rather than showing a
-key that fails. Start by reading `internal/core/store/claudecode` — every
+key that fails. Start by reading `internal/core/store/claudecode`, where every
 awkward thing in it is commented with the observation that forced it.
 
 ## Reporting a bug

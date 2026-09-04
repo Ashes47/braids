@@ -6,7 +6,7 @@ fake ~/.claude, then pasted in verbatim. A hand-drawn mockup drifts from the
 program the moment either changes, and a frame whose borders do not line up is
 the first thing a reader notices.
 
-    python3 scripts/demo.py --out /tmp/braids-demo --frames site/frames --width 88
+    make frames   # recapture every screen, then redraw the README PNGs
     python3 site/build.py
 """
 

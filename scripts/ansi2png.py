@@ -75,7 +75,9 @@ def convert(ans: str) -> Image.Image:
     regular = ImageFont.truetype(FACE, SIZE, index=0)
     bold = ImageFont.truetype(FACE, SIZE, index=1)
     advance = regular.getlength("M")
-    step = round(SIZE * 1.5)
+    # No leading between rows: a terminal has none, and braids draws boxes.
+    # Any gap turns every vertical rule into a dashed line.
+    step = round(SIZE * 1.18)
 
     cols = max((len(SGR.sub("", line)) for line in lines), default=0)
     width = round(cols * advance + 2 * PAD)

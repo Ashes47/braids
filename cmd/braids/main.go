@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -216,6 +217,13 @@ func cmdMap(args []string, out *printer) error {
 		Source:    "claudecode",
 		IndexPath: dbPath,
 		LoadSpine: tui.SpineLoader(ctx, ix),
+		WorkspaceOK: func(laneID string) error {
+			lane, err := findLane(ctx, ix, laneID)
+			if err != nil {
+				return err
+			}
+			return worktreeOK(lane.Cwd)
+		},
 		LoadCompactions: func(laneID string) ([]index.CompactionRow, error) {
 			return ix.LaneCompactions(ctx, laneID)
 		},
@@ -703,6 +711,21 @@ func discardWork(ctx context.Context, ix *index.Index, bin *trash.Bin, laneID st
 // workspaceKind marks a branch that should get a git worktree of its own.
 const workspaceKind = "workspace"
 
+// worktreeOK reports whether a directory can hold a git worktree, which is what
+// a workspace branch needs. A directory that is not a repository cannot, and
+// finding that out when the branch is resumed is far too late.
+func worktreeOK(dir string) error {
+	if dir == "" {
+		return errors.New("this conversation has no working directory recorded")
+	}
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		_ = out
+		return fmt.Errorf("%s is not a git repository, so it cannot hold a worktree", dir)
+	}
+	return nil
+}
+
 func resumeCommand(ctx context.Context, ix *index.Index, kinds *sidecar.Store[string], laneID string) (string, error) {
 	lane, err := findLane(ctx, ix, laneID)
 	if err != nil {
@@ -715,7 +738,9 @@ func resumeCommand(ctx context.Context, ix *index.Index, kinds *sidecar.Store[st
 	// A workspace branch asks the harness for a worktree of its own, so two
 	// branches that both write to the repo cannot collide. braids does not
 	// create it: --worktree is the harness's own flag and its own job.
-	if kind, _ := kinds.Get(lane.ID); kind == workspaceKind {
+	// A flag that is known to fail is worse than one that is absent: if the
+	// directory stopped being a repository, ask for a plain resume.
+	if kind, _ := kinds.Get(lane.ID); kind == workspaceKind && worktreeOK(lane.Cwd) == nil {
 		command += " --worktree " + slug(lane.Title, lane.ID)
 	}
 	return command, nil

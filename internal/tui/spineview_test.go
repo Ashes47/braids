@@ -720,3 +720,45 @@ func TestBranchKindIsChosenBeforeItIsMade(t *testing.T) {
 		t.Error("the next branch should start as a thought again")
 	}
 }
+
+func TestAWorkspaceIsRefusedWhereItCannotExist(t *testing.T) {
+	m := spineModel(t, demoSegments(), nil)
+	m.branch = func(string, int, string, bool) (string, error) { return "x", nil }
+	m.workspaceOK = func(string) error {
+		return errors.New("/tmp/scratch is not a git repository, so it cannot hold a worktree")
+	}
+	m = m.openSpine()
+	m, _ = m.spineKey("b")
+	m, _ = m.spineKey("tab")
+
+	if m.spine.workspace {
+		t.Fatal("a workspace must be refused where the harness could not make one")
+	}
+	out := plain(m.renderSpine())
+	if !strings.Contains(out, "not a git repository") {
+		t.Errorf("the reason should be given:\n%s", out)
+	}
+	if !strings.Contains(out, "branching as a thought") {
+		t.Error("it should say what will happen instead")
+	}
+	if !strings.Contains(out, "as thought") {
+		t.Error("the prompt should still read as a thought")
+	}
+}
+
+func TestAWorkspaceIsAllowedWhereItCanExist(t *testing.T) {
+	m := spineModel(t, demoSegments(), nil)
+	m.branch = func(string, int, string, bool) (string, error) { return "x", nil }
+	m.workspaceOK = func(string) error { return nil }
+	m = m.openSpine()
+	m, _ = m.spineKey("b")
+	m, _ = m.spineKey("tab")
+
+	if !m.spine.workspace {
+		t.Fatal("tab should switch to a workspace in a repository")
+	}
+	// And back again without complaint.
+	if m, _ = m.spineKey("tab"); m.spine.workspace {
+		t.Error("tab should switch back")
+	}
+}

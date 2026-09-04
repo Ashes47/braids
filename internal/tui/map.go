@@ -41,6 +41,9 @@ type Options struct {
 	// LoadSpine reduces one lane to its spine. Passing it as a function keeps
 	// the views free of any dependency on the index.
 	LoadSpine func(laneID string) ([]graph.Segment, error)
+	// WorkspaceOK reports whether a conversation can take a workspace branch,
+	// explaining why not when it cannot.
+	WorkspaceOK func(laneID string) error
 	// LoadCompactions lists where a conversation was compacted.
 	LoadCompactions func(laneID string) ([]index.CompactionRow, error)
 	// LoadSubagents lists the conversations a lane spawned and collapsed into
@@ -124,6 +127,7 @@ type Model struct {
 	loadSpine      func(string) ([]graph.Segment, error)
 	loadAgents     func(string) ([]index.SubagentRow, error)
 	loadSeams      func(string) ([]index.CompactionRow, error)
+	workspaceOK    func(string) error
 	promote        func(string, string) (string, error)
 	loadAgentSpine func(string, string) ([]graph.Segment, error)
 	branch         func(string, int, string, bool) (string, error)
@@ -190,6 +194,7 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		loadSpine:      opts.LoadSpine,
 		loadAgents:     opts.LoadSubagents,
 		loadSeams:      opts.LoadCompactions,
+		workspaceOK:    opts.WorkspaceOK,
 		promote:        opts.Promote,
 		loadAgentSpine: opts.LoadAgentSpine,
 		branch:         opts.Branch,

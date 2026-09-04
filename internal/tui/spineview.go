@@ -707,7 +707,7 @@ func (m Model) namingKey(key string) Model {
 	case "enter":
 		return m.commitBranch()
 	case "tab":
-		s.workspace = !s.workspace
+		return m.toggleBranchKind()
 	default:
 		s.naming.edit(key)
 	}
@@ -741,6 +741,27 @@ func (m Model) commitBranch() Model {
 		m = m.adopt(forest)
 	}
 	m.spine.notice, m.spine.failed = notice, false
+	return m
+}
+
+// toggleBranchKind switches between a thought and a workspace, refusing a
+// workspace where the harness could not make one. Finding that out when the
+// branch is resumed, after it has already been created, is far too late.
+func (m Model) toggleBranchKind() Model {
+	s := m.spine
+	if s.workspace {
+		s.workspace = false
+		s.notice, s.failed = "", false
+		return m
+	}
+	if m.workspaceOK != nil {
+		if err := m.workspaceOK(s.lane.ID); err != nil {
+			s.notice, s.failed = err.Error()+" — branching as a thought", true
+			return m
+		}
+	}
+	s.workspace = true
+	s.notice, s.failed = "", false
 	return m
 }
 

@@ -423,6 +423,13 @@ its own job; braids records the choice and puts the flag in the resume command,
 so `y` and `o` carry it. The kind is chosen fresh each time rather than
 remembered — a workspace writes files, and that should be a decision.
 
+**A workspace is refused where one could not exist.** A worktree needs a git
+repository, and a conversation run somewhere that is not one cannot have a
+branch of that kind. Discovering that when the branch is resumed — after it has
+been created and named — is far too late, so `tab` says so and stays a thought.
+For the same reason the flag is left out of a resume command whose directory
+has stopped being a repository: a flag known to fail is worse than one absent.
+
 `r` renames a conversation on the map, pre-filled with what it is called now.
 Names live in braids' sidecar, so renaming never touches a transcript, and
 emptying the field restores whatever the harness called it.

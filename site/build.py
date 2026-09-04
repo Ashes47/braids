@@ -22,17 +22,15 @@ BODY = f"""
 
 <header><div class="wrap">
   <img class="mark" src="assets/braids-logo.png" alt="braids">
-  <h1>Conversations don't go<br>in a straight line.</h1>
+  <h1>Claude Code runs one thread.<br>Your work runs twelve.</h1>
   <p class="lede">
-    Claude Code works best on one linear thread doing one thing. You don't work
-    that way — a task forks, doubles back, and spawns three side quests.
-    <strong>braids is the map.</strong> It draws every conversation and every
-    branch as one graph, searches all of them in milliseconds, and turns any
-    message into the start of a new conversation.
+    braids draws every conversation you have had, and every branch of it, as one
+    graph. It searches all of them in a few milliseconds. Put the cursor on any
+    message and start a new conversation from exactly there.
   </p>
   <p class="lede">
-    It never talks to a model. It arranges the conversations you have with one.
-    <em>Local, open source, nothing hosted.</em>
+    braids never talks to a model. It arranges the conversations you have with
+    one. <em>Local, open source, nothing hosted.</em>
   </p>
   <div class="cta">
     <div class="install">
@@ -44,65 +42,85 @@ BODY = f"""
     <a class="btn" href="https://github.com/Ashes47/braids">Star on GitHub</a>
   </div>
   <p class="note">
-    One binary, no daemon, no configuration file. Or
-    <code>go install github.com/Ashes47/braids/cmd/braids@latest</code> if you
-    have Go.
+    One binary. No daemon, no config file, nothing to sign up for. Prefer Go?
+    <code>go install github.com/Ashes47/braids/cmd/braids@latest</code>
   </p>
 </div></header>
 
 <section id="what"><div class="wrap">
-  <h2><span class="kicker">The map</span>Every conversation, and where each one came from</h2>
+  <h2><span class="kicker">The map</span>Every conversation, and where it came from</h2>
   <p class="sub">
-    Branches sit under the conversation they were cut from, with the turn they
-    left at. The state column is the part you actually scan: who is owed
-    something, and by whom.
+    Branches sit under the conversation they were cut from, tagged with the turn
+    they left at. The column you actually scan is the last one: who is waiting
+    on you, and what is still running.
   </p>
-  {frame("map", "Real output. Every screenshot on this page is produced by scripts/demo.py against a fake ~/.claude, not drawn by hand.")}
+  {frame("map", cmd="braids", caption="A real frame at 195 columns, colours and all. Captured by scripts/demo.py against a fake ~/.claude, never drawn by hand.")}
+  <ul class="plain">
+    <li><strong>your turn</strong> means the session asked you something and
+      stopped. <kbd>n</kbd> jumps to the next one.</li>
+    <li><strong>The indent</strong> is lineage. <code>t14</code> on a branch is
+      the turn of the parent it was cut at.</li>
+    <li><strong>The state column</strong> is the one you scan. Four
+      conversations here are waiting on you and one is still working.</li>
+  </ul>
 </div></section>
 
 <section><div class="wrap">
-  <h2><span class="kicker">The spine</span>A long conversation, reduced to what happened in it</h2>
+  <h2><span class="kicker">The spine</span>A 25,000 turn conversation in a few hundred rows</h2>
   <p class="sub">
-    Not every line — the landmarks. What you asked, what came back, where a tool
-    call failed, where the context was compacted, and where each branch left.
-    A 25,000-turn conversation becomes a few hundred rows you can actually read.
+    braids keeps the landmarks and collapses the rest: what you asked, what came
+    back, where a tool call failed, where the context got compacted, and where
+    every branch left. Long conversations become readable.
   </p>
-  {frame("spine", "⋯ is a run of turns nothing interesting happened in. ⚠ is a failed tool call. ← t14 is where a branch left.")}
+  {frame("spine", cmd="braids", then="<kbd>↵</kbd> on a conversation")}
+  <ul class="plain">
+    <li><code>⋯</code> is a run of turns where nothing notable happened. It
+      counts them so you know what you are skipping.</li>
+    <li><code>⚠</code> is a tool call that failed. <kbd>n</kbd> walks straight
+      down the failures.</li>
+    <li><code>← t14</code> is a branch leaving. Press <kbd>↵</kbd> to follow it.</li>
+  </ul>
   <p>
-    Put the cursor on any turn and press <kbd>b</kbd>. braids writes a new
-    session file holding that turn's ancestry and hands you the
-    <code>claude --resume</code> command. Add a workspace and the branch gets a
-    git worktree of its own, so two branches can edit the same file without
-    touching each other.
+    Put the cursor on a turn and press <kbd>b</kbd>. braids writes a new session
+    file holding that turn's ancestry, then hands you the
+    <code>claude --resume</code> command. Ask for a workspace and the branch
+    gets its own git worktree, so two branches can edit the same file and never
+    collide.
   </p>
 </div></section>
 
 <section><div class="wrap">
-  <h2><span class="kicker">Search</span>One query across everything you have</h2>
+  <h2><span class="kicker">Search</span>One field over everything you have</h2>
   <p class="sub">
     Every message and tool call, every memory a project keeps, and the name of
-    every file a session left on disk. Each result says which it is, and
-    <kbd>↵</kbd> opens the screen that can act on it.
+    every file a session left on disk. Each hit says which kind it is. Press
+    <kbd>↵</kbd> and braids opens the screen that can do something about it.
   </p>
-  {frame("search", "Ranked per kind and merged, because a filename is three words against a turn's several hundred — ranked together, filenames bury every conversation.")}
+  {frame("search", cmd="braids", then="<kbd>/</kbd> and a word")}
+  <p class="note">
+    Each kind is ranked on its own and then merged. Ranked together, a
+    three-word filename beats a turn of several hundred words every time, and
+    filenames bury the conversations you were looking for.
+  </p>
 </div></section>
 
 <section id="local"><div class="wrap">
-  <h2><span class="kicker">Local</span>It reads your transcripts. So this matters.</h2>
+  <h2><span class="kicker">Local</span>It reads your transcripts, so this matters</h2>
   <ul class="plain">
     <li><strong>No network calls.</strong> There is no HTTP client and no
-      listener in it. <code>go list -deps ./cmd/braids | grep net/http</code>
-      comes back empty — check it yourself.</li>
-    <li><strong>Nothing leaves your machine.</strong> The index is a SQLite file
-      at <code>~/.braids/index.db</code>.</li>
+      listener in it. Run
+      <code>go list -deps ./cmd/braids | grep net/http</code> and see for
+      yourself.</li>
+    <li><strong>Nothing leaves the machine.</strong> The index is one SQLite
+      file at <code>~/.braids/index.db</code>.</li>
     <li><strong>What it writes stays yours.</strong> <code>~/.braids</code> is
       <code>0700</code> and the index is <code>0600</code>, because it holds the
       full text of every message it has read.</li>
     <li><strong>It never writes to a transcript the harness owns.</strong>
-      Branching writes a new file; the source is opened read-only, and a test
-      hashes it before and after.</li>
-    <li><strong>Delete braids and you lose a view, never a conversation.</strong>
-      Everything is derived from <code>~/.claude</code>.</li>
+      Branching writes a new file. The source is opened read only, and a test
+      hashes it before and after to prove it.</li>
+    <li><strong>Delete braids and you lose a view, not a conversation.</strong>
+      All of it is derived from <code>~/.claude</code>.</li>
   </ul>
 </div></section>
 
@@ -111,57 +129,59 @@ BODY = f"""
   <div class="cols">
     <div class="card">
       <h4>Work products</h4>
-      <p>A session's scratch usually dwarfs its transcript — 3.3&nbsp;GB against
-      360&nbsp;MB on one machine. <kbd>w</kbd> opens it as a size browser,
-      heaviest first, so you can bin one 231&nbsp;MB dump and keep the rest.</p>
+      <p>A session's scratch files usually dwarf its transcript. On one machine
+      it was 3.3&nbsp;GB against 360&nbsp;MB. <kbd>w</kbd> opens it heaviest
+      first, so you can bin the 231&nbsp;MB dump and keep everything else.</p>
     </div>
     <div class="card">
       <h4>Memories</h4>
-      <p>What a project told the harness to remember, plus the two things you
-      cannot see from inside a session: a memory the index omits, so nothing
-      loads it, and a link pointing at one that is gone.</p>
+      <p>What a project told the harness to remember, with the two problems you
+      cannot see from inside a session: a memory missing from the index, so
+      nothing ever loads it, and a link pointing at one that was never
+      written.</p>
     </div>
     <div class="card">
       <h4>Merge and promote</h4>
-      <p>Join a branch back as a new conversation, spliced from the real turns of
-      both — refused when one already contains the other. A subagent's
-      transcript can become a conversation of its own.</p>
+      <p>Bring a branch back as a new conversation, spliced from the real turns
+      of both. braids refuses when one already contains the other. A subagent's
+      transcript can graduate into a conversation of its own.</p>
     </div>
     <div class="card">
-      <h4>A recoverable bin</h4>
-      <p>Everything braids deletes moves aside with a manifest and a 14-day
-      retention. Being wrong about a deletion costs a keystroke.</p>
+      <h4>A bin you can undo</h4>
+      <p>Everything braids deletes moves aside with a manifest and sits there
+      for 14 days. Press <kbd>u</kbd> to get it back.</p>
     </div>
     <div class="card">
-      <h4>Hooks, opt in</h4>
-      <p>Files cannot tell a session that is running from one waiting on your
-      approval. One hook can. It merges with whatever you already have, and
-      takes back only what it added.</p>
+      <h4>Hooks, if you want them</h4>
+      <p>Files cannot tell a running session apart from one waiting on your
+      approval. One hook can. It merges with whatever hooks you already have,
+      and removing it takes back only what it added.</p>
     </div>
     <div class="card">
-      <h4>Usable by an agent</h4>
-      <p>Every command that reports something takes <code>--json</code>, so
-      Claude Code can search its own past conversations and branch from the turn
-      it finds.</p>
+      <h4>Agents can drive it</h4>
+      <p>Every command that reports something takes <code>--json</code> with
+      whole IDs, so Claude Code can search its own past conversations and branch
+      from the turn it finds.</p>
     </div>
   </div>
 </div></section>
 
 <section><div class="wrap">
-  <h2><span class="kicker">Numbers</span>Measured, on one laptop, against a real corpus</h2>
-  <p class="sub">28 conversations, ~62,000 messages, ~360&nbsp;MB of transcripts.
-  Rounded, because a corpus you are still working in never sits still.</p>
+  <h2><span class="kicker">Numbers</span>Measured on one laptop, against a real corpus</h2>
+  <p class="sub">28 conversations, about 62,000 messages, about 360&nbsp;MB of
+  transcripts. Rounded, because a corpus you are still working in will not sit
+  still.</p>
   <table>
     <tr><th>Operation</th><th>Cost</th></tr>
-    <tr><td>First index, from nothing</td><td>~8 s</td></tr>
-    <tr><td>Re-index, a turn added to a 145 MB conversation</td><td>~40 ms</td></tr>
-    <tr><td>Re-index, nothing changed</td><td>under 1 ms</td></tr>
-    <tr><td>Search, across ~62,000 indexed units</td><td>1–6 ms</td></tr>
-    <tr><td>Index on disk</td><td>~190 MB</td></tr>
+    <tr><td>First index, from nothing</td><td>about 8 s</td></tr>
+    <tr><td>Re-index after a turn lands in a 145 MB conversation</td><td>about 40 ms</td></tr>
+    <tr><td>Re-index when nothing changed</td><td>under 1 ms</td></tr>
+    <tr><td>Search across about 62,000 indexed units</td><td>1 to 6 ms</td></tr>
+    <tr><td>Index on disk</td><td>about 190 MB</td></tr>
   </table>
   <p class="note">
-    The last row is the honest cost: the index is roughly half the size of the
-    transcripts, because searching text means storing it again.
+    That last row is the honest cost. The index runs about half the size of the
+    transcripts, because searching text means keeping a copy of it.
   </p>
 </div></section>
 
@@ -174,7 +194,7 @@ BODY = f"""
     <tr><td>braids search QUERY</td><td>search conversations, memories and work-product names</td></tr>
     <tr><td>braids lanes</td><td>list indexed conversations</td></tr>
     <tr><td>braids branch --lane ID --at TURN</td><td>cut a new conversation at that turn</td></tr>
-    <tr><td>braids merge --lane ID --from ID</td><td>join a branch back, as a new conversation</td></tr>
+    <tr><td>braids merge --lane ID --from ID</td><td>bring a branch back, as a new conversation</td></tr>
     <tr><td>braids promote --lane ID --agent ID</td><td>turn a subagent into its own conversation</td></tr>
     <tr><td>braids agents --lane ID</td><td>list the subagents a conversation spawned</td></tr>
     <tr><td>braids work --lane ID</td><td>browse what a session wrote to disk</td></tr>
@@ -182,9 +202,9 @@ BODY = f"""
     <tr><td>braids hooks --install</td><td>let sessions report when they block</td></tr>
   </table>
   <p class="note">
-    Every command takes <code>--help</code> for its own flags and
-    <code>--json</code> if it reports something. A mistyped one names the command
-    you meant.
+    Every command takes <code>--help</code> for its own flags, and
+    <code>--json</code> if it reports anything. Mistype one and braids names the
+    command you probably meant.
   </p>
 </div></section>
 
@@ -192,18 +212,18 @@ BODY = f"""
   <h2><span class="kicker">If it is useful</span>Star the repo</h2>
   <p class="sub">
     braids is one person's tool, made public because the problem is not one
-    person's. If it saves you a terminal, a star is how the next person finds
-    it — and an issue is how it gets better.
+    person's. A star is how the next person finds it. An issue is how it gets
+    better.
   </p>
   <div class="cta">
-    <a class="btn primary" href="https://github.com/Ashes47/braids">⭐ Star braids on GitHub</a>
+    <a class="btn primary" href="https://github.com/Ashes47/braids">★ Star braids on GitHub</a>
     <a class="btn" href="https://github.com/Ashes47/braids/issues/new/choose">Open an issue</a>
   </div>
 </div></section>
 
-<section><div class="wrap">
-  <h2><span class="kicker">Install</span>One binary</h2>
-<pre class="sh"><span class="c"># works out the build for your machine and verifies it</span>
+<section id="install"><div class="wrap">
+  <h2><span class="kicker">Install</span>One binary, and one way out</h2>
+<pre class="sh"><span class="c"># picks the build for your machine and checks it against the published sums</span>
 curl -fsSL https://braids.chat/install.sh | sh
 
 <span class="c"># or with Go</span>
@@ -217,9 +237,17 @@ make install
 braids index   <span class="c"># read every transcript under ~/.claude</span>
 braids         <span class="c"># open the map</span>
 </pre>
+  <h3>Uninstalling</h3>
+<pre class="sh"><span class="c"># take the hook back out of ~/.claude/settings.json, if you added it</span>
+braids hooks --remove
+
+<span class="c"># then the binary and the index</span>
+rm "$(command -v braids)"
+rm -rf ~/.braids
+</pre>
   <p class="note">
-    Nothing is a command you have to remember: the header of every screen lists
-    all of its keys.
+    That is all of it. Your conversations live in <code>~/.claude</code> and are
+    never touched, so removing braids costs you the map and nothing else.
   </p>
 </div></section>
 
@@ -237,13 +265,13 @@ function copyCmd(button) {{
 """
 
 PAGE = page(
-    title="braids — branch your Claude Code conversations",
+    title="braids: branch your Claude Code conversations",
     description="braids draws every Claude Code conversation and every branch as one graph, searches all of them in milliseconds, and turns any message into the start of a new conversation. Local, open source, nothing hosted.",
-    og_title="braids — conversations don't go in a straight line",
+    og_title="braids: conversations don't go in a straight line",
     og_description="A terminal map of every Claude Code conversation and branch. Search all of them in milliseconds. Fork a new conversation from any message. Local, open source, nothing hosted.",
     body=BODY,
     css=CSS,
 )
 
 (HERE / "index.html").write_text(PAGE)
-print("wrote site/index.html —", len(PAGE), "bytes")
+print("wrote site/index.html:", len(PAGE), "bytes")

@@ -1,23 +1,20 @@
- Query:    lock                                                 <↵>     open the result
- Scope:    every conversation                                   <tab>   change scope
- Hits:     9                                                    <↑ / ↓> down / up
- Took:     325µs                                                <esc>   back
-╭─ Search(everywhere)[9] ──────────────────────────────────────────────────────────────╮
-│ TYPE   WHERE                     TURN KIND        MATCH                              │
-│ convo  index-contention            t2 Bash        {"command": "counting [lock] waits…│
-│ memory lock-scope-rule                            [lock]-scope-rule A [lock] must no…│
-│ work   tmp/lock-waits-by-sha…                     tmp/[lock]-waits-by-shard.tsv      │
-│ convo  checkout-flow               t4 Grep        {"command": "grep for the [lock] a…│
-│ memory import-nulls                               …Related: [[[lock]-scope-rule]].   │
-│ convo  checkout-flow               t8 text        the [lock] is held across a networ…│
-│ convo  try-option-c                t2 Edit        {"command": "moving the [lock] and…│
-│ convo  checkout-flow               t2 Read        {"command": "reading the handler a…│
-│ convo  try-option-c                t1 text        try option c: move the [lock] insi…│
-│                                                                                      │
-│                                                                                      │
-│                                                                                      │
-│                                                                                      │
-│                                                                                      │
-│                                                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────╯
+ Query:    lock                  <↵>     open the result                                                                                     ___.                          __        .___         
+ Scope:    every conversation    <tab>   change scope                                                                                        \_ |__   ______     _____    |__|    __| _/    ______
+ Hits:     9                     <↑ / ↓> down / up                                                                                            | __ \  \_  __ \   \__  \    |     / __ |    /  ___/
+ Took:     271µs                 <esc>   back                                                                                                 | \_\ \  |  | \/    / __ \_  |    / /_/ |    \___  \
+                                                                                                                                              |___  /  |__|      (____  / |__|  \____ |   /____  /
+                                                                                                                                                  \/                  \/             \/        \/ 
+
+╭─ Search(everywhere)[9] ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ TYPE   WHERE                     TURN KIND        MATCH                                                                                                                                         │
+│ convo  Two writers contendin…      t2 Bash        {"command": "counting [lock] waits per shard"}                                                                                                │
+│ memory lock-scope-rule                            [lock]-scope-rule A [lock] must not span a network call. This…                                                                                │
+│ work   tmp/lock-waits-by-sha…                     tmp/[lock]-waits-by-shard.tsv                                                                                                                 │
+│ convo  Checkout stalls at 80…      t4 Grep        {"command": "grep for the [lock] across the service"}                                                                                         │
+│ memory import-nulls                               …Related: [[[lock]-scope-rule]].                                                                                                              │
+│ convo  Checkout stalls at 80…      t8 text        the [lock] is held across a network call                                                                                                      │
+│ convo  Option C: move the lo…      t2 Edit        {"command": "moving the [lock] and narrowing its scope"}                                                                                      │
+│ convo  Checkout stalls at 80…      t2 Read        {"command": "reading the handler and the [lock] it takes"}                                                                                    │
+│ convo  Option C: move the lo…      t1 text        try option c: move the [lock] inside the tax client                                                                                           │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
  /lock▏  ↵ open · tab scope · esc back

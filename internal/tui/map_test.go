@@ -940,6 +940,45 @@ func TestMarkSizeFollowsWidth(t *testing.T) {
 	}
 }
 
+// Once a terminal is wide enough to draw the mark, every wider terminal draws
+// it too.
+//
+// This asserts on the drawn header rather than on the plan, which is the only
+// way it catches what it is here for: the plan priced the mark at logoGap while
+// the drawing spent factsGap plus slack on it, so across a five-column band
+// the plan reserved room the drawing could not use and placed no mark at all.
+// Widening a 215-column terminal to 220 lost the logo, and the three tests
+// above all passed throughout, because p.logo was set the whole time.
+func TestMarkOnceDrawnSurvivesEveryWiderTerminal(t *testing.T) {
+	lanes := []index.LaneInfo{laneInfo("root", "main work", "app", 100, time.Hour)}
+	f := forestOf(lanes, nil)
+	rank := func(header string) int {
+		switch {
+		case strings.Contains(header, strings.TrimSpace(brand.Full()[4])):
+			return 2
+		case strings.Contains(header, strings.TrimSpace(brand.Small()[4])):
+			return 1
+		default:
+			return 0
+		}
+	}
+	widest, at := 0, 0
+	for width := 60; width <= 300; width++ {
+		m := NewModel(f, Options{ASCII: true, Source: "claudecode", IndexPath: "~/.braids/index.db"})
+		m.now = func() time.Time { return now }
+		m.width, m.height = width, 30
+		got := rank(plain(m.info()))
+		if got < widest {
+			t.Fatalf("width %d draws mark rank %d, but %d columns already drew rank %d",
+				width, got, at, widest)
+		}
+		widest, at = got, width
+	}
+	if widest != 2 {
+		t.Errorf("no width up to 300 drew the full mark; widest drawn was rank %d", widest)
+	}
+}
+
 // The mark is decoration and priced below both legends: it may never cost the
 // glyph key, which names marks that are on the screen right now.
 func TestMarkNeverCostsTheGlyphKey(t *testing.T) {

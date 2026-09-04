@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import subprocess
 import time
 import datetime as dt
@@ -32,7 +33,7 @@ STORIES = {
         ("you", "which network call", None),
         ("claude", "listing the calls inside the critical section", "Grep"),
         ("claude", "it waits on the tax service, median 40ms", "Bash"),
-        ("claude", "tax service timed out — no route to host", "Bash"),
+        ("claude", "tax service timed out, no route to host", "Bash"),
         ("you", "skip the tax call and see if the stall goes", None),
         ("claude", "patching the handler to defer the tax lookup", "Edit"),
         ("claude", "rerunning the load test", "Bash"),
@@ -74,18 +75,33 @@ STORIES = {
     ],
 }
 
-# id, title, age in minutes, (parent, forked at turn), whether it ends owing you
+# id, story, the title the harness gave it, age in minutes, (parent, forked at
+# turn), whether it ends owing you an answer.
+#
+# Titles are sentences because that is what Claude Code writes. Short slugs
+# left the map with a gutter down the middle and made every screenshot look
+# emptier than the real thing.
 LANES = [
-    ("a1b2c3d4-0000-4000-8000-000000000001", "checkout-flow", 8, None, True),
-    ("b2c3d4e5-0000-4000-8000-000000000002", "try-option-c", 3, ("a1b2c3d4-0000-4000-8000-000000000001", 14), False),
-    ("c3d4e5f6-0000-4000-8000-000000000003", "cache-gate-probe", 190, ("b2c3d4e5-0000-4000-8000-000000000002", 3), True),
-    ("d4e5f6a7-0000-4000-8000-000000000004", "blobstore-density", 2880, ("a1b2c3d4-0000-4000-8000-000000000001", 8), False),
-    ("e5f6a7b8-0000-4000-8000-000000000005", "index-contention", 20160, ("a1b2c3d4-0000-4000-8000-000000000001", 6), False),
-    ("f6a7b8c9-0000-4000-8000-000000000006", "import-pipeline", 7200, None, True),
+    ("a1b2c3d4-0000-4000-8000-000000000001", "checkout-flow",
+     "Checkout stalls at 80% under load, then recovers on its own", 8, None, True),
+    ("b2c3d4e5-0000-4000-8000-000000000002", "try-option-c",
+     "Option C: move the lock inside the tax client and re-run the load test", 3,
+     ("a1b2c3d4-0000-4000-8000-000000000001", 14), False),
+    ("c3d4e5f6-0000-4000-8000-000000000003", "cache-gate-probe",
+     "Is the cache gate even open in staging, or has it been closed all along", 190,
+     ("b2c3d4e5-0000-4000-8000-000000000002", 3), True),
+    ("d4e5f6a7-0000-4000-8000-000000000004", "blobstore-density",
+     "Blobstore is doing 11 KiB reads per object instead of batching them", 2880,
+     ("a1b2c3d4-0000-4000-8000-000000000001", 8), False),
+    ("e5f6a7b8-0000-4000-8000-000000000005", "index-contention",
+     "Two writers contending on the same shard index, 80% of the waits", 20160,
+     ("a1b2c3d4-0000-4000-8000-000000000001", 6), False),
+    ("f6a7b8c9-0000-4000-8000-000000000006", "import-pipeline",
+     "Nightly import drops rows without logging any of them", 7200, None, True),
 ]
 
 MEMORIES = {
-    "lock-scope-rule": ("project", "A lock must not span a network call — this bit us in checkout",
+    "lock-scope-rule": ("project", "A lock must not span a network call. This bit us in checkout",
                         "The checkout handler held its lock across the tax service call, so a 40ms\n"
                         "median turned into a stall at 200 concurrent carts. The rule: **narrow the\n"
                         "lock to the state it protects**, and let the remote call happen outside it.\n"
@@ -94,7 +110,7 @@ MEMORIES = {
                             "Median 40ms, p99 610ms, and it times out rather than erroring when the\n"
                             "route is down. Anything that waits on it synchronously inherits that p99.\n"),
     "import-nulls": ("project", "The nightly import drops rows with a null in a not-null column",
-                     "Fourteen rows of 1,412 on the night we looked. It does not log them — the\n"
+                     "Fourteen rows of 1,412 on the night we looked. It does not log them. The\n"
                      "insert fails per row and the batch carries on. Related: [[lock-scope-rule]].\n"),
     "working-style": ("feedback", "Read the code before claiming what it does",
                       "Corrected twice for asserting behaviour from a symbol's existence. Verify\n"
@@ -117,8 +133,8 @@ def write_corpus(out: pathlib.Path) -> None:
     project.mkdir(parents=True, exist_ok=True)
     now = dt.datetime(2026, 9, 4, 12, 0, tzinfo=dt.timezone.utc)
 
-    for sid, title, age, parent, owes in LANES:
-        story = STORIES[title]
+    for sid, story_key, title, age, parent, owes in LANES:
+        story = STORIES[story_key]
         start = now - dt.timedelta(minutes=age + len(story))
         lines = [json.dumps({"type": "ai-title", "aiTitle": title, "sessionId": sid})]
         prev = None
@@ -172,7 +188,7 @@ def write_corpus(out: pathlib.Path) -> None:
         # working-style is deliberately left out of the index, so the memory
         # screen has the failure it exists to show.
         if name != "working-style":
-            index.append(f"- [{name.replace('-', ' ').capitalize()}]({name}.md) — {description}")
+            index.append(f"- [{name.replace('-', ' ').capitalize()}]({name}.md): {description}")
     (memory / "MEMORY.md").write_text("\n".join(index) + "\n")
 
     for rel, size in ARTIFACTS.items():
@@ -181,7 +197,7 @@ def write_corpus(out: pathlib.Path) -> None:
         path.write_bytes(b"{}\n" * (size // 3))
     (out / "jobs" / LANES[0][0][:8] / "state.json").write_text('{"state":"working"}\n')
 
-    origins = {sid: {"Parent": p[0], "ForkSeq": p[1]} for sid, _, _, p, _ in LANES if p}
+    origins = {sid: {"Parent": p[0], "ForkSeq": p[1]} for sid, _, _, _, p, _ in LANES if p}
     braids = out / "braids"
     braids.mkdir(exist_ok=True)
     (braids / "origins.json").write_text(json.dumps(origins, indent=1))
@@ -190,7 +206,7 @@ def write_corpus(out: pathlib.Path) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True, help="where to build the fake ~/.claude")
-    ap.add_argument("--frames", help="write the screenshots here as .txt")
+    ap.add_argument("--frames", help="write the screenshots here as .ans and .txt")
     ap.add_argument("--width", type=int, default=78)
     ap.add_argument("--braids", default="braids", help="the binary to run")
     args = ap.parse_args()
@@ -205,28 +221,60 @@ def main() -> None:
                    check=True, capture_output=True)
 
     shots = {
-        "map": [],
-        "spine": ["--lane", LANES[0][0][:8]],
-        "search": ["--query", "lock"],
+        "map": (18, []),
+        "spine": (24, ["--lane", LANES[0][0][:8]]),
+        "search": (20, ["--query", "lock"]),
     }
-    for name, extra in shots.items():
+    for name, (height, extra) in shots.items():
         frame = subprocess.run(
-            [args.braids, "map", "--print", "--width", str(args.width), "--db", str(db)] + extra,
+            [args.braids, "map", "--print", "--width", str(args.width),
+             "--height", str(height), "--db", str(db)] + extra,
             check=True, capture_output=True, text=True).stdout
-        frame = strip(frame)
+        frame = sanitize(frame, str(db))
         if args.frames:
             target = pathlib.Path(args.frames).expanduser()
             target.mkdir(parents=True, exist_ok=True)
-            (target / f"{name}.txt").write_text(frame + "\n")
+            # .ans keeps braids' own colours, for the site. .txt is the same
+            # frame with the escapes taken out, for anywhere that cannot show
+            # them: a README, a plain-text paste.
+            (target / f"{name}.ans").write_text(frame + "\n")
+            (target / f"{name}.txt").write_text(plain(frame) + "\n")
         print(f"=== {name} ===\n{frame}\n")
 
 
-def strip(frame: str) -> str:
-    import re
-    frame = re.sub(r"\x1b\[[0-9;]*m", "", frame)
-    frame = re.sub(r"^ Index:.*$", " Index:          ~/.braids/index.db", frame, flags=re.M)
-    kept = [line.rstrip() for line in frame.split("\n")
-            if line.strip() and not re.match(r"^ [0-9a-f]{8}-", line)]
+SGR = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def plain(frame: str) -> str:
+    return SGR.sub("", frame)
+
+
+def sanitize(frame: str, db: str) -> str:
+    """Make a captured frame safe to publish, without disturbing its layout.
+
+    Two things have to go: the index path, which is wherever the demo built it,
+    and the rows of raw session IDs that the map prints for a lane it has no
+    title for. Both are done on the visible text while the escape sequences are
+    left where they are, and the index path is padded back to the width it had,
+    because the header lays the facts and the key hints out on one line. An
+    earlier version replaced that whole line and quietly deleted the
+    `open spine` hint from every screenshot on the site.
+    """
+    shown = "~/.braids/index.db"
+    if db in frame:
+        frame = frame.replace(db, shown + " " * max(0, len(db) - len(shown)))
+    kept = []
+    for line in frame.split("\n"):
+        bare = plain(line)
+        # The footer prints the selected lane's whole session ID. A made-up one
+        # is the single line of a screenshot that looks made up, so it goes.
+        if re.match(r"^ [0-9a-f]{8}-", bare):
+            continue
+        kept.append(line.rstrip())
+    # Interior blank lines are part of the layout and stay. Only the trailing
+    # ones, left by the footer going, come off.
+    while kept and not plain(kept[-1]).strip():
+        kept.pop()
     return "\n".join(kept)
 
 

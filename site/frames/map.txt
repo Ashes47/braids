@@ -1,22 +1,17 @@
- Source:         claudecode                                <j/k>   down / up
- Index:          ~/.braids/index.db
- Lanes:          6                                         </>     search
- Waiting on you: 4                                         <f>     filter list
- Hooks:          reporting                                 <a>     toggle archive
-                                                           <r>     rename
-                                                           <q>     quit
-╭─ Conversations(all)[6] ──────────────────────────────────────────────────────────────╮
-│  CONVERSATION                   FORK    TURNS      SIZE       WORK    AGE      STATUS│
-│ ● checkout-flow                            24      6 kB    1004 kB     8m  unanswered│
-│ ├─● try-option-c               ← t14        6      2 kB                3m   your turn│
-│ │  └─● cache-gate-probe         ← t3        4      1 kB                3h   your turn│
-│ ├─● blobstore-density           ← t8        4      1 kB                2d   your turn│
-│ └─● index-contention            ← t6        3     814 B               14d  unanswered│
-│ ● import-pipeline                           8      2 kB                5d   your turn│
-│                                                                                      │
-│                                                                                      │
-│                                                                                      │
-│                                                                                      │
-│                                                                                      │
-│                                                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────╯
+ Source:         claudecode                          ◆    stopped, needs you   <j/k>   down / up            <n / N> next / prev waiting      ___.                          __        .___         
+ Index:          ~/.braids/index.db                  ●    working              <↵>     open spine           <d>     delete                   \_ |__   ______     _____    |__|    __| _/    ______
+ Lanes:          6                                   ●    an open loop         </>     search               <w / D> work / delete all         | __ \  \_  __ \   \__  \    |     / __ |    /  ___/
+ Waiting on you: 4                                   ●    idle                 <f>     filter list          <u>     deleted / recover         | \_\ \  |  | \/    / __ \_  |    / /_/ |    \___  \
+ Hooks:          reporting                           ○    archived             <a>     toggle archive       <M>     memories                  |___  /  |__|      (____  / |__|  \____ |   /____  /
+                                                     ├─   branched from above  <r>     rename               <A>     show archived                 \/                  \/             \/        \/ 
+                                                                               <q>     quit                 <y / o> copy / open terminal
+
+╭─ Conversations(all)[6] ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  CONVERSATION                                                                                                                              FORK    TURNS      SIZE       WORK    AGE      STATUS│
+│ ● Checkout stalls at 80% under load, then recovers on its own                                                                                         24      6 kB    1004 kB     8m  unanswered│
+│ ├─● Option C: move the lock inside the tax client and re-run the load test                                                                ← t14        6      2 kB                3m   your turn│
+│ │  └─● Is the cache gate even open in staging, or has it been closed all along                                                             ← t3        4      1 kB                3h   your turn│
+│ ├─● Blobstore is doing 11 KiB reads per object instead of batching them                                                                    ← t8        4      1 kB                2d   your turn│
+│ └─● Two writers contending on the same shard index, 80% of the waits                                                                       ← t6        3     862 B               14d  unanswered│
+│ ● Nightly import drops rows without logging any of them                                                                                                8      2 kB                5d   your turn│
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

@@ -18,11 +18,116 @@ HERE = pathlib.Path(__file__).parent
 FRAMES = HERE / "frames"
 
 
-def frame(name: str, caption: str = "") -> str:
-    """A verbatim braids screenshot, as produced by scripts/demo.py."""
-    text = html.escape((FRAMES / f"{name}.txt").read_text().rstrip("\n"))
+SGR = re.compile(r"\x1b\[([0-9;]*)m")
+
+
+def _xterm(n: int) -> str:
+    """One of the 256 palette colours, as a hex string."""
+    if n < 16:
+        base = [(0, 0, 0), (205, 0, 0), (0, 205, 0), (205, 205, 0), (0, 0, 238),
+                (205, 0, 205), (0, 205, 205), (229, 229, 229), (127, 127, 127),
+                (255, 0, 0), (0, 255, 0), (255, 255, 0), (92, 92, 255),
+                (255, 0, 255), (0, 255, 255), (255, 255, 255)][n]
+        return "#%02x%02x%02x" % base
+    if n < 232:
+        n -= 16
+        steps = [0, 95, 135, 175, 215, 255]
+        return "#%02x%02x%02x" % (steps[n // 36], steps[n % 36 // 6], steps[n % 6])
+    grey = 8 + 10 * (n - 232)
+    return "#%02x%02x%02x" % (grey, grey, grey)
+
+
+def ansi_to_html(text: str) -> str:
+    """Turn a captured terminal frame into HTML, colours and all.
+
+    braids writes truecolor even into a pipe, so a screenshot keeps the exact
+    palette the program chose. Rendering those bytes rather than a stripped
+    copy is the difference between showing the product and describing it.
+
+    Only the sequences braids emits are handled: reset, bold, faint, and
+    24-bit or 256-colour foreground and background. Anything else is dropped
+    rather than guessed at, so an unrecognised sequence loses a colour instead
+    of leaking escape codes into the page.
+    """
+    out, style, pos = [], {}, 0
+    open_span = False
+
+    def push(chunk: str) -> None:
+        nonlocal open_span
+        if not chunk:
+            return
+        css = ""
+        if "fg" in style:
+            css += f"color:{style['fg']};"
+        if "bg" in style:
+            css += f"background:{style['bg']};"
+        if style.get("bold"):
+            css += "font-weight:600;"
+        if style.get("faint"):
+            css += "opacity:.62;"
+        if css:
+            out.append(f'<span style="{css}">{html.escape(chunk)}</span>')
+            open_span = True
+        else:
+            out.append(html.escape(chunk))
+
+    for m in SGR.finditer(text):
+        push(text[pos:m.start()])
+        pos = m.end()
+        params = [int(p) for p in m.group(1).split(";") if p != ""] or [0]
+        i = 0
+        while i < len(params):
+            p = params[i]
+            if p == 0:
+                style = {}
+            elif p == 1:
+                style["bold"] = True
+            elif p == 2:
+                style["faint"] = True
+            elif p == 22:
+                style.pop("bold", None)
+                style.pop("faint", None)
+            elif p == 39:
+                style.pop("fg", None)
+            elif p == 49:
+                style.pop("bg", None)
+            elif p in (38, 48) and i + 1 < len(params):
+                where = "fg" if p == 38 else "bg"
+                if params[i + 1] == 2 and i + 4 < len(params):
+                    r, g, b = params[i + 2:i + 5]
+                    style[where] = "#%02x%02x%02x" % (r, g, b)
+                    i += 4
+                elif params[i + 1] == 5 and i + 2 < len(params):
+                    style[where] = _xterm(params[i + 2])
+                    i += 2
+            i += 1
+    push(text[pos:])
+    del open_span
+    return "".join(out)
+
+
+def frame(name: str, caption: str = "", cmd: str = "", then: str = "",
+          plain: bool = False) -> str:
+    """A verbatim braids screenshot, as produced by scripts/demo.py.
+
+    The .ans capture keeps braids' colours; .txt is the same frame with the
+    escapes removed, for anywhere they would show up as noise. `cmd` and `then`
+    label how you reach the screen, which is the first thing a reader wants to
+    know and the one thing a screenshot cannot show.
+    """
+    coloured = FRAMES / f"{name}.ans"
+    if coloured.exists() and not plain:
+        body = ansi_to_html(coloured.read_text().rstrip("\n"))
+    else:
+        body = html.escape((FRAMES / f"{name}.txt").read_text().rstrip("\n"))
+    bar = ""
+    if cmd:
+        bar = (f'<div class="cmdbar"><span class="prompt">$</span> <b>{cmd}</b>'
+               + (f'<span class="then">then {then}</span>' if then else "")
+               + "</div>")
     cap = f'<figcaption>{caption}</figcaption>' if caption else ""
-    return f'<figure class="frame"><pre>{text}</pre>{cap}</figure>'
+    return (f'<figure class="frame"><div class="shell">{bar}'
+            f'<pre>{body}</pre></div>{cap}</figure>')
 
 
 def retarget(markup: str, home: str) -> str:
@@ -40,8 +145,10 @@ def retarget(markup: str, home: str) -> str:
 
 
 NAV = """<nav><div class="wrap">
-  <img src="assets/braids-icon-64.png" alt="">
-  <span class="name">braids</span>
+  <a class="brand" href="#">
+    <img src="assets/braids-icon-64.png" alt="">
+    <span class="name">braids</span>
+  </a>
   <span class="spacer"></span>
   <a class="link" href="#what">What it does</a>
   <a class="link" href="#local">Local</a>
@@ -141,7 +248,7 @@ def page(*, title: str, description: str, body: str, css: str,
 CSS = """
 :root {
   --bg:#0b0d10; --panel:#11141a; --line:#232833; --ink:#e6edf3; --dim:#8b949e;
-  --faint:#6e7681; --accent:#e07a2f; --blue:#3b93f7; --ok:#3fb950;
+  --faint:#6e7681; --accent:#f0883e; --blue:#3b93f7; --ok:#3fb950;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
 }
@@ -162,8 +269,13 @@ nav {
   backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
 }
 nav .wrap { display:flex; align-items:center; gap:20px; height:58px; }
+nav .brand img { height:26px; width:auto; display:block; }
 nav img { height:26px; width:auto; display:block; }
-nav .name { font-family:var(--mono); font-weight:600; letter-spacing:.02em; color:var(--ink); }
+nav .brand { display:flex; align-items:center; gap:10px; }
+nav .brand:hover { text-decoration:none; }
+nav .brand:hover .name { color:var(--accent); }
+nav .name { font-family:var(--mono); font-weight:600; letter-spacing:.02em; color:var(--ink);
+            transition:color .12s ease; }
 nav .spacer { flex:1; }
 nav a.link { color:var(--dim); font-size:14px; }
 nav a.link:hover { color:var(--ink); text-decoration:none; }
@@ -212,15 +324,36 @@ h3 { font-size:17px; margin:26px 0 6px; }
 p { max-width:72ch; }
 p.sub { color:var(--dim); margin-top:0; }
 
-/* ---- terminal frames ---- */
-figure.frame { margin:22px 0 0; }
+/* ---- terminal frames ----
+   A frame is 195 columns of real terminal, which is wider than the prose
+   column. It breaks out to the width of the window and takes a font size that
+   fits those columns on a desktop, because a screenshot you have to scroll
+   sideways is a screenshot nobody reads. Narrow windows still scroll, at a
+   size you can actually see. */
+figure.frame {
+  margin:26px 0 0; width:min(1400px, calc(100vw - 40px));
+  margin-left:50%; transform:translateX(-50%);
+}
+figure.frame .shell {
+  background:var(--panel); border:1px solid var(--line); border-radius:11px;
+  overflow:hidden;
+}
+figure.frame .cmdbar {
+  display:flex; align-items:center; gap:9px; flex-wrap:wrap;
+  font-family:var(--mono); font-size:12px; color:var(--dim);
+  padding:9px 15px; border-bottom:1px solid var(--line);
+  background:rgba(255,255,255,.016);
+}
+figure.frame .cmdbar .prompt { color:var(--faint); }
+figure.frame .cmdbar b { color:var(--ink); font-weight:600; }
+figure.frame .cmdbar .then { color:var(--faint); }
+figure.frame .cmdbar kbd { font-size:11px; padding:0 5px; }
 figure.frame pre {
-  font-family:var(--mono); font-size:11.5px; line-height:1.5; margin:0;
-  background:var(--panel); border:1px solid var(--line); border-radius:10px;
-  padding:16px 18px; overflow-x:auto; color:var(--ink);
+  font-family:var(--mono); font-size:clamp(8.5px,.78vw,11.5px); line-height:1.5; margin:0;
+  padding:15px 16px; overflow-x:auto; color:var(--ink);
   -webkit-overflow-scrolling:touch;
 }
-figure.frame figcaption { color:var(--faint); font-size:13px; margin-top:9px; }
+figure.frame figcaption { color:var(--faint); font-size:13px; margin-top:10px; text-align:center; }
 
 pre.sh {
   font-family:var(--mono); font-size:13px; line-height:1.7; margin:16px 0 0;
@@ -253,7 +386,8 @@ td code { background:none; border:none; padding:0; }
 ul.plain { list-style:none; padding:0; margin:22px 0 0; max-width:74ch; }
 ul.plain li { padding:9px 0 9px 26px; position:relative; color:var(--dim); border-bottom:1px solid var(--line); }
 ul.plain li:last-child { border-bottom:none; }
-ul.plain li::before { content:"—"; position:absolute; left:0; color:var(--accent); }
+ul.plain li::before { content:"\\203A"; position:absolute; left:2px; color:var(--accent);
+                      font-weight:600; }
 ul.plain li strong { color:var(--ink); font-weight:600; }
 
 footer { border-top:1px solid var(--line); padding:42px 0 56px; color:var(--faint); font-size:14px; }

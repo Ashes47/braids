@@ -183,9 +183,16 @@ func (m Model) headerPlan() plan {
 	if len(glyphs) > 0 {
 		minimum += p.glyphWidth + minGlyphGap
 	}
+	// Priced the way it is drawn, which is dearer than it looks: with the mark
+	// present the facts stop floating and take factsGap before the legend, and
+	// the mark needs logoGap of slack in front of it. Pricing it any cheaper
+	// reserved room the drawing then could not use, and on a five-column band
+	// of widths the header decided the mark fitted and drew no mark at all --
+	// so widening the terminal by two columns lost the logo.
 	for _, art := range logoSizes() {
-		if minimum+logoGap+brand.Width(art) <= m.width-3 {
-			p.logo, reserved = art, logoGap+brand.Width(art)
+		cost := factsGap + logoGap + brand.Width(art)
+		if minimum+cost <= m.width-3 {
+			p.logo, reserved = art, cost
 			break
 		}
 	}
@@ -196,6 +203,8 @@ func (m Model) headerPlan() plan {
 	p.glyphGap = minGlyphGap
 	if p.showGlyphs {
 		used := factWidth + reserved + columnsWidth(p.hintWidth, p.columns) + p.glyphWidth + minGlyphGap
+		// The gap may only spend what nothing else wants, and `reserved`
+		// already covers the mark in full, so what is left here is free.
 		p.glyphGap += max(0, min(m.width-3-used, maxGlyphGap-minGlyphGap))
 	}
 	p.rows = len(keys)

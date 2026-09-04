@@ -126,6 +126,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS docs USING fts5(
 // Index is a searchable snapshot of every lane a Source can see.
 type Index struct {
 	db *sql.DB
+	// recreated records that the schema on disk was an older one and was
+	// dropped. Everything the index held is gone, so whoever opened it has to
+	// read the transcripts again before showing anybody an empty map.
+	recreated bool
 }
 
 // Stats summarises a Rebuild.
@@ -212,13 +216,14 @@ func Open(path string) (*Index, error) {
 			return nil, errors.Join(fmt.Errorf("apply %s: %w", pragma, err), db.Close())
 		}
 	}
-	if err := migrate(db); err != nil {
+	dropped, err := migrate(db)
+	if err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
 	if err := restrict(path); err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
-	return &Index{db: db}, nil
+	return &Index{db: db, recreated: dropped}, nil
 }
 
 // restrict keeps the index to its owner. It holds the full text of every
@@ -247,27 +252,32 @@ func restrict(path string) error {
 	return nil
 }
 
-// migrate brings the database to the current schema, discarding an older one.
-// Callers must rebuild afterwards; Lanes on a freshly dropped index simply
-// reports nothing, which the CLI and the map both already handle.
-func migrate(db *sql.DB) error {
+// migrate brings the database to the current schema, discarding an older one,
+// and reports whether it discarded anything. A caller that ignores that is a
+// caller showing an empty map to somebody who has just upgraded.
+func migrate(db *sql.DB) (bool, error) {
 	var version int
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
-		return fmt.Errorf("read schema version: %w", err)
+		return false, fmt.Errorf("read schema version: %w", err)
 	}
+	dropped := version != schemaVersion && version != 0
 	if version != schemaVersion {
 		if _, err := db.Exec(dropAll); err != nil {
-			return fmt.Errorf("drop stale schema v%d: %w", version, err)
+			return false, fmt.Errorf("drop stale schema v%d: %w", version, err)
 		}
 	}
 	if _, err := db.Exec(schema); err != nil {
-		return fmt.Errorf("create schema: %w", err)
+		return false, fmt.Errorf("create schema: %w", err)
 	}
 	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion)); err != nil {
-		return fmt.Errorf("stamp schema version: %w", err)
+		return false, fmt.Errorf("stamp schema version: %w", err)
 	}
-	return nil
+	return dropped, nil
 }
+
+// Recreated reports that opening this index threw away an older schema, so it
+// holds nothing until something reads the transcripts again.
+func (ix *Index) Recreated() bool { return ix.recreated }
 
 // Close releases the underlying database.
 func (ix *Index) Close() error { return ix.db.Close() }

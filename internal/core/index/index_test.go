@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -984,5 +985,55 @@ func TestSyncMemoriesPicksUpANewMemoryAndSkipsWhenNothingMoved(t *testing.T) {
 	}
 	if hits, _ := ix.Search(ctx, Query{Text: "came later", Limit: 5}); len(hits) != 0 {
 		t.Error("the old text of a rewritten memory is still searchable")
+	}
+}
+
+// An upgrade that changes the schema throws away everything the index held.
+// Open has to say so, because the alternative is a map with nothing on it and
+// no word about why, which is what braids used to do.
+func TestOpenReportsAThrownAwaySchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "index.db")
+
+	fresh, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Recreated() {
+		t.Error("a brand new index reported that it threw something away")
+	}
+	if err := fresh.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Recreated() {
+		t.Error("reopening an index at the current schema reported a drop")
+	}
+	if err := again.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// What a release that changes the schema looks like from here.
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion-1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upgraded.Close() //nolint:errcheck // test
+	if !upgraded.Recreated() {
+		t.Error("an older schema was dropped without saying so, so the map would open empty")
 	}
 }

@@ -5,14 +5,19 @@ package brand
 // Full is braids set in the angular ASCII face. Pure ASCII, so it needs no
 // --ascii twin: the glyphs are the same either way. Every line is padded to one
 // width, so the block can be aligned as a unit without measuring each row.
+//
+// The letters are spaced one column apart, which the face does not do on its
+// own: r ends two columns short of its cell, so r and a sat three apart while
+// every other pair sat one, and i and d sat two. Measured by looking for
+// columns with no ink in any row rather than by eye.
 func Full() []string {
 	return []string{
-		"  ___.                          __        .___         ",
-		"  \\_ |__   ______     _____    |__|    __| _/    ______",
-		"   | __ \\  \\_  __ \\   \\__  \\    |     / __ |    /  ___/",
-		"   | \\_\\ \\  |  | \\/    / __ \\_  |    / /_/ |    \\___  \\",
-		"   |___  /  |__|      (____  / |__|  \\____ |   /____  /",
-		"       \\/                  \\/             \\/        \\/ ",
+		"  ___.                        __       .___         ",
+		"  \\_ |__   ______   _____    |__|   __| _/    ______",
+		"   | __ \\  \\_  __ \\ \\__  \\    |    / __ |    /  ___/",
+		"   | \\_\\ \\  |  | \\/  / __ \\_  |   / /_/ |    \\___  \\",
+		"   |___  /  |__|    (____  / |__| \\____ |   /____  /",
+		"       \\/                \\/            \\/        \\/ ",
 	}
 }
 

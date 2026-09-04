@@ -634,6 +634,23 @@ func cmdMap(args []string, out *printer) error {
 			return tui.Forest(ctx, ix, provenance.All(), names.All())
 		},
 	}
+	// An upgrade that changes the schema drops what the index held, and until
+	// this it opened a map with nothing on it and no word about why. The
+	// transcripts are still there, so read them again before drawing anything.
+	if ix.Recreated() {
+		out.printf("the index format changed, so braids is reading your transcripts again\n")
+		if _, err := ix.Sync(ctx, src); err != nil {
+			return err
+		}
+		if _, err := ix.SyncMemories(ctx, src); err != nil {
+			return err
+		}
+		forest, err := tui.Forest(ctx, ix, provenance.All(), names.All())
+		if err != nil {
+			return err
+		}
+		out.printf("read %d conversations\n", len(forest.ByID))
+	}
 	if !*print {
 		return tui.Run(ctx, ix, opts)
 	}

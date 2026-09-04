@@ -162,7 +162,23 @@ stamp
 
 say ""
 say "  what changed: https://github.com/$REPO/releases/tag/$VERSION"
+
+# A first install has no index, and braids will not make one on a read: a
+# command that quietly creates an empty index answers a mistyped --db with "no
+# matches", which is a wrong answer wearing the shape of a right one. So the
+# one command that is allowed to create it runs here, once.
+#
+# An upgrade does not. The index is already there, braids keeps it current
+# every time the map opens, and re-reading a large history is a slow surprise
+# in the middle of installing something. If a release ever changes the index
+# format, braids notices that on its own and re-reads then.
+if [ -z "$here" ]; then
+  say ""
+  say "  reading your transcripts, once:"
+  "$bindir/braids" index 2>&1 | sed 's/^/    /' || \
+    say "    could not index yet. Run: braids index"
+fi
+
 say ""
 say "Next:"
-say "  braids index    # read every transcript under ~/.claude"
 say "  braids          # open the map"

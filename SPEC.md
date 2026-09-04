@@ -477,6 +477,21 @@ stdin is a terminal, by ioctl rather than by file mode so a redirect from
 silent whatever it is given: a hook that fails loudly breaks the session it is
 reporting on.
 
+**braids should be usable by the thing it is watching.** Every command that
+reports something takes `--json`, so an agent can search its own past
+conversations, find where a decision was made and branch from that exact turn.
+Two properties make that work and neither is incidental: IDs are whole in JSON —
+the tables shorten them with an ellipsis to fit a terminal, and a caller that
+cannot hand an ID back has been given nothing — and an empty result is `[]`
+rather than a sentence, so nothing has to tell "no matches" from a parse failure.
+The JSON types are declared separately from the ones braids works with
+internally: what it prints for a program is a promise, what it holds in memory
+is not.
+
+The same ellipsis is accepted on the way back in. Copying a shortened ID off the
+screen and pasting it is the obvious thing to do with one, and refusing an ID
+braids itself printed teaches nobody anything.
+
 ### 6.5 Branch — inline at the junction, never a modal
 
 ```

@@ -67,6 +67,9 @@ search flags:
 
 common flags:
   --db PATH        index location (default $BRAIDS_DB or ~/.braids/index.db)
+  --json           machine-readable output, with whole IDs. Every command
+                   that reports something takes it.
+  --help           the flags that command takes
 
 environment:
   BRAIDS_SPAWN     command template for 'o' (open a terminal), understanding
@@ -446,6 +449,7 @@ func cmdIndex(args []string, out *printer) error {
 	root := fs.String("root", "", "transcript root (default ~/.claude/projects)")
 	db := fs.String("db", "", "index location")
 	full := fs.Bool("full", false, "re-read every transcript instead of only what changed")
+	asJSON := jsonFlag(fs)
 	if err := parse(fs, args, out); err != nil {
 		return err
 	}
@@ -472,6 +476,14 @@ func cmdIndex(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
+	if *asJSON {
+		return out.emit(struct {
+			Lanes    int     `json:"lanes"`
+			Messages int     `json:"messages"`
+			Parts    int     `json:"parts"`
+			Took     float64 `json:"took_ms"`
+		}{stats.Lanes, stats.Messages, stats.Parts, float64(stats.Duration.Microseconds()) / 1000})
+	}
 	out.printf("indexed %d lanes · %d messages · %d searchable parts in %s\n",
 		stats.Lanes, stats.Messages, stats.Parts, stats.Duration.Round(time.Millisecond))
 	return out.Err()
@@ -484,6 +496,7 @@ func cmdSearch(args []string, out *printer) error {
 	kinds := fs.String("kind", "", "comma-separated part kinds")
 	limit := fs.Int("limit", 20, "maximum hits")
 	db := fs.String("db", "", "index location")
+	asJSON := jsonFlag(fs)
 	words, err := parseArgs(fs, args, out)
 	if err != nil {
 		return err
@@ -508,6 +521,18 @@ func cmdSearch(args []string, out *printer) error {
 		index.Query{Text: query, Lane: *lane, Kinds: parsed, Limit: *limit})
 	if err != nil {
 		return err
+	}
+	if *asJSON {
+		rows := make([]hitOut, 0, len(hits))
+		for _, h := range hits {
+			rows = append(rows, hitOf(h))
+		}
+		return out.emit(struct {
+			Query string   `json:"query"`
+			Hits  []hitOut `json:"hits"`
+			Count int      `json:"count"`
+			Took  float64  `json:"took_ms"`
+		}{query, rows, len(rows), float64(time.Since(start).Microseconds()) / 1000})
 	}
 	if len(hits) == 0 {
 		out.printf("no matches for %q\n", query)
@@ -535,6 +560,7 @@ func cmdBranch(args []string, out *printer) error {
 	name := fs.String("name", "", "name for the new conversation")
 	workspace := fs.Bool("workspace", false, "give the branch a git worktree of its own")
 	db := fs.String("db", "", "index location")
+	asJSON := jsonFlag(fs)
 	if err := parse(fs, args, out); err != nil {
 		return err
 	}
@@ -561,19 +587,21 @@ func cmdBranch(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
+	// Resolved once, so the prefix the user typed is turned into a whole ID
+	// before anything acts on it.
+	source, err := findLane(ctx, ix, *laneRef)
+	if err != nil {
+		return err
+	}
 	// Check before cutting: a branch that cannot be the kind it was asked for
 	// should not exist at all. The source lane's directory is the one the
 	// branch will run in.
 	if *workspace {
-		source, err := findLane(ctx, ix, *laneRef)
-		if err != nil {
-			return err
-		}
 		if err := worktreeOK(source.Cwd); err != nil {
 			return err
 		}
 	}
-	newID, err := branchAt(ctx, ix, provenance, *laneRef, *at, *name)
+	newID, err := branchAt(ctx, ix, provenance, source.ID, *at, *name)
 	if err != nil {
 		return err
 	}
@@ -593,6 +621,15 @@ func cmdBranch(args []string, out *printer) error {
 	command, err := resumeCommand(ctx, ix, kinds, newID)
 	if err != nil {
 		return err
+	}
+	if *asJSON {
+		return out.emit(struct {
+			Lane   string `json:"lane"`
+			From   string `json:"from"`
+			At     int    `json:"at"`
+			Kind   string `json:"kind"`
+			Resume string `json:"resume"`
+		}{newID, source.ID, *at, branchKindName(*workspace), command})
 	}
 	out.printf("branched %s at turn %d as a %s\n  new conversation %s\n  resume with: %s\n",
 		shortID(*laneRef), *at, branchKindName(*workspace), newID, command)
@@ -657,6 +694,7 @@ func cmdPromote(args []string, out *printer) error {
 	laneRef := fs.String("lane", "", "conversation the subagent belongs to")
 	agentRef := fs.String("agent", "", "subagent to promote (ID prefix)")
 	db := fs.String("db", "", "index location")
+	asJSON := jsonFlag(fs)
 	if err := parse(fs, args, out); err != nil {
 		return err
 	}
@@ -694,6 +732,17 @@ func cmdPromote(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
+	if *asJSON {
+		return out.emit(struct {
+			Lane   string `json:"lane"`
+			From   string `json:"from"`
+			Agent  string `json:"agent"`
+			Type   string `json:"type"`
+			Task   string `json:"task"`
+			At     int    `json:"at"`
+			Resume string `json:"resume"`
+		}{newID, lane.ID, agent.ID, agent.Type, agent.Task, agent.ParentSeq, "claude --resume " + newID})
+	}
 	out.printf("promoted %s (%s) from turn %d\n  new conversation %s\n  resume with: claude --resume %s\n",
 		agent.Type, agent.Task, agent.ParentSeq, newID, newID)
 	return out.Err()
@@ -730,6 +779,7 @@ func cmdAgents(args []string, out *printer) error {
 	fs := newFlagSet("agents")
 	laneRef := fs.String("lane", "", "conversation to list subagents of")
 	db := fs.String("db", "", "index location")
+	asJSON := jsonFlag(fs)
 	if err := parse(fs, args, out); err != nil {
 		return err
 	}
@@ -750,6 +800,16 @@ func cmdAgents(args []string, out *printer) error {
 	agents, err := ix.LaneSubagents(ctx, lane.ID)
 	if err != nil {
 		return err
+	}
+	if *asJSON {
+		rows := make([]agentOut, 0, len(agents))
+		for _, a := range agents {
+			rows = append(rows, agentOf(a))
+		}
+		return out.emit(struct {
+			Lane   string     `json:"lane"`
+			Agents []agentOut `json:"agents"`
+		}{lane.ID, rows})
 	}
 	if len(agents) == 0 {
 		out.printf("%s spawned no subagents\n", shortID(lane.ID))
@@ -779,6 +839,7 @@ func cmdMerge(args []string, out *printer) error {
 	name := fs.String("name", "", "name for the merged conversation")
 	dry := fs.Bool("plan", false, "report what would be carried over, and stop")
 	db := fs.String("db", "", "index location")
+	asJSON := jsonFlag(fs)
 	if err := parse(fs, args, out); err != nil {
 		return err
 	}
@@ -811,11 +872,16 @@ func cmdMerge(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
-	out.printf("%s: %d turns, %d of them not in %s\n%s: %d turns not in %s\n",
-		orDash(base.Title), plan.BaseTurns, plan.BaseOnlyTurns, orDash(incoming.Title),
-		orDash(incoming.Title), plan.IncomingTurns, orDash(base.Title))
-	if !plan.Worthwhile() {
-		out.printf("\nnothing to join: one already contains the other\n")
+	if *dry && *asJSON {
+		return out.emit(mergePlanOut(base.ID, incoming.ID, plan, ""))
+	}
+	if !*asJSON {
+		out.printf("%s: %d turns, %d of them not in %s\n%s: %d turns not in %s\n",
+			orDash(base.Title), plan.BaseTurns, plan.BaseOnlyTurns, orDash(incoming.Title),
+			orDash(incoming.Title), plan.IncomingTurns, orDash(base.Title))
+		if !plan.Worthwhile() {
+			out.printf("\nnothing to join: one already contains the other\n")
+		}
 	}
 	if *dry {
 		return out.Err()
@@ -827,6 +893,9 @@ func cmdMerge(args []string, out *printer) error {
 	}
 	if _, err := ix.Sync(ctx, src); err != nil {
 		return err
+	}
+	if *asJSON {
+		return out.emit(mergePlanOut(base.ID, incoming.ID, plan, merged.ID))
 	}
 	out.printf("  new conversation %s\n  resume with: claude --resume %s\n", merged.ID, merged.ID)
 	return out.Err()
@@ -904,6 +973,7 @@ func cmdHooks(args []string, out *printer) error {
 	install := fs.Bool("install", false, "ask sessions to report when they block")
 	remove := fs.Bool("remove", false, "stop asking")
 	settings := fs.String("settings", "", "settings file (default ~/.claude/settings.json)")
+	asJSON := jsonFlag(fs)
 	if err := parse(fs, args, out); err != nil {
 		return err
 	}
@@ -953,6 +1023,15 @@ func cmdHooks(args []string, out *printer) error {
 	status, err := hooks.Inspect(path, command)
 	if err != nil {
 		return err
+	}
+	if *asJSON {
+		return out.emit(struct {
+			Settings  string   `json:"settings"`
+			Command   string   `json:"command"`
+			Reporting bool     `json:"reporting"`
+			Events    []string `json:"events"`
+			Elsewhere []string `json:"elsewhere"`
+		}{path, command, len(status.Events) > 0, orEmpty(status.Events), orEmpty(status.Elsewhere)})
 	}
 	out.printf("settings: %s\ncommand:  %s\n", path, command)
 	switch {
@@ -1202,6 +1281,11 @@ func findLane(ctx context.Context, ix *index.Index, ref string) (index.LaneInfo,
 	if err != nil {
 		return index.LaneInfo{}, err
 	}
+	// The tables shorten an ID with an ellipsis, so the obvious thing to do
+	// with one — copy it off the screen and paste it back — arrives with the
+	// ellipsis attached. Accept it: refusing an ID braids itself printed
+	// teaches nothing.
+	ref = strings.TrimRight(ref, "…")
 	var found []index.LaneInfo
 	for _, l := range lanes {
 		if strings.HasPrefix(l.ID, ref) {
@@ -1222,6 +1306,7 @@ func cmdLanes(args []string, out *printer) error {
 	fs := newFlagSet("lanes")
 	fs.SetOutput(out)
 	db := fs.String("db", "", "index location")
+	asJSON := jsonFlag(fs)
 	if err := parse(fs, args, out); err != nil {
 		return err
 	}
@@ -1234,6 +1319,17 @@ func cmdLanes(args []string, out *printer) error {
 	lanes, err := ix.Lanes(context.Background())
 	if err != nil {
 		return err
+	}
+	if *asJSON {
+		// An empty result is an empty list, not a message: a caller should
+		// not have to tell "nothing indexed" from a parse failure.
+		rows := make([]laneOut, 0, len(lanes))
+		for _, l := range lanes {
+			rows = append(rows, laneOf(l))
+		}
+		return out.emit(struct {
+			Lanes []laneOut `json:"lanes"`
+		}{rows})
 	}
 	if len(lanes) == 0 {
 		out.printf("no lanes indexed yet (run: braids index)\n")

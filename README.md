@@ -12,9 +12,10 @@ It never talks to Claude. It arranges the conversations you have with Claude.
 
 ## Status
 
-Early. The index, search and the Map are working; the Spine is next. See
-[SPEC.md](SPEC.md) for the full design and [§11](SPEC.md#11-build-order) for the
-build order.
+Working: the index and search, the Map, the Spine, branching (with an optional
+git worktree), merging a branch back, promoting a subagent into a conversation
+of its own, archive and a recoverable bin, and optional hooks that let sessions
+report when they are blocked on you. See [SPEC.md](SPEC.md) for the full design.
 
 ```
  Source:   claudecode                                          <j/k>   move
@@ -81,8 +82,46 @@ Re-run `make install` after every change — `make build` only updates `./braids
 in the repo. `braids version` prints the commit it was built from, so a stale
 binary is visible rather than mysterious.
 
-Other commands: `braids search QUERY [--kind text,tool_use] [--limit N]`,
-`braids lanes`, `braids map --ascii`, `braids version`.
+## Commands
+
+```sh
+braids                                  open the map
+braids index [--full]                   index new and changed transcripts
+braids search QUERY [--kind K] [--limit N]
+braids lanes                            list indexed conversations
+braids agents  --lane ID                list the subagents a conversation spawned
+braids branch  --lane ID --at TURN [--workspace]
+braids promote --lane ID --agent ID     turn a subagent into its own conversation
+braids merge   --lane ID --from ID [--plan]
+braids hooks [--install|--remove]       let sessions report when they block
+braids version
+```
+
+Every command takes `--help` for its own flags. A mistyped one names what you
+meant.
+
+## Driving it from an agent
+
+Every command that reports something takes `--json`, so braids is usable by the
+thing it is watching. Claude Code can search its own past conversations, find
+where a decision was made, and branch from that exact turn.
+
+```sh
+braids search "why did we drop the retry" --json | jq -r '.hits[0] | .lane, .turn'
+braids branch --lane <id> --at <turn> --json | jq -r .resume
+```
+
+Two properties make this work, and both are deliberate:
+
+- **IDs are whole in JSON.** The tables shorten them with an ellipsis to fit a
+  terminal; `--json` never does. (Pasting a shortened one back works too — braids
+  accepts the ellipsis rather than refusing an ID it printed itself.)
+- **Empty is `[]`, not a sentence.** A caller should never have to tell "nothing
+  matched" apart from a parse failure.
+
+Errors go to stderr with a non-zero exit; `--json` output is the only thing on
+stdout. `braids hooks --json` reports whether reporting is on, so an agent can
+check before relying on it.
 
 ## Principles
 

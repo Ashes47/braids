@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -292,5 +293,89 @@ func TestKnownCommandsAllDispatch(t *testing.T) {
 		if err != nil && strings.Contains(err.Error(), "unknown command") {
 			t.Errorf("%q is offered as a suggestion but does not dispatch", name)
 		}
+	}
+}
+
+// The JSON surface is what makes braids usable by the thing it watches, so its
+// shape is pinned: whole IDs, and an empty result that is still a list.
+func TestJSONIsMachineReadable(t *testing.T) {
+	root := fixtureRoot(t)
+	db := filepath.Join(t.TempDir(), "index.db")
+	runCmd(t, "index", "--root", root, "--db", db)
+
+	var listed struct {
+		Lanes []struct {
+			ID       string `json:"id"`
+			Title    string `json:"title"`
+			Messages int    `json:"messages"`
+			Resume   string `json:"resume"`
+		} `json:"lanes"`
+	}
+	decode(t, runCmd(t, "lanes", "--db", db, "--json"), &listed)
+	if len(listed.Lanes) == 0 {
+		t.Fatal("no lanes in JSON output")
+	}
+	lane := listed.Lanes[0]
+	if strings.Contains(lane.ID, "…") {
+		t.Errorf("id = %q, want the whole thing, not a shortened one", lane.ID)
+	}
+	if !strings.Contains(lane.Resume, lane.ID) {
+		t.Errorf("resume = %q, want it to carry the whole id", lane.Resume)
+	}
+
+	// The ID that came out has to be one that goes back in.
+	var agents struct {
+		Lane   string `json:"lane"`
+		Agents []any  `json:"agents"`
+	}
+	decode(t, runCmd(t, "agents", "--lane", lane.ID, "--db", db, "--json"), &agents)
+	if agents.Lane != lane.ID {
+		t.Errorf("agents lane = %q, want %q", agents.Lane, lane.ID)
+	}
+	if agents.Agents == nil {
+		t.Error("agents = null, want [] so a caller can iterate it unguarded")
+	}
+
+	var found struct {
+		Hits []struct {
+			Lane string `json:"lane"`
+			Turn int    `json:"turn"`
+		} `json:"hits"`
+		Count int `json:"count"`
+	}
+	decode(t, runCmd(t, "search", "--db", db, "--json", "nothing-matches-this-xyzzy"), &found)
+	if found.Count != 0 || found.Hits == nil {
+		t.Errorf("empty search = %+v, want zero hits as an empty list", found)
+	}
+}
+
+// An ID copied off a table arrives with the ellipsis that made it fit. Braids
+// printed it, so braids accepts it.
+func TestShortenedIDPastedBackResolves(t *testing.T) {
+	root := fixtureRoot(t)
+	db := filepath.Join(t.TempDir(), "index.db")
+	runCmd(t, "index", "--root", root, "--db", db)
+
+	// Whatever the table showed, an ID wearing the ellipsis that made it fit
+	// has to resolve to the conversation it names.
+	var listed struct {
+		Lanes []struct {
+			ID string `json:"id"`
+		} `json:"lanes"`
+	}
+	decode(t, runCmd(t, "lanes", "--db", db, "--json"), &listed)
+	if len(listed.Lanes) == 0 {
+		t.Fatal("nothing indexed")
+	}
+	pasted := listed.Lanes[0].ID + "…"
+	if out := runCmd(t, "agents", "--lane", pasted, "--db", db); strings.Contains(out, "no conversation") {
+		t.Errorf("pasting back %q was refused: %s", pasted, out)
+	}
+}
+
+func decode(t *testing.T, body string, into any) {
+	t.Helper()
+	if err := json.Unmarshal([]byte(body), into); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, body)
 	}
 }

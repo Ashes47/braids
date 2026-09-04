@@ -57,6 +57,8 @@ Every design decision below rests on something measured on this machine
 | …but not fork *direction* | A fork rewrites `sessionId` throughout and records no origin; timestamps are copied too, so nothing in the file says which came first |
 | File birth time does say | Demo tree: root 23:21:00 → fork 23:21:20 → fork 23:21:39 → fork 23:21:49, all correct. APFS reports it; Linux may not |
 | `parentUuid` names bookkeeping, not turns | A message's parent is usually an `attachment`; resolving through them is what makes a chain reconstruct at all |
+| Work products dwarf conversations | 3.5 GB of scratch and job records against 365 MB of transcript, all of it in two conversations |
+| Job directories use the short ID | `~/.claude/jobs/9419fd9c`, not the full session UUID the transcript is filed under |
 | 35 compactions across this history | Parsed for free: a boundary is announced one record before the summary that replaces what it dropped, so it rides the existing pass |
 | In-file branching is the common case | One real 25,571-turn lane: **220 junctions, 228 departing branches** — none of them visible in Claude Code |
 | A tool result wears the user role | Treating every user record as a landmark left a long spine 85% uncollapsed; requiring text cut 20,506 segments to 3,015 |
@@ -509,9 +511,18 @@ Two rules the notice states outright:
   accident worth preventing outright; `d` from inside a conversation is
   redirected to the map, where you can see what would go.
 
-Still to come: multi-select and the filtered sweep, and reclaiming job artifacts
-separately from the conversation — 3.2 GB against 392 MB of transcript on this
-machine, which is the deletion nobody regrets.
+**`D` discards a conversation's work products and keeps the conversation.** A
+harness stores scratch files and job records outside the transcript, and they
+dwarf it: **3.5 GB against 365 MB** here, held by two conversations out of
+thirty-three. Letting them go costs nothing that can be read again, which makes
+it the deletion nobody regrets — and it goes to the same bin, so even that is
+reversible.
+
+A `WORK` column appears when anything has them, blank where there are none so
+the eye lands only on what is actually holding something. Sizing costs a walk of
+a few thousand directory entries, which is milliseconds.
+
+Still to come: multi-select and the filtered sweep.
 
 ---
 

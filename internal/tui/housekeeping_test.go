@@ -283,3 +283,54 @@ func TestAnEmptyBinSaysSo(t *testing.T) {
 		t.Error("esc should return to the map")
 	}
 }
+
+func TestWorkProductsAreShownAndCanGoSeparately(t *testing.T) {
+	heavy := laneInfo("a", "long debugging session", "app", 900, time.Hour)
+	heavy.Size = 145 << 20
+	heavy.ArtifactBytes = 1970 << 20
+	heavy.ArtifactPath = "/tmp/jobs/a"
+	heavy.Activity = model.Activity{LastRole: model.RoleAssistant}
+	light := laneInfo("b", "a quick question", "app", 4, time.Hour)
+	light.Size = 40 << 10
+
+	var discarded []string
+	m, _ := keepingModel(t, []index.LaneInfo{heavy, light})
+	m.deleteWorkFn = func(id string) (int64, error) {
+		discarded = append(discarded, id)
+		return 1970 << 20, nil
+	}
+	m.width = 128
+
+	out := plain(m.render())
+	if !strings.Contains(out, "WORK") {
+		t.Fatalf("a conversation with work products should earn the column:\n%s", out)
+	}
+	heavyRow := rowFor(t, out, "long debugging session")
+	if !strings.Contains(heavyRow, "1.9 GB") || !strings.Contains(heavyRow, "145 MB") {
+		t.Errorf("the row should carry both sizes: %q", heavyRow)
+	}
+	// A conversation with none leaves the cell empty rather than printing zero.
+	if lightRow := rowFor(t, out, "a quick question"); strings.Contains(lightRow, "0 B") {
+		t.Errorf("an empty work cell should stay empty: %q", lightRow)
+	}
+
+	m = press(m, "D")
+	if len(discarded) != 1 || discarded[0] != "a" {
+		t.Fatalf("D discarded %v", discarded)
+	}
+	notice := plain(m.render())
+	if !strings.Contains(notice, "1.9 GB of work products") {
+		t.Errorf("expected the amount reclaimed:\n%s", notice)
+	}
+	if !strings.Contains(notice, "conversation is untouched") {
+		t.Error("the notice must say the conversation survives — that is the whole point")
+	}
+}
+
+func TestNoWorkColumnWithoutWorkProducts(t *testing.T) {
+	m, _ := keepingModel(t, []index.LaneInfo{laneInfo("a", "just a chat", "app", 4, time.Hour)})
+	m.width = 128
+	if strings.Contains(plain(m.render()), "WORK") {
+		t.Error("the column should not appear when nothing has work products")
+	}
+}

@@ -232,6 +232,9 @@ func cmdMap(args []string, out *printer) error {
 		Delete: func(laneID string) (int64, error) {
 			return discardLane(ctx, ix, bin, laneID)
 		},
+		DeleteWork: func(laneID string) (int64, error) {
+			return discardWork(ctx, ix, bin, laneID)
+		},
 		LoadBin: func() ([]trash.Entry, error) {
 			// Expire on open, so the count and the deadlines shown are true.
 			if _, _, err := bin.Expire(time.Now()); err != nil {
@@ -642,6 +645,30 @@ func discardLane(ctx context.Context, ix *index.Index, bin *trash.Bin, laneID st
 	}
 	if len(entry.Items) == 0 {
 		return 0, fmt.Errorf("nothing to delete for %s", shortID(lane.ID))
+	}
+	return entry.Bytes, nil
+}
+
+// discardWork moves a conversation's work products to the bin, leaving the
+// conversation itself in place.
+func discardWork(ctx context.Context, ix *index.Index, bin *trash.Bin, laneID string) (int64, error) {
+	lane, err := findLane(ctx, ix, laneID)
+	if err != nil {
+		return 0, err
+	}
+	if lane.ArtifactPath == "" {
+		return 0, fmt.Errorf("%s has no work products", shortID(lane.ID))
+	}
+	label := lane.Title
+	if label == "" {
+		label = shortID(lane.ID)
+	}
+	entry, err := bin.Discard("work products of "+label, []string{lane.ArtifactPath})
+	if err != nil {
+		return 0, err
+	}
+	if len(entry.Items) == 0 {
+		return 0, fmt.Errorf("nothing to discard for %s", shortID(lane.ID))
 	}
 	return entry.Bytes, nil
 }

@@ -21,6 +21,7 @@ const (
 	projectWidth = 10
 	msgsWidth    = 7
 	sizeWidth    = 8
+	workWidth    = 9
 	ageWidth     = 5
 	statusWidth  = 10
 )
@@ -68,6 +69,9 @@ type Options struct {
 	// Delete moves a conversation's files to the bin, returning how much was
 	// reclaimed. Nil disables deleting.
 	Delete func(laneID string) (int64, error)
+	// DeleteWork moves a conversation's work products to the bin, leaving the
+	// conversation itself alone.
+	DeleteWork func(laneID string) (int64, error)
 	// LoadBin lists what has been deleted and not yet expired.
 	LoadBin func() ([]trash.Entry, error)
 	// Restore brings a deleted conversation back.
@@ -126,6 +130,7 @@ type Model struct {
 	archived       map[string]bool
 	archiveFn      func(string, bool) error
 	deleteFn       func(string) (int64, error)
+	deleteWorkFn   func(string) (int64, error)
 	loadBin        func() ([]trash.Entry, error)
 	restoreFn      func(string) error
 	purgeFn        func(string) error
@@ -156,6 +161,7 @@ type Model struct {
 	// than one project. Ambiguous titles get their lane ID appended.
 	showFork    bool
 	showProject bool
+	showWork    bool
 	ambiguous   map[string]bool
 
 	cursor int
@@ -187,6 +193,7 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		archived:       opts.Archived,
 		archiveFn:      opts.Archive,
 		deleteFn:       opts.Delete,
+		deleteWorkFn:   opts.DeleteWork,
 		loadBin:        opts.LoadBin,
 		restoreFn:      opts.Restore,
 		purgeFn:        opts.Purge,
@@ -243,6 +250,12 @@ func (m *Model) measure() {
 		projects[r.node.Lane.Project] = struct{}{}
 	}
 	m.showProject = len(projects) > 1
+	for _, r := range m.all {
+		if r.node.Lane.ArtifactBytes > 0 {
+			m.showWork = true
+			break
+		}
+	}
 	m.forestHas = make(map[string]struct{}, len(m.all))
 	for _, r := range m.all {
 		m.forestHas[r.node.Lane.ID] = struct{}{}
@@ -396,6 +409,8 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.clamp()
 	case "d":
 		return m.deleteLane(), nil
+	case "D":
+		return m.deleteWork(), nil
 	case "n":
 		m.cursor = m.nextWaiting(m.cursor, 1)
 	case "N":
@@ -472,6 +487,24 @@ func (m Model) deleteLane() Model {
 	m = m.catchUp()
 	return m.withNotice(fmt.Sprintf("deleted %s · %s reclaimed · u to recover · children unaffected",
 		shortID(lane), humanBytes(bytes)), false)
+}
+
+// deleteWork discards a conversation's work products and keeps the
+// conversation. Scratch files and job records are usually most of what a
+// session occupies — 3.5 GB against 365 MB of transcript here — and letting
+// them go costs nothing that can be read again.
+func (m Model) deleteWork() Model {
+	lane, ok := m.selectedLane()
+	if !ok || m.deleteWorkFn == nil {
+		return m.withNotice("nothing here has work products", true)
+	}
+	bytes, err := m.deleteWorkFn(lane)
+	if err != nil {
+		return m.withNotice(err.Error(), true)
+	}
+	m = m.catchUp()
+	return m.withNotice(fmt.Sprintf("discarded %s of work products · the conversation is untouched · u to recover",
+		humanBytes(bytes)), false)
 }
 
 // selectedLane is the conversation under the cursor on whichever screen is up.
@@ -701,19 +734,22 @@ func (m Model) nextWaiting(from, step int) int {
 // built from it, so they cannot drift apart — the two width bugs this screen
 // has already had were exactly that drift.
 type rowLayout struct {
-	fork, project, turns, size, status bool
-	right                              int // total width of everything after the title
+	fork, project, turns, size, work, status bool
+	right                                    int // width of everything after the title
 }
 
 // layoutFor drops columns from the right as the terminal narrows, keeping the
 // name and the age: what it is, and whether it is stale.
 func (m Model) layoutFor() rowLayout {
-	l := rowLayout{fork: m.showFork, project: m.showProject, turns: true, size: true, status: true}
+	l := rowLayout{
+		fork: m.showFork, project: m.showProject,
+		turns: true, size: true, work: m.showWork, status: true,
+	}
 	width := func(l rowLayout) int {
 		n := ageWidth
 		for on, w := range map[*bool]int{
-			&l.fork: forkWidth, &l.project: projectWidth, &l.turns: msgsWidth, &l.size: sizeWidth,
-			&l.status: statusWidth,
+			&l.fork: forkWidth, &l.project: projectWidth, &l.turns: msgsWidth,
+			&l.size: sizeWidth, &l.work: workWidth, &l.status: statusWidth,
 		} {
 			if *on {
 				n += w + 2
@@ -722,7 +758,7 @@ func (m Model) layoutFor() rowLayout {
 		return n
 	}
 	// Give up the least informative column first.
-	for _, drop := range []*bool{&l.size, &l.status, &l.project, &l.turns, &l.fork} {
+	for _, drop := range []*bool{&l.size, &l.work, &l.status, &l.project, &l.turns, &l.fork} {
 		if m.contentWidth()-4-width(l) >= minTitleWidth {
 			break
 		}
@@ -796,6 +832,13 @@ func (m Model) rowParts(r row) (plain, styled string) {
 		rightPlain += cell + "  "
 		rightStyled += m.theme.Faint.Render(cell) + "  "
 	}
+	if layout.work {
+		cell := padLeft(orBlank(lane.ArtifactBytes), workWidth)
+		rightPlain += cell + "  "
+		// Work products are worth noticing when they dwarf the conversation,
+		// which is usually, so they are not drawn as quietly as a byte count.
+		rightStyled += m.theme.Dim.Render(cell) + "  "
+	}
 	age := padLeft(humanAge(m.now().Sub(lane.Updated)), ageWidth)
 	rightPlain += age
 	rightStyled += m.theme.Dim.Render(age)
@@ -838,6 +881,9 @@ func (m Model) columns() string {
 	}
 	if layout.size {
 		right += padLeft("SIZE", sizeWidth) + "  "
+	}
+	if layout.work {
+		right += padLeft("WORK", workWidth) + "  "
 	}
 	right += padLeft("AGE", ageWidth)
 	if layout.status {
@@ -927,6 +973,15 @@ func (m Model) hidingAny() bool {
 }
 
 // oneLine lives in spineview.go.
+
+// orBlank leaves an empty cell rather than printing a zero, so the eye lands
+// only on conversations that actually hold something.
+func orBlank(n int64) string {
+	if n == 0 {
+		return ""
+	}
+	return humanBytes(n)
+}
 
 // humanBytes renders a transcript size compactly.
 func humanBytes(n int64) string {

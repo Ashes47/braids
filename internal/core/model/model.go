@@ -163,6 +163,13 @@ type Lane struct {
 	Created time.Time
 	Updated time.Time
 	Size    int64
+	// ArtifactBytes is what the conversation's work products occupy: the
+	// scratch files and job records a harness keeps outside the transcript.
+	// They are usually far larger than the conversation, and discarding them
+	// is a different decision from discarding it.
+	ArtifactBytes int64
+	// ArtifactPath is where those work products live, empty when there are none.
+	ArtifactPath string
 	// Activity is what the conversation was doing when last written to.
 	Activity Activity
 }

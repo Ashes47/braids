@@ -18,7 +18,7 @@ import (
 // schemaVersion is bumped whenever the tables change. The index holds no unique
 // state — it rebuilds from the transcripts in seconds — so an old schema is
 // dropped and recreated rather than migrated.
-const schemaVersion = 7
+const schemaVersion = 8
 
 const dropAll = `
 DROP TABLE IF EXISTS parts;
@@ -41,7 +41,9 @@ CREATE TABLE IF NOT EXISTS lanes (
 	msg_count  INTEGER NOT NULL DEFAULT 0,
 	part_count INTEGER NOT NULL DEFAULT 0,
 	last_role  TEXT    NOT NULL DEFAULT '',
-	last_tool  INTEGER NOT NULL DEFAULT 0
+	last_tool  INTEGER NOT NULL DEFAULT 0,
+	artifacts  INTEGER NOT NULL DEFAULT 0,
+	artifact_path TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS messages (
 	lane_id   TEXT    NOT NULL,
@@ -386,11 +388,12 @@ func replaceLane(ctx context.Context, tx *sql.Tx, src store.Source, lane model.L
 		return 0, 0, fmt.Errorf("index lane %s: %w", lane.ID, err)
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO lanes (id,source,project,path,title,cwd,created,updated,size,msg_count,part_count,last_role,last_tool) `+
-			`VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO lanes (id,source,project,path,title,cwd,created,updated,size,msg_count,part_count,last_role,last_tool,artifacts,artifact_path) `+
+			`VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		lane.ID, lane.Source, lane.Project, lane.Path, lane.Title, lane.Cwd,
 		unixOrZero(lane.Created), lane.Updated.Unix(), lane.Size, msgs, parts,
-		string(activity.LastRole), boolToInt(activity.LastWasToolCall)); err != nil {
+		string(activity.LastRole), boolToInt(activity.LastWasToolCall),
+		lane.ArtifactBytes, lane.ArtifactPath); err != nil {
 		return 0, 0, fmt.Errorf("insert lane %s: %w", lane.ID, err)
 	}
 	if err := indexSubagents(ctx, tx, src, lane, spawnedAt); err != nil {
@@ -711,7 +714,7 @@ func (ix *Index) Timelines(ctx context.Context) (map[string][]time.Time, error) 
 // Lanes returns every indexed lane, most recently updated first.
 func (ix *Index) Lanes(ctx context.Context) ([]LaneInfo, error) {
 	rows, err := ix.db.QueryContext(ctx,
-		`SELECT id,source,project,path,title,cwd,created,updated,size,msg_count,part_count,last_role,last_tool FROM lanes ORDER BY updated DESC`)
+		`SELECT id,source,project,path,title,cwd,created,updated,size,msg_count,part_count,last_role,last_tool,artifacts,artifact_path FROM lanes ORDER BY updated DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list lanes: %w", err)
 	}
@@ -724,7 +727,8 @@ func (ix *Index) Lanes(ctx context.Context) ([]LaneInfo, error) {
 		var lastRole string
 		var lastTool int
 		if err := rows.Scan(&l.ID, &l.Source, &l.Project, &l.Path, &l.Title, &l.Cwd,
-			&created, &updated, &l.Size, &l.Messages, &l.Parts, &lastRole, &lastTool); err != nil {
+			&created, &updated, &l.Size, &l.Messages, &l.Parts, &lastRole, &lastTool,
+			&l.ArtifactBytes, &l.ArtifactPath); err != nil {
 			return nil, fmt.Errorf("scan lane: %w", err)
 		}
 		if created > 0 {

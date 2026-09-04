@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,9 @@ import (
 	"github.com/Ashes47/braids/internal/core/model"
 	"github.com/Ashes47/braids/internal/core/store"
 )
+
+// shortIDLen is how much of a session ID names its job directory.
+const shortIDLen = 8
 
 // maxLine caps a single JSONL record. The largest record seen in a real
 // transcript is ~1.2 MB, so 64 MB is generous headroom rather than a guess.
@@ -113,7 +117,40 @@ func (s *Source) Enrich(_ context.Context, lane model.Lane) (model.Lane, error) 
 		return lane, err
 	}
 	lane.Title, lane.Cwd = title, cwd
+	lane.ArtifactPath, lane.ArtifactBytes = s.artifacts(lane.ID)
 	return lane, nil
+}
+
+// artifacts locates a conversation's work products and measures them.
+//
+// Claude Code keeps them outside the transcript, beside the projects directory,
+// and they dwarf it: 3.2 GB against 392 MB of conversation on this machine,
+// almost all of it scratch files. Measuring costs a directory walk of a few
+// thousand entries, which is milliseconds.
+func (s *Source) artifacts(laneID string) (path string, bytes int64) {
+	// Job directories are named by the short form of the session ID, not the
+	// whole UUID the transcript is filed under.
+	if len(laneID) < shortIDLen {
+		return "", 0
+	}
+	path = filepath.Join(filepath.Dir(s.root), "jobs", laneID[:shortIDLen])
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return "", 0
+	}
+	err = filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil //nolint:nilerr // an unreadable entry contributes nothing
+		}
+		if fi, err := d.Info(); err == nil {
+			bytes += fi.Size()
+		}
+		return nil
+	})
+	if err != nil || bytes == 0 {
+		return "", 0
+	}
+	return path, bytes
 }
 
 // Messages streams a lane's messages in file order, skipping the bookkeeping

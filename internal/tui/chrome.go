@@ -20,7 +20,7 @@ const (
 	// infoLines is the header's natural height; it grows to at most maxInfoLines
 	// when a narrow terminal cannot fit every binding in fewer rows.
 	infoLines    = 4
-	maxInfoLines = 6
+	maxInfoLines = 7
 	labelCol     = 10
 	hintCol      = 8
 	glyphCol     = 5
@@ -59,6 +59,7 @@ func hints() []hint {
 		{"/", "search"}, {"f", "filter list"},
 		{"a", "toggle archive"}, {"q", "quit"},
 		{"n / N", "next / prev waiting"}, {"d", "delete"},
+		{"D", "delete work products"},
 		{"u", "deleted / recover"}, {"A", "show archived"},
 		{"y", "copy resume"}, {"o", "open terminal"},
 	}

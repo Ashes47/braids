@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
@@ -1040,6 +1041,7 @@ func TestVersionRowOffersTheKeyOnlyWhenDue(t *testing.T) {
 		m := NewModel(f, Options{
 			ASCII: true, Source: "claudecode", Version: "0.1.0",
 			Release: func() release.State { return state },
+			Update:  func() *exec.Cmd { return exec.Command("true") },
 		})
 		m.now = func() time.Time { return now }
 		m.width, m.height = 120, 24
@@ -1064,6 +1066,23 @@ func TestVersionRowOffersTheKeyOnlyWhenDue(t *testing.T) {
 	// And with nothing knowable, it still names the build.
 	if got := build(release.State{}).versionFact(); got != "0.1.0" {
 		t.Errorf("with no dates the row reads %q", got)
+	}
+
+	// Where braids has no installer it has run, the row still says how old the
+	// build is and stops short of offering a key that would do nothing. That is
+	// what Windows gets.
+	m := NewModel(f, Options{
+		ASCII: true, Source: "claudecode", Version: "0.1.0",
+		Release: func() release.State { return stale },
+	})
+	m.now = func() time.Time { return now }
+	m.width, m.height = 120, 24
+	got := m.versionFact()
+	if !strings.Contains(got, "3 months old") {
+		t.Errorf("without an installer the row lost the age: %q", got)
+	}
+	if strings.Contains(got, "v to update") {
+		t.Errorf("a key was offered with nothing to run: %q", got)
 	}
 }
 

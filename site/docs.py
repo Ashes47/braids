@@ -877,6 +877,7 @@ go list -deps ./cmd/braids | grep net/http
   private and tightened on every open. An earlier version left it
   world readable at 0644.
 </p>
+{say("Those modes are POSIX modes. Windows has no equivalent bits, so braids cannot set them there: what it writes is protected by the permissions on your user profile directory instead, which braids neither sets nor checks. The tests that assert modes say so rather than passing where the guarantee does not hold.")}
 
 <h2 id="never">What it never writes</h2>
 <p>

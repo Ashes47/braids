@@ -10,7 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
 	"time"
+
+	"github.com/Ashes47/braids/internal/perms"
 
 	"github.com/Ashes47/braids/internal/core/memory"
 	"github.com/Ashes47/braids/internal/core/model"
@@ -488,6 +491,7 @@ func TestSyncReplacesSubagentsRatherThanDuplicating(t *testing.T) {
 // Code keeps the transcripts it came from at 0700. Copying that into a
 // world-readable file widens the user's exposure without being asked to.
 func TestIndexIsPrivateToItsOwner(t *testing.T) {
+	perms.RequirePOSIX(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "index.db")
 

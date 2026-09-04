@@ -161,6 +161,12 @@ The index holds the full text of every message it has read, so `~/.braids` is
 `0700` and the file is `0600`, tightened on every open rather than only at
 creation. An earlier version left it world readable.
 
+Those are POSIX modes and Windows has none: Go reports every file there as
+0666, or 0444 when read only, and a chmod toggles that one flag. On Windows the
+privacy comes from the profile directory instead, which braids neither sets nor
+asserts. The tests that read modes skip rather than pass, because a test that
+passes where the guarantee does not hold is worse than no test.
+
 **Sidecar.** Names, archive flags, branch kinds, and the provenance of branches
 braids made itself. Topology is still derived; the sidecar only overrides it
 where inference cannot win, because two lanes can hold byte-identical prefixes

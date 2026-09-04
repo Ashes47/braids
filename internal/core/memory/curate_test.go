@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Ashes47/braids/internal/perms"
 )
 
 // curateSet lays out a set with the drift that occurs in practice: a memory the
@@ -166,6 +168,7 @@ func TestRepairMakesTheIndexAgreeWithTheFiles(t *testing.T) {
 // The index is what a session loads, so it is replaced atomically and stays
 // private like everything else braids writes.
 func TestIndexIsWrittenSafely(t *testing.T) {
+	perms.RequirePOSIX(t)
 	loc := curateSet(t)
 	if _, _, err := Repair(loc); err != nil {
 		t.Fatal(err)
@@ -246,6 +249,7 @@ func TestCurationRefusesANameThatIsNotOneOfItsOwn(t *testing.T) {
 // These are the harness's files. braids edits them; it does not adopt them, so
 // it leaves their permissions as it found them.
 func TestCurationKeepsTheModeItFound(t *testing.T) {
+	perms.RequirePOSIX(t)
 	loc := curateSet(t)
 	for _, name := range []string{IndexFile, "shard-manifest.md", "reader-contract.md"} {
 		if err := os.Chmod(filepath.Join(loc.Dir, name), 0o644); err != nil {
@@ -258,6 +262,7 @@ func TestCurationKeepsTheModeItFound(t *testing.T) {
 	if _, _, err := Repair(loc); err != nil {
 		t.Fatalf("Repair: %v", err)
 	}
+	perms.RequirePOSIX(t)
 	for _, name := range []string{IndexFile, "shard-manifest.md", "reader-ordering.md"} {
 		info, err := os.Stat(filepath.Join(loc.Dir, name))
 		if err != nil {

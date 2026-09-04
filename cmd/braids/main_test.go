@@ -9,7 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
 	"time"
+
+	"github.com/Ashes47/braids/internal/perms"
 
 	"github.com/Ashes47/braids/internal/brand"
 	"github.com/Ashes47/braids/internal/core/model"
@@ -460,6 +463,7 @@ func TestOnlyIndexCreatesTheIndex(t *testing.T) {
 // directory's mode alone, so one made by an older build has to be tightened on
 // the way past rather than only at creation.
 func TestBraidsDirectoryIsPrivate(t *testing.T) {
+	perms.RequirePOSIX(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("BRAIDS_DB", "")

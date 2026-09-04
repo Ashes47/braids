@@ -31,6 +31,11 @@ func TestDetectPrefersAnExplicitTemplate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Where a template cannot be run through a shell braids does not
+			// offer one, so the next launcher wins instead.
+			if !shellTemplates && tt.want == "BRAIDS_SPAWN" {
+				t.Skip("BRAIDS_SPAWN needs a POSIX shell, which braids does not use here")
+			}
 			open, name := Detect(envOf(tt.env))
 			if name != tt.want {
 				t.Errorf("terminal = %q, want %q", name, tt.want)
@@ -43,6 +48,9 @@ func TestDetectPrefersAnExplicitTemplate(t *testing.T) {
 }
 
 func TestTemplateExpansion(t *testing.T) {
+	if !shellTemplates {
+		t.Skip("BRAIDS_SPAWN needs a POSIX shell, which braids does not use here")
+	}
 	open, _ := Detect(envOf(map[string]string{
 		"BRAIDS_SPAWN": "sh -c 'test {name} = mine && test {dir} = /tmp && echo {cmd}'",
 	}))

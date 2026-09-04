@@ -28,6 +28,7 @@ import (
 	"github.com/Ashes47/braids/internal/core/graph"
 	"github.com/Ashes47/braids/internal/core/hooks"
 	"github.com/Ashes47/braids/internal/core/index"
+	"github.com/Ashes47/braids/internal/core/memory"
 	"github.com/Ashes47/braids/internal/core/model"
 	"github.com/Ashes47/braids/internal/core/sidecar"
 	"github.com/Ashes47/braids/internal/core/store"
@@ -57,6 +58,8 @@ usage:
   braids agents --lane ID                list the subagents a conversation spawned
   braids work [--lane ID] [--path SUB]   browse the work products a session left
               [--orphans] [--reclaim]    ...or find and reclaim ownerless ones
+  braids memories [--project NAME]       what a project remembers, and whether
+                                         the index still agrees with the files
   braids promote --lane ID --agent ID    turn a subagent into its own conversation
   braids merge --lane ID --from ID       join a branch back, as a new conversation
   braids hooks [--install|--remove]      let sessions report when they block
@@ -132,6 +135,8 @@ func run(args []string, w io.Writer) error {
 		return cmdAgents(args[1:], out)
 	case "work":
 		return cmdWork(args[1:], out)
+	case "memories":
+		return cmdMemories(args[1:], out)
 	case "version", "-v", "--version":
 		out.mark(brand.Small())
 		out.printf("braids %s (%s)\n", version, commit)
@@ -151,7 +156,7 @@ func run(args []string, w io.Writer) error {
 // known is every command name braids answers to. A test walks it against the
 // dispatch above, so a command cannot be added without being offered here.
 var known = []string{
-	"map", "index", "search", "lanes", "branch", "agents", "work",
+	"map", "index", "search", "lanes", "branch", "agents", "work", "memories",
 	"promote", "merge", "hooks", "hook", "version", "help",
 }
 
@@ -447,6 +452,9 @@ func cmdMap(args []string, out *printer) error {
 				return bytes, err
 			}
 			return bytes, ix.RefreshArtifacts(ctx, src)
+		},
+		LoadMemories: func() ([]memory.Set, error) {
+			return memorySets(src, "")
 		},
 		LoadWork: func(laneID, dir string) (tui.WorkLevel, error) {
 			lane, err := findLane(ctx, ix, laneID)
@@ -1720,4 +1728,107 @@ func lastWritten(at time.Time) string {
 		return "—"
 	}
 	return at.Format("2006-01-02")
+}
+
+// cmdMemories reports what a project remembers.
+//
+// Read-only. The index is what a session actually loads, so the two things
+// worth saying are what is remembered and where the index and the files have
+// drifted apart — a memory absent from the index is loaded by nothing.
+func cmdMemories(args []string, out *printer) error {
+	fs := newFlagSet("memories")
+	fs.SetOutput(out)
+	project := fs.String("project", "", "only this project")
+	asJSON := jsonFlag(fs)
+	if err := parse(fs, args, out); err != nil {
+		return err
+	}
+	root, err := claudecode.DefaultRoot()
+	if err != nil {
+		return err
+	}
+	sets, err := memorySets(claudecode.New(root), *project)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return out.emit(memoriesOut(sets))
+	}
+	return printMemories(sets, out)
+}
+
+// memorySets reads every project's memories, or one project's.
+func memorySets(src store.Source, project string) ([]memory.Set, error) {
+	rememberer, ok := src.(store.Rememberer)
+	if !ok {
+		return nil, errors.New("this source keeps no memories")
+	}
+	locations, err := rememberer.MemoryDirs()
+	if err != nil {
+		return nil, err
+	}
+	var sets []memory.Set
+	for _, location := range locations {
+		// Match the name braids shows, or anything in the directory it came
+		// from. The shown name is the last dash-separated part of a slug that
+		// encodes a path with dashes, so a directory called GPU-Cluster shows
+		// as "Cluster" — consistent with the map, and surprising to type.
+		if project != "" && !strings.EqualFold(location.Project, project) &&
+			!strings.Contains(strings.ToLower(location.Dir), strings.ToLower(project)) {
+			continue
+		}
+		set, err := memory.Read(location)
+		if err != nil {
+			return nil, err
+		}
+		if len(set.Memories) == 0 && len(set.Orphaned) == 0 {
+			continue
+		}
+		sets = append(sets, set)
+	}
+	return sets, nil
+}
+
+func printMemories(sets []memory.Set, out *printer) error {
+	if len(sets) == 0 {
+		out.printf("nothing is remembered yet\n")
+		return out.Err()
+	}
+	for i, set := range sets {
+		if i > 0 {
+			out.printf("\n")
+		}
+		out.printf("%s · %d memories · %s\n", set.Project, len(set.Memories), format.Bytes(set.Bytes()))
+		tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		rows := []string{"MEMORY\tKIND\tLINKS\tCHANGED\tFROM"}
+		for _, m := range set.Memories {
+			name := m.Name
+			if !m.Listed {
+				name += " ⚠"
+			}
+			rows = append(rows, fmt.Sprintf("%s\t%s\t%d\t%s\t%s",
+				truncate(name, 34), m.Kind, len(m.Links),
+				m.Modified.Format("01-02"), orDash(shortID(m.Origin))))
+		}
+		for _, r := range rows {
+			if _, err := fmt.Fprintln(tw, r); err != nil {
+				return fmt.Errorf("write memories: %w", err)
+			}
+		}
+		if err := tw.Flush(); err != nil {
+			return fmt.Errorf("write memories: %w", err)
+		}
+		// The index is what a session loads, so a disagreement with it is the
+		// one thing here that is actually broken rather than merely listed.
+		for _, m := range set.Unlisted() {
+			out.printf("  ⚠ %s is not in %s, so nothing ever loads it\n", m.Name, memory.IndexFile)
+		}
+		for _, slug := range set.Orphaned {
+			out.printf("  ⚠ %s names %s, which is not there\n", memory.IndexFile, slug)
+		}
+		for _, link := range set.Dangling() {
+			out.printf("  · %s points at [[%s]], which does not exist yet\n", link.From, link.To)
+		}
+	}
+	return out.Err()
 }

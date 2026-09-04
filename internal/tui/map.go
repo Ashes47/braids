@@ -12,6 +12,7 @@ import (
 	"github.com/Ashes47/braids/internal/core/graph"
 	"github.com/Ashes47/braids/internal/core/hooks"
 	"github.com/Ashes47/braids/internal/core/index"
+	"github.com/Ashes47/braids/internal/core/memory"
 	"github.com/Ashes47/braids/internal/core/model"
 	"github.com/Ashes47/braids/internal/core/trash"
 	"github.com/Ashes47/braids/internal/format"
@@ -94,6 +95,9 @@ type Options struct {
 	// LoadWork lists one level of a conversation's work products. dir is
 	// relative to the top of them; empty means the top.
 	LoadWork func(laneID, dir string) (WorkLevel, error)
+	// LoadMemories reads what every project remembers. Nil for a source that
+	// keeps no memories, which hides the screen rather than showing it empty.
+	LoadMemories func() ([]memory.Set, error)
 	// DiscardPaths moves particular files or directories to the bin, returning
 	// how much was moved. It is how one heavy scratch file is reclaimed without
 	// taking the rest of a session's work with it.
@@ -142,6 +146,7 @@ const (
 	searchMode
 	binMode
 	workMode
+	memoryMode
 )
 
 // Model is the Map: every conversation and every branch as a single forest.
@@ -178,6 +183,7 @@ type Model struct {
 	deleteWorkFn func(string) (int64, error)
 	loadBin      func() ([]trash.Entry, error)
 	loadWork     func(laneID, dir string) (WorkLevel, error)
+	loadMemories func() ([]memory.Set, error)
 	discardPaths func(label string, paths []string) (int64, error)
 	restoreFn    func(string) error
 	purgeFn      func(string) error
@@ -195,6 +201,7 @@ type Model struct {
 	search   *searchState
 	bin      *binState
 	work     *workState
+	memories *memoryState
 
 	all     []row
 	visible []row
@@ -249,6 +256,7 @@ func NewModel(f *graph.Forest, opts Options) Model {
 		deleteFn:       opts.Delete,
 		deleteWorkFn:   opts.DeleteWork,
 		loadWork:       opts.LoadWork,
+		loadMemories:   opts.LoadMemories,
 		discardPaths:   opts.DiscardPaths,
 		loadBin:        opts.LoadBin,
 		restoreFn:      opts.Restore,
@@ -420,6 +428,8 @@ func (m Model) View() tea.View {
 		return tea.View{Content: m.renderBin(), AltScreen: true}
 	case m.mode == workMode && m.work != nil:
 		return tea.View{Content: m.renderWork(), AltScreen: true}
+	case m.mode == memoryMode && m.memories != nil:
+		return tea.View{Content: m.renderMemories(), AltScreen: true}
 	case m.mode == searchMode && m.search != nil:
 		return tea.View{Content: m.renderSearch(), AltScreen: true}
 	case m.mode == spineMode && m.spine != nil:
@@ -462,6 +472,9 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode == workMode {
 		return m.workKey(key), nil
 	}
+	if m.mode == memoryMode {
+		return m.memoryKey(key), nil
+	}
 	if key == "/" && m.searchFn != nil {
 		return m.openSearch(), nil
 	}
@@ -492,6 +505,8 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.deleteWork(), nil
 	case "w":
 		return m.openWork(), nil
+	case "M":
+		return m.openMemories(), nil
 	case "n":
 		m.cursor = m.nextWaiting(m.cursor, 1)
 	case "N":

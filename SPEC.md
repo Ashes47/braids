@@ -544,6 +544,37 @@ Artifacts whose conversation is gone are found by `braids work --orphans` and
 reclaimed with `--reclaim`. Nothing will ever look at them again, and nothing
 else would ever clear them up.
 
+### 6.4c Memories — read-only, and shaped for curation
+
+A harness keeps memories as small markdown files beside the transcripts, with an
+index — MEMORY.md — that is what a session actually loads. Two consequences
+follow, and they are the reason this screen exists: a memory can be present and
+do nothing, by being absent from the index, and an index row can point at a file
+that is gone. Neither is visible from inside a session. On this machine the
+first check found one such memory out of 83.
+
+Most memories also record the session that wrote them: 62 of 76 here, and 61 of
+those conversations braids already has indexed. That is a real edge, so `↵` on a
+memory lands on the conversation where the decision was actually made — and the
+spine is already there to find the turn.
+
+Three findings are reported apart because they mean different things. A memory
+the index omits is broken. An index row with no file is a stale pointer. A link
+to a name that does not exist yet is a legitimate note to self, and braids says
+so rather than calling it a fault.
+
+**Read-only, deliberately.** MEMORY.md is the harness's file and a live session
+may rewrite it, which sits badly with one writer per file. Curation attaches
+without rework: the cursor already names one memory, the notice line already
+reports what happened, and the state already reloads from disk after an action.
+What a delete, rename or retype would add is a key, a function on Options, and
+one hard obligation — change the index in the same breath as the file, because
+the index is the part that is read. A guard against acting while a session in
+that project is live is what the hooks already make possible.
+
+Search does not cover memories yet. That is the next slice rather than an
+oversight: it needs the index schema to hold something other than transcripts.
+
 ### 6.5 Branch — inline at the junction, never a modal
 
 ```

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 
+	"github.com/Ashes47/braids/internal/core/memory"
 	"github.com/Ashes47/braids/internal/core/model"
 )
 
@@ -49,6 +50,13 @@ type Enricher interface {
 // single tool call. Sources without subagents simply do not implement it.
 type Sidechains interface {
 	Subagents(ctx context.Context, lane model.Lane) ([]model.Subagent, error)
+}
+
+// Rememberer lists the memory directories a harness keeps. A harness with no
+// notion of memory simply does not implement it, and braids offers no memory
+// screen for that source.
+type Rememberer interface {
+	MemoryDirs() ([]memory.Location, error)
 }
 
 // Measurer re-measures a conversation's work products.

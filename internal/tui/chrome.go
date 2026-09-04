@@ -94,8 +94,11 @@ func hints() []hint {
 		// One row for both: a fifteenth entry needs a third column of legend,
 		// and that column costs the glyph key on an ordinary terminal.
 		{"w / D", "work / delete all"},
-		{"u", "deleted / recover"}, {"A", "show archived"},
-		{"y", "copy resume"}, {"o", "open terminal"},
+		{"u", "deleted / recover"}, {"M", "memories"},
+		{"A", "show archived"},
+		// Paired for the same reason as w / D: a fifteenth row needs a third
+		// column of legend, and that column costs the glyph key.
+		{"y / o", "copy / open terminal"},
 	}
 }
 
@@ -261,6 +264,8 @@ func (m Model) headerContent() ([]fact, []hint, []glyph) {
 		return m.binFacts(), binHints(), nil
 	case m.mode == workMode && m.work != nil:
 		return m.workFacts(), workHints(), nil
+	case m.mode == memoryMode && m.memories != nil:
+		return m.memoryFacts(), memoryHints(), m.memoryGlyphs()
 	case m.mode == spineMode && m.spine != nil:
 		return m.spineFacts(), m.spineHints(), m.spineGlyphs()
 	default:

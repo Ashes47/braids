@@ -112,6 +112,11 @@ descend — so you can bin one 231 MB dump and keep the rest. The harness's own
 record of a job is shown and refused. `braids work --orphans` finds the sets
 whose conversation is gone.
 
+**Memories** — what a project has told the harness to remember, with the two
+things you cannot see from inside a session: a memory the index omits, which is
+therefore loaded by nothing, and a link pointing at a memory that is gone. `↵`
+on a memory opens the conversation that wrote it. Read-only for now.
+
 **Bin** — deleting moves files aside with a manifest and a 14-day retention, so
 nothing you delete is gone the moment you regret it.
 
@@ -144,6 +149,8 @@ braids lanes                            list indexed conversations
 braids agents  --lane ID                list the subagents a conversation spawned
 braids work    --lane ID [--path SUB]   browse a session's work products
 braids work    --orphans [--reclaim]    find, and reclaim, ownerless ones
+braids memories [--project NAME]        what a project remembers, and whether
+                                        the index still agrees with the files
 braids branch  --lane ID --at TURN [--workspace]
 braids promote --lane ID --agent ID     turn a subagent into its own conversation
 braids merge   --lane ID --from ID [--plan]

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Ashes47/braids/internal/core/artifacts"
 	"github.com/Ashes47/braids/internal/core/index"
+	"github.com/Ashes47/braids/internal/core/memory"
 	"github.com/Ashes47/braids/internal/core/store"
 )
 
@@ -165,4 +166,76 @@ func workOut(lane, dir string, entries []artifacts.Entry) any {
 		Bytes   int64      `json:"bytes"`
 		Files   int        `json:"files"`
 	}{lane, dir, rows, bytes, files}
+}
+
+type memoryOut struct {
+	Name        string    `json:"name"`
+	Title       string    `json:"title,omitempty"`
+	Description string    `json:"description"`
+	Kind        string    `json:"kind"`
+	Path        string    `json:"path"`
+	Bytes       int64     `json:"bytes"`
+	Modified    time.Time `json:"modified"`
+	// Origin is the conversation that wrote it, when one was recorded. It is
+	// the edge worth having: it leads back to where the decision was made.
+	Origin string   `json:"origin,omitempty"`
+	Links  []string `json:"links"`
+	// Listed is whether the index mentions it. False means nothing loads it.
+	Listed bool `json:"listed"`
+}
+
+type setOut struct {
+	Project  string         `json:"project"`
+	Dir      string         `json:"dir"`
+	Memories []memoryOut    `json:"memories"`
+	Bytes    int64          `json:"bytes"`
+	Kinds    map[string]int `json:"kinds"`
+	// Unlisted, Orphaned and Dangling are what the index and the files
+	// disagree about, which is the part a person cannot see from inside a
+	// session.
+	Unlisted []string      `json:"unlisted"`
+	Orphaned []string      `json:"orphaned"`
+	Dangling []danglingOut `json:"dangling"`
+}
+
+type danglingOut struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+func memoriesOut(sets []memory.Set) any {
+	rows := make([]setOut, 0, len(sets))
+	for _, set := range sets {
+		memories := make([]memoryOut, 0, len(set.Memories))
+		for _, m := range set.Memories {
+			links := m.Links
+			if links == nil {
+				links = []string{}
+			}
+			memories = append(memories, memoryOut{
+				m.Name, m.Title, m.Description, m.Kind, m.Path, m.Bytes,
+				m.Modified, m.Origin, links, m.Listed,
+			})
+		}
+		unlisted := make([]string, 0)
+		for _, m := range set.Unlisted() {
+			unlisted = append(unlisted, m.Name)
+		}
+		dangling := make([]danglingOut, 0)
+		for _, l := range set.Dangling() {
+			dangling = append(dangling, danglingOut{l.From, l.To})
+		}
+		orphaned := set.Orphaned
+		if orphaned == nil {
+			orphaned = []string{}
+		}
+		rows = append(rows, setOut{
+			Project: set.Project, Dir: set.Dir, Memories: memories,
+			Bytes: set.Bytes(), Kinds: set.ByKind(),
+			Unlisted: unlisted, Orphaned: orphaned, Dangling: dangling,
+		})
+	}
+	return struct {
+		Projects []setOut `json:"projects"`
+	}{rows}
 }

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ashes47/braids/internal/core/memory"
 	"github.com/Ashes47/braids/internal/core/model"
 	"github.com/Ashes47/braids/internal/core/store"
 )
@@ -491,4 +492,12 @@ func ReservedArtifact(name string) bool {
 	default:
 		return false
 	}
+}
+
+// MemoryDirs finds the memory directories the harness keeps, one per project
+// that has remembered anything. They sit inside the project directory beside
+// the transcripts, which braids already walks — it reads only *.jsonl there, so
+// the two have never collided.
+func (s *Source) MemoryDirs() ([]memory.Location, error) {
+	return memory.Dirs(s.root, projectName)
 }

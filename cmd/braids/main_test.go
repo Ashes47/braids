@@ -529,3 +529,83 @@ func TestWorkBrowsesAndStaysInside(t *testing.T) {
 		t.Error("work with neither --lane nor --orphans was accepted")
 	}
 }
+
+// The memories command reports what is remembered and, more usefully, where
+// the index and the files have drifted apart.
+func TestMemoriesReportsWhatTheIndexOmits(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "-Users-me-src-alpha", "memory")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("listed.md", "---\nname: listed\ndescription: in the index\nmetadata:\n  type: project\n---\n\nsee [[nowhere]]\n")
+	write("hidden.md", "---\nname: hidden\ndescription: not in the index\nmetadata:\n  type: feedback\n---\n\nbody\n")
+	write("MEMORY.md", "# Memory index\n\n- [Listed](listed.md) — in the index\n- [Gone](gone.md) — no file\n")
+
+	t.Setenv("HOME", root)
+
+	// DefaultRoot resolves under HOME, so lay the tree out the way it expects.
+	claudeProjects := filepath.Join(root, ".claude", "projects", "-Users-me-src-alpha", "memory")
+	if err := os.MkdirAll(claudeProjects, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"listed.md", "hidden.md", "MEMORY.md"} {
+		body, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(claudeProjects, name), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out := runCmd(t, "memories")
+	for _, want := range []string{
+		"listed", "hidden",
+		"hidden is not in MEMORY.md, so nothing ever loads it",
+		"MEMORY.md names gone, which is not there",
+		"listed points at [[nowhere]]",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("memories output is missing %q:\n%s", want, out)
+		}
+	}
+
+	// The JSON surface keeps the same three findings apart.
+	var got struct {
+		Projects []struct {
+			Project  string   `json:"project"`
+			Unlisted []string `json:"unlisted"`
+			Orphaned []string `json:"orphaned"`
+			Dangling []struct {
+				From, To string
+			} `json:"dangling"`
+			Memories []struct {
+				Name   string `json:"name"`
+				Listed bool   `json:"listed"`
+			} `json:"memories"`
+		} `json:"projects"`
+	}
+	decode(t, runCmd(t, "memories", "--json"), &got)
+	if len(got.Projects) != 1 {
+		t.Fatalf("json reported %d projects", len(got.Projects))
+	}
+	p := got.Projects[0]
+	if len(p.Unlisted) != 1 || p.Unlisted[0] != "hidden" {
+		t.Errorf("unlisted = %v", p.Unlisted)
+	}
+	if len(p.Orphaned) != 1 || p.Orphaned[0] != "gone" {
+		t.Errorf("orphaned = %v", p.Orphaned)
+	}
+	if len(p.Dangling) != 1 || p.Dangling[0].To != "nowhere" {
+		t.Errorf("dangling = %+v", p.Dangling)
+	}
+	if len(p.Memories) != 2 {
+		t.Errorf("memories = %+v", p.Memories)
+	}
+}

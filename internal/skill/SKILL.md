@@ -106,7 +106,7 @@ unless narrowed, and work products are matched by name rather than contents.
 
 ```sh
 braids show --lane LANE --at 22403 --around 6 --kind text --json
-braids show --lane LANE --from 100 --to 140 --json
+braids show --lane LANE --from 100 --to 140 --plain --json
 ```
 
 `--at` with `--around` reads a window either side of one turn, which is what a
@@ -118,6 +118,16 @@ to "how did that one go".
 real conversation; leave it off when what you want *is* what a command
 returned. Blocks are cut at `--chars` characters and say how much was removed,
 so a tool result carrying a whole file does not arrive whole.
+
+`--plain` takes out the terminal colour codes. A program that found a terminal
+on the other end wrote them, and braids stores what was written, so by default
+they are there: a test run that printed `1 failed` in red is stored with eleven
+escape bytes inside that phrase. That matters twice over. They are bytes you
+cannot read, and they sit inside the words, so searching the output you got
+back for `1 failed | 64 passed` will not find it. **Pass `--plain` when you
+want to read what a command said.** Leave it off when the codes are the point,
+which is when the question is about the terminal output itself. It is applied
+before `--chars`, so asking for plain text also buys you more of the words.
 
 ## Where a file came from
 

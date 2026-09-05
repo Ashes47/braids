@@ -499,6 +499,7 @@ braids search "fork" --json
 braids show --lane 9419fd9c --at 22403                # six turns either side
 braids show --lane 9419fd9c --at 22403 --kind text    # only what was said
 braids show --lane 9419fd9c --from 100 --to 140       # a range
+braids show --lane 9419fd9c --plain                   # without terminal colour
 braids show --lane 9419fd9c                           # how it ended
 """)}
 <p>
@@ -508,6 +509,16 @@ braids show --lane 9419fd9c                           # how it ended
   <code>--chars</code> characters and says how many it dropped, because a
   single tool result can be a whole file and arriving whole is rarely a
   kindness.
+</p>
+<p>
+  A tool that found a terminal on the other end wrote colour codes, and braids
+  stores what was written, so they come back with it. <code>--plain</code>
+  takes them out. It is off by default because editing a transcript to make it
+  read better is the one thing braids does not do, and on request because those
+  bytes sit <em>inside</em> the words: a test run that printed
+  <code>1 failed</code> in red holds eleven escape bytes in the middle of that
+  phrase, so searching the output for it finds nothing. Stripping happens
+  before <code>--chars</code>, so asking for it also buys more of the words.
 </p>
 {say("This is the command the map has always had as a screen and the command line did not. A search could tell an agent where an answer was and give it no way to read the answer, which made the honest advice \"quote the evidence\" impossible to follow.")}
 
@@ -1073,6 +1084,7 @@ REFERENCE = f"""
     ("--to N", "last turn"),
     ("--kind LIST", "text, thinking, tool_use, tool_result"),
     ("--chars N", "characters of each block, default 600, 0 for all"),
+    ("--plain", "strip the terminal colour codes recorded in tool output"),
 ])}
 <h3>braids branch</h3>
 {table(["Flag", "What it does"], [

@@ -64,14 +64,24 @@ func TestSkillOnlyTeachesCommandsThatExist(t *testing.T) {
 // command actually has.
 func commandTakes(t *testing.T, command, flag string) bool {
 	t.Helper()
-	if flag == "--json" || flag == "--help" {
-		return true
+	if flag == "--help" {
+		return true // never listed, always accepted
 	}
 	var buf bytes.Buffer
 	// --help writes the flag list and returns a sentinel error, which is the
 	// same path a mistyped flag takes.
 	_ = run([]string{command, "--help"}, &buf)
-	return strings.Contains(buf.String(), flag+" ")
+	// A flag that takes a value is listed as "--at int", and one that does not
+	// is listed as "--plain" with the line ending right there. Matching on a
+	// trailing space alone finds only the first kind, which is why the two
+	// boolean flags this used to know about were special cases rather than
+	// answers.
+	for _, end := range []string{" ", "\n"} {
+		if strings.Contains(buf.String(), flag+end) {
+			return true
+		}
+	}
+	return false
 }
 
 // And the reverse: a command worth teaching should be taught. This is a

@@ -222,6 +222,7 @@ braids memories [--project NAME]        what a project remembers, and whether
 braids explain FILE                     which conversations were live when
                                         this file last changed
 braids show    --lane ID [--at TURN]    read the turns around one turn
+               [--kind text] [--plain]  ...only what was said, without colour
 braids branch  --lane ID --at TURN [--workspace]
 braids promote --lane ID --agent ID     turn a subagent into its own conversation
 braids merge   --lane ID --from ID [--plan]

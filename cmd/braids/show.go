@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -61,6 +62,7 @@ func cmdShow(args []string, out *printer) error {
 	to := fs.Int("to", 0, "last turn")
 	kinds := fs.String("kind", "", "comma-separated part kinds: text, thinking, tool_use, tool_result")
 	chars := fs.Int("chars", bodyChars, "characters of each block to print, 0 for all of it")
+	plain := fs.Bool("plain", false, "strip the terminal colour codes recorded in tool output")
 	asJSON := jsonFlag(fs)
 	if err := parse(fs, args, out); err != nil {
 		return err
@@ -105,7 +107,11 @@ func cmdShow(args []string, out *printer) error {
 			if !keeps(wanted, p.Kind) {
 				continue
 			}
-			body, cut := clip(p.Body, *chars)
+			body := p.Body
+			if *plain {
+				body = plainText(body)
+			}
+			body, cut := clip(body, *chars)
 			row.Parts = append(row.Parts, showPart{
 				Kind: string(p.Kind), Tool: p.Tool, Body: body, Cut: cut,
 			})
@@ -169,6 +175,29 @@ func keeps(wanted []model.PartKind, kind model.PartKind) bool {
 		}
 	}
 	return false
+}
+
+// escapes matches what a program writes to colour a terminal: the CSI
+// sequences that carry colour and cursor movement, and the OSC sequences that
+// carry titles and hyperlinks, each to its own terminator.
+var escapes = regexp.MustCompile("\x1b\\[[0-9;?]*[ -/]*[@-~]" + // CSI
+	"|\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)" + // OSC
+	"|\x1b[@-Z\\\\-_]") // the short two-byte ones
+
+// plainText takes the colour out of what a tool wrote.
+//
+// A program that finds a terminal on the other end writes colour, and the
+// harness records the bytes it wrote, so a test run that printed "1 failed" in
+// red is stored with eleven escape bytes sitting inside that phrase. braids
+// reports what was written and does not quietly tidy it, so this happens only
+// when it is asked for. It runs before the block is shortened, because a
+// budget of characters spent on codes for a terminal that no longer exists is
+// a budget spent on nothing.
+func plainText(body string) string {
+	if !strings.Contains(body, "\x1b") {
+		return body
+	}
+	return escapes.ReplaceAllString(body, "")
 }
 
 // clip shortens a block, reporting how much it took off so the reader knows

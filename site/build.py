@@ -281,7 +281,12 @@ function copyCmd(button) {{
 PAGE = page(
     title="braids: find the reasoning in your past Claude Code sessions",
     description="Every Claude Code session on your machine, searchable in milliseconds. Find the turn where you worked something out, see which conversation produced a file, and start a new conversation from exactly there. Local, open source, nothing hosted.",
-    og_title="braids: you worked this out already",
+    # The headline, whole. It was the first half of it, which reads as a
+    # sentence broken off before the point: what an unfurl showed was
+    # "you worked this out already" and never said what braids does about
+    # it. og:site_name already carries the name, so the line does not
+    # have to spend its first word on it either.
+    og_title="You worked this out already. braids finds where.",
     og_description="Every Claude Code session on your machine, searchable in milliseconds, with the conversation behind any file and a new branch from any turn. Local, open source, nothing hosted.",
     body=BODY,
     css=CSS,

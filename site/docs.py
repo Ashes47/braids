@@ -487,6 +487,30 @@ braids search "fork" --json
     ("--json", "machine readable, with whole IDs"),
 ])}
 
+<h2 id="read">Reading what a hit points at</h2>
+<p>
+  A hit is a pointer, not an answer. It names a conversation, the turn the
+  match was on, and about twelve words either side of it, which is enough to
+  recognise the right thread and far too little to tell a proposal from a
+  conclusion. The sentence that settles it is usually the one after the one
+  that matched.
+</p>
+{sh("""
+braids show --lane 9419fd9c --at 22403                # six turns either side
+braids show --lane 9419fd9c --at 22403 --kind text    # only what was said
+braids show --lane 9419fd9c --from 100 --to 140       # a range
+braids show --lane 9419fd9c                           # how it ended
+""")}
+<p>
+  Two thirds of a real conversation is tool calls and their results, so
+  <code>--kind text</code> is usually what you want; leave it off when the
+  thing you are after is what a command returned. Each block is cut at
+  <code>--chars</code> characters and says how many it dropped, because a
+  single tool result can be a whole file and arriving whole is rarely a
+  kindness.
+</p>
+{say("This is the command the map has always had as a screen and the command line did not. A search could tell an agent where an answer was and give it no way to read the answer, which made the honest advice \"quote the evidence\" impossible to follow.")}
+
 <h2 id="typed">The same filters, typed</h2>
 <p>
   Flags are right for a script and wrong for a person mid-sentence, so the
@@ -1002,6 +1026,7 @@ REFERENCE = f"""
     ("braids work", "browse what a session wrote to disk"),
     ("braids memories", "what a project remembers, and what it has lost"),
     ("braids explain FILE", "which conversations were live when this file last changed"),
+    ("braids show --lane ID", "read the turns of a conversation, around one turn"),
     ("braids hooks", "install, remove or inspect the hook"),
     ("braids skill", "install, remove or inspect the Claude Code skill"),
     ("braids version", "the version, the commit, and how old this build is"),
@@ -1038,6 +1063,16 @@ REFERENCE = f"""
     ("--type LIST", "conversation, memory, artifact"),
     ("--kind LIST", "text, thinking, tool_use, tool_result"),
     ("--limit N", "maximum hits, default 20"),
+])}
+<h3>braids show</h3>
+{table(["Flag", "What it does"], [
+    ("--lane ID", "conversation to read"),
+    ("--at TURN", "centre the window on this turn"),
+    ("--around N", "turns either side of --at, default 6"),
+    ("--from N", "first turn, instead of --at"),
+    ("--to N", "last turn"),
+    ("--kind LIST", "text, thinking, tool_use, tool_result"),
+    ("--chars N", "characters of each block, default 600, 0 for all"),
 ])}
 <h3>braids branch</h3>
 {table(["Flag", "What it does"], [

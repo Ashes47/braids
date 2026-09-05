@@ -1165,6 +1165,108 @@ func toolsOf(m model.Message) string {
 	return strings.Join(names, ",")
 }
 
+// Turn is one turn of a conversation with what was actually said in it.
+//
+// The map draws turns from MessageRow, which carries a preview: enough to
+// draw a line, and deliberately not enough to read. This carries the bodies,
+// because something reading a conversation rather than drawing it needs the
+// words.
+type Turn struct {
+	Seq    int
+	ID     string
+	Role   model.Role
+	At     time.Time
+	Failed bool
+	Parts  []TurnPart
+}
+
+// TurnPart is one block of a turn: something said, something thought, a tool
+// called or a tool answering.
+type TurnPart struct {
+	Kind model.PartKind
+	Tool string
+	Body string
+}
+
+// Window reads a run of turns, from and to inclusive, with their contents.
+//
+// Bounded on purpose. A long conversation is tens of thousands of turns and
+// tool output runs to megabytes, so the caller says which turns it wants and
+// gets those. Reading a whole lane to look at twelve turns is how a tool that
+// answers questions about history becomes a tool that exhausts memory.
+func (ix *Index) Window(ctx context.Context, laneID string, from, to int) ([]Turn, error) {
+	if from < 1 {
+		from = 1
+	}
+	if to < from {
+		return nil, nil
+	}
+	rows, err := ix.db.QueryContext(ctx,
+		`SELECT seq, msg_id, role, at, failed FROM messages
+		 WHERE lane_id = ? AND seq >= ? AND seq <= ? ORDER BY seq`,
+		laneID, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("read turns of %s: %w", laneID, err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only
+
+	var turns []Turn
+	at := map[string]int{} // msg_id to its place in turns
+	for rows.Next() {
+		var t Turn
+		var role string
+		var when int64
+		var failed int
+		if err := rows.Scan(&t.Seq, &t.ID, &role, &when, &failed); err != nil {
+			return nil, fmt.Errorf("scan turn: %w", err)
+		}
+		t.Role = model.Role(role)
+		t.At = time.Unix(when, 0)
+		t.Failed = failed == 1
+		at[t.ID] = len(turns)
+		turns = append(turns, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate turns: %w", err)
+	}
+	if len(turns) == 0 {
+		return nil, nil
+	}
+
+	// The bodies, in one pass. parts has no ordering column of its own, so the
+	// rowid stands in: it is the order they were written, which is the order
+	// they were said.
+	marks := make([]string, len(turns))
+	args := []any{laneID}
+	for i, t := range turns {
+		marks[i] = "?"
+		args = append(args, t.ID)
+	}
+	bodies, err := ix.db.QueryContext(ctx,
+		`SELECT msg_id, kind, tool, body FROM parts
+		 WHERE lane_id = ? AND msg_id IN (`+strings.Join(marks, ",")+`)
+		 ORDER BY rowid`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("read what was said in %s: %w", laneID, err)
+	}
+	defer bodies.Close() //nolint:errcheck // read-only
+
+	for bodies.Next() {
+		var msgID, kind, tool, body string
+		if err := bodies.Scan(&msgID, &kind, &tool, &body); err != nil {
+			return nil, fmt.Errorf("scan a turn's contents: %w", err)
+		}
+		i, ok := at[msgID]
+		if !ok {
+			continue
+		}
+		turns[i].Parts = append(turns[i].Parts, TurnPart{
+			Kind: model.PartKind(kind), Tool: tool, Body: body,
+		})
+	}
+	return turns, bodies.Err()
+}
+
 // Overlaps returns every message that appears in more than one lane, which is
 // the raw material for fork detection.
 func (ix *Index) Overlaps(ctx context.Context) ([]Overlap, error) {

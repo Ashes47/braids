@@ -82,7 +82,7 @@ func TestSkillMentionsTheCommandsWorthTeaching(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := strings.ReplaceAll(string(body), "\r\n", "\n")
-	for _, command := range []string{"search", "branch", "explain", "lanes", "memories", "work"} {
+	for _, command := range []string{"search", "show", "branch", "explain", "lanes", "memories", "work"} {
 		if !strings.Contains(text, "braids "+command) {
 			t.Errorf("the skill never mentions `braids %s`", command)
 		}

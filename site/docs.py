@@ -1258,7 +1258,9 @@ def build() -> None:
         out = OUT / slug / "index.html" if slug else OUT / "index.html"
         out.parent.mkdir(parents=True, exist_ok=True)
         page_html = page(title=f"{title} | braids", description=description,
-                         body=html_body, css=DOCS_CSS, home=HOME)
+                         og_title=f"{title} · braids",
+                         body=html_body, css=DOCS_CSS, home=HOME,
+                         path=f"/docs/{slug}/" if slug else "/docs/")
         out.write_text(page_html)
         print(f"wrote {out.relative_to(HERE)}: {len(page_html) // 1024} KB")
 

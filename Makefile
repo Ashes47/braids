@@ -83,6 +83,7 @@ frames: install
 	for f in map spine search work file memories memory bin; do \
 		python3 scripts/ansi2png.py site/frames/$$f.ans assets/frames/$$f.png; \
 	done
+	python3 scripts/social.py
 
 # site-build does the lot: recapture, then regenerate.
 site-build: frames pages

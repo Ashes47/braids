@@ -1,17 +1,17 @@
  Query:    lock                  <↵>     open the result                                                                             ___.                        __       .___        
  Scope:    every conversation    <tab>   change scope                                                                                \_ |__   ______   _____    |__|   __| _/   ______
  Hits:     9                     <↑ / ↓> down / up                                                                                    | __ \  \_  __ \ \__  \    |    / __ |   /  ___/
- Took:     280µs                 <esc>   back                                                                                         | \_\ \  |  | \/  / __ \_  |   / /_/ |   \___  \
+ Took:     281µs                 <esc>   back                                                                                         | \_\ \  |  | \/  / __ \_  |   / /_/ |   \___  \
                                                                                                                                       |___  /  |__|    (____  / |__| \____ |  /____  /
                                                                                                                                           \/                \/            \/       \/ 
 
 ╭─ Search(everywhere)[9] ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ TYPE   WHERE                  WHEN           TURN KIND        MATCH                                                                                                                 │
 │ convo  Two writers contendin… 08-21 13:58      t2 Bash        {"command": "counting [lock] waits per shard"}                                                                        │
-│ memory lock-scope-rule        09-05 02:44                     [lock]-scope-rule A [lock] must not span a network call. This…                                                        │
-│ work   tmp/lock-waits-by-sha… 09-05 02:44                     tmp/[lock]-waits-by-shard.tsv                                                                                         │
+│ memory lock-scope-rule        09-05 12:26                     [lock]-scope-rule A [lock] must not span a network call. This…                                                        │
+│ work   tmp/lock-waits-by-sha… 09-05 12:26                     tmp/[lock]-waits-by-shard.tsv                                                                                         │
 │ convo  Checkout stalls at 80… 09-04 13:38      t4 Grep        {"command": "grep for the [lock] across the service"}                                                                 │
-│ memory import-nulls           09-05 02:44                     …Related: [[[lock]-scope-rule]].                                                                                      │
+│ memory import-nulls           09-05 12:26                     …Related: [[[lock]-scope-rule]].                                                                                      │
 │ convo  Checkout stalls at 80… 09-04 13:40      t8 text        the [lock] is held across a network call                                                                              │
 │ convo  Option C: move the lo… 09-04 13:53      t2 Edit        {"command": "moving the [lock] and narrowing its scope"}                                                              │
 │ convo  Checkout stalls at 80… 09-04 13:37      t2 Read        {"command": "reading the handler and the [lock] it takes"}                                                            │

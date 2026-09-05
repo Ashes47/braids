@@ -171,15 +171,27 @@ def scrollableTables(markup: str) -> str:
     return markup.replace("</table>", "</table></div>")
 
 
+SITE = "https://braids.chat"
+
+
 def page(*, title: str, description: str, body: str, css: str,
-         og_title: str = "", og_description: str = "", home: str = "") -> str:
+         og_title: str = "", og_description: str = "", home: str = "",
+         path: str = "") -> str:
     """One complete, self-contained HTML page.
 
     Self-contained matters: the stylesheet is inlined and there is no font, no
     analytics script and no CDN, so reading about a tool that never phones home
     does not phone home either.
+
+    The sharing tags are the one place that has to break the site's habit of
+    relative links. A link unfurler is not reading the page from the site, so
+    a relative image is an image it cannot resolve and does not show; every URL
+    it is given here is absolute for that reason. `path` is where this page
+    lives, so each one is canonical to itself rather than all claiming to be
+    the front page.
     """
     a = home + "assets"
+    here = SITE + (path or "/")
     body = scrollableTables(body)
     return f"""<!doctype html>
 <html lang="en">
@@ -189,11 +201,25 @@ def page(*, title: str, description: str, body: str, css: str,
 <title>{title}</title>
 <meta name="description" content="{description}">
 <link rel="icon" href="{a}/braids-icon-64.png">
+<link rel="apple-touch-icon" href="{a}/braids-icon-256.png">
+<link rel="canonical" href="{here}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="braids">
 <meta property="og:title" content="{og_title or title}">
 <meta property="og:description" content="{og_description or description}">
-<meta property="og:image" content="{a}/braids-icon-256.png">
-<meta property="og:url" content="https://braids.chat">
+<meta property="og:url" content="{here}">
+<meta property="og:image" content="{SITE}/assets/social.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The braids map: every Claude Code conversation on one screen, each nested under the conversation it was cut from.">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{og_title or title}">
+<meta name="twitter:description" content="{og_description or description}">
+<meta name="twitter:image" content="{SITE}/assets/social.png">
+<meta name="twitter:image:alt" content="The braids map: every Claude Code conversation on one screen.">
+<meta name="twitter:creator" content="@devanujhere">
+<meta name="theme-color" content="#0b0d10">
 <style>{css}</style>
 </head>
 <body>{body}</body>

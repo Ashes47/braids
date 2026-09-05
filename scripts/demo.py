@@ -272,6 +272,25 @@ def write_corpus(out: pathlib.Path, repo: pathlib.Path) -> None:
     (braids / "origins.json").write_text(json.dumps(origins, indent=1))
 
 
+def shown_version(given: str) -> str:
+    """The version the screenshots should name.
+
+    A released one, so the header reads the way it reads on a machine that is
+    up to date rather than one nagging about a binary built a minute ago. Taken
+    from the latest tag, because a number typed in by hand goes stale quietly
+    and then ships inside every screenshot on the site, which is how these came
+    to say 0.1.0 four releases later.
+    """
+    if given:
+        return given
+    try:
+        tag = subprocess.run(["git", "describe", "--tags", "--abbrev=0"],
+                             capture_output=True, text=True, check=True).stdout.strip()
+    except (subprocess.CalledProcessError, OSError):
+        return "0.0.0"
+    return tag.lstrip("v") or "0.0.0"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True, help="where to build the fake ~/.claude")
@@ -279,6 +298,8 @@ def main() -> None:
     ap.add_argument("--width", type=int, default=183,
                     help="the width at which every screen draws the full mark")
     ap.add_argument("--braids", default="braids", help="the binary to run")
+    ap.add_argument("--version", default="",
+                    help="the version the map header names; defaults to the latest tag")
     ap.add_argument("--shots", default="go run ./scripts/shots",
                     help="the screenshot tool, for the screens --print cannot reach")
     args = ap.parse_args()
@@ -344,6 +365,7 @@ def main() -> None:
         frame = subprocess.run(
             args.shots.split() + ["--db", str(db), "--root", str(out / "projects"),
                                   "--width", str(args.width),
+                                  "--version", shown_version(args.version),
                                   "--height", str(height)] + extra,
             check=True, capture_output=True, text=True).stdout
         frame = sanitize(frame, str(db))

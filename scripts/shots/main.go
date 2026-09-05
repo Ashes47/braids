@@ -49,6 +49,7 @@ func run() error {
 	keys := flag.String("keys", "", "keys to press, space separated, instead of --screen")
 	discard := flag.String("discard", "", "move this path to the bin first, so the bin has something in it")
 	width := flag.Int("width", 195, "frame width")
+	version := flag.String("version", "0.0.0", "the version the header should name")
 	height := flag.Int("height", 24, "frame height")
 	flag.Parse()
 	if *db == "" || *root == "" {
@@ -86,8 +87,10 @@ func run() error {
 		Reporting: true,
 		// A released version, freshly checked, so the header shows the row as
 		// it reads on a machine that is up to date rather than one nagging
-		// about a demo binary built a minute ago.
-		Version:   "0.1.0",
+		// about a demo binary built a minute ago. Passed in rather than
+		// written here, because a number written here goes stale silently and
+		// then ships inside every screenshot on the site.
+		Version:   *version,
 		Release:   func() release.State { return release.State{Built: time.Now()} },
 		LoadSpine: tui.SpineLoader(ctx, ix),
 		Search: func(query, scope string) ([]index.Hit, error) {

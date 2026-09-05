@@ -285,6 +285,7 @@ PAGE = page(
     og_description="Every Claude Code session on your machine, searchable in milliseconds, with the conversation behind any file and a new branch from any turn. Local, open source, nothing hosted.",
     body=BODY,
     css=CSS,
+    path="/",
 )
 
 (HERE / "index.html").write_text(PAGE)
@@ -294,7 +295,11 @@ print("wrote site/index.html:", len(PAGE), "bytes")
 # repo, and were once a second byte-identical copy in here, which is one logo
 # to update and two places to forget. Copied at build time instead, so the
 # repo holds one of each.
-NEEDED = ["braids-logo.png", "braids-icon-64.png", "braids-icon-256.png"]
+# social.png is the card every link unfurler shows. It is listed here
+# because an og:image that 404s is an og:image that shows nothing, and
+# nothing is exactly what a missing file looks like from the outside.
+NEEDED = ["braids-logo.png", "braids-icon-64.png", "braids-icon-256.png",
+          "social.png"]
 into = HERE / "assets"
 into.mkdir(exist_ok=True)
 for name in NEEDED:

@@ -1,5 +1,6 @@
 ~/src/storefront/checkout/handler.go
-2 commits, against 6 conversations that ran in this repository
+2 commits, against 6 conversations
+  6 ran in this repository
 
 996282d5  2026-09-04 13:55  checkout: defer the tax lookup out of the lock
     Checkout stalls at 80% under load, then recovers on its own  ·  storefront  ·  24 turns in the window

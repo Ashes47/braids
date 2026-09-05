@@ -59,11 +59,15 @@ braids search "lock held across a network call" --json --limit 5
 braids show --lane LANE --at TURN --kind text --json
 ```
 
-A hit names a conversation, the turn it was found at, and about twelve words of
-snippet. **The snippet is a pointer, not the evidence.** Read the turns around
-it before saying anything about what was decided: the sentence that matters is
-usually the one after the one that matched, and a snippet is far too little to
-tell a proposal from a conclusion.
+A hit's `of` says what was found: a `conversation`, a `memory` or an
+`artifact`. A conversation hit names the conversation, the turn it was found
+at, and about twelve words of snippet. **The snippet is a pointer, not the
+evidence.** Read the turns around it before saying anything about what was
+decided: the sentence that matters is usually the one after the one that
+matched, and a snippet is far too little to tell a proposal from a conclusion.
+
+The other two are documents rather than turns, and are read a different way.
+See below.
 
 Then, if the user wants to carry on from there:
 
@@ -128,6 +132,34 @@ back for `1 failed | 64 passed` will not find it. **Pass `--plain` when you
 want to read what a command said.** Leave it off when the codes are the point,
 which is when the question is about the terminal output itself. It is applied
 before `--chars`, so asking for plain text also buys you more of the words.
+
+### A hit that is not a conversation
+
+A `memory` or `artifact` hit has `turn: 0`, because a document has no turns and
+`show` has nothing to open. Its `lane` is where it came from, not where to look
+for it. Read these by their path.
+
+```sh
+braids memories --project NAME --json
+```
+
+Every memory comes back with its `path`, its `description`, the `links` to
+other memories and `origin`, the conversation it was written in. The body is an
+ordinary file: read it.
+
+**A memory is the strongest thing braids holds.** Everything else it reports is
+something that was said near something else; a memory is somebody writing down
+what they concluded, in their own words, on purpose. When one answers the
+question, quote it and say it is a memory. Then follow `origin` if the
+conversation behind it matters.
+
+```sh
+braids work --lane LANE --json
+```
+
+An artifact hit is a file a session left on disk, and it is matched by name and
+never by contents, so a hit means the name matched and nothing more. `entries`
+carries the path of each one. Read the file if you want to know what is in it.
 
 ## Where a file came from
 

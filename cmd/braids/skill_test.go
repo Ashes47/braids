@@ -84,6 +84,29 @@ func commandTakes(t *testing.T, command, flag string) bool {
 	return false
 }
 
+// A search returns three kinds of hit and only one of them has turns. A skill
+// that teaches the conversation case alone sends its reader to `braids show`
+// with turn 0 and no way on, which is exactly what happened: the flow was
+// written, shipped, and then walked into on real data.
+func TestSkillCoversEveryKindOfHit(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "internal", "skill", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.ReplaceAll(string(body), "\r\n", "\n")
+	// The three values of a hit's `of`, which is what the reader dispatches on.
+	for _, kind := range []string{"conversation", "memory", "artifact"} {
+		if !strings.Contains(text, kind) {
+			t.Errorf("the skill never mentions a %q hit", kind)
+		}
+	}
+	// And that a document has no turn to open, which is the trap.
+	if !strings.Contains(text, "turn: 0") {
+		t.Error("the skill never says a memory or artifact hit has no turn, " +
+			"so its reader will pass turn 0 to `braids show`")
+	}
+}
+
 // And the reverse: a command worth teaching should be taught. This is a
 // reminder rather than a rule, so it names what is missing without failing.
 func TestSkillMentionsTheCommandsWorthTeaching(t *testing.T) {

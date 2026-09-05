@@ -1402,3 +1402,244 @@ func TestRebuildGivesTheSpaceBack(t *testing.T) {
 			big.Size(), small.Size())
 	}
 }
+
+// Claude Code writes session state into the same directory, with the same
+// extension, as the conversations themselves. Resuming a session leaves a file
+// holding its title, its mode and its cost and no turns at all, because the
+// turns are recorded under the id it was resumed from.
+//
+// Read as a conversation that file is empty. braids used to index it anyway,
+// which put a second, empty copy of a real conversation in the map under the
+// same title, and then reported it as a possible format change with a link to
+// the issue tracker. It is neither.
+func TestSessionStateIsNotAConversation(t *testing.T) {
+	root := t.TempDir()
+	projects := filepath.Join(root, "projects", "-p")
+	if err := os.MkdirAll(projects, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const real = "a1b2c3d4-0000-4000-8000-000000000001"
+	const state = "a1b2c3d4-0000-4000-8000-000000000002"
+
+	// The conversation.
+	body := `{"type":"ai-title","aiTitle":"ask before running bash","sessionId":"` + real + `"}` + "\n" +
+		`{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-09-01T10:00:00Z",` +
+		`"message":{"role":"user","content":"hello"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(projects, real+".jsonl"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The state left beside it: every record real, none of them a turn.
+	only := `{"type":"last-prompt","lastPrompt":"ask before running bash","leafUuid":"u1","sessionId":"` + state + `"}` + "\n" +
+		`{"type":"ai-title","aiTitle":"ask before running bash","sessionId":"` + state + `"}` + "\n" +
+		`{"type":"mode","mode":"normal","sessionId":"` + state + `"}` + "\n" +
+		`{"type":"permission-mode","permissionMode":"default","sessionId":"` + state + `"}` + "\n" +
+		`{"type":"atis-latch","atis":"","sessionId":"` + state + `"}` + "\n" +
+		`{"type":"cost-state","sessionId":"` + state + `","totalCostUSD":0.26}` + "\n"
+	if err := os.WriteFile(filepath.Join(projects, state+".jsonl"), []byte(only), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	src := claudecode.New(filepath.Join(root, "projects"))
+
+	for _, how := range []struct {
+		name string
+		run  func(*Index) (Stats, error)
+	}{
+		{"Sync", func(ix *Index) (Stats, error) { return ix.Sync(ctx, src) }},
+		{"Rebuild", func(ix *Index) (Stats, error) { return ix.Rebuild(ctx, src) }},
+	} {
+		t.Run(how.name, func(t *testing.T) {
+			ix, err := Open(filepath.Join(t.TempDir(), "index.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ix.Close() //nolint:errcheck // test cleanup
+
+			stats, err := how.run(ix)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stats.Lanes != 1 {
+				t.Errorf("indexed %d lanes, want only the conversation", stats.Lanes)
+			}
+			lanes, err := ix.Lanes(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, l := range lanes {
+				if l.ID == state {
+					t.Errorf("session state was indexed as a conversation, titled %q", l.Title)
+				}
+			}
+			// And nothing to report, because nothing is wrong.
+			unreadable, err := ix.Unreadable(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(unreadable) != 0 {
+				t.Errorf("cried format change over %d lanes: %+v", len(unreadable), unreadable)
+			}
+		})
+	}
+}
+
+// The other half, and the one that must not be sacrificed to fix the first: a
+// transcript that does hold turns but yields no messages is what a real format
+// change looks like, and it has to keep its row and be reported.
+func TestATranscriptWithTurnsButNoMessagesIsStillReported(t *testing.T) {
+	root := t.TempDir()
+	projects := filepath.Join(root, "projects", "-p")
+	if err := os.MkdirAll(projects, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const session = "a1b2c3d4-0000-4000-8000-000000000003"
+	// Turn-shaped records, carrying uuids, whose bodies braids cannot read:
+	// this is the shape of the harness moving the message somewhere new.
+	body := `{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-09-01T10:00:00Z",` +
+		`"speech":{"role":"user","words":"hello"}}` + "\n" +
+		`{"type":"assistant","uuid":"u2","parentUuid":"u1","timestamp":"2026-09-01T10:00:01Z",` +
+		`"speech":{"role":"assistant","words":"hi"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(projects, session+".jsonl"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	ix, err := Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Close() //nolint:errcheck // test cleanup
+
+	if _, err := ix.Sync(ctx, claudecode.New(filepath.Join(root, "projects"))); err != nil {
+		t.Fatal(err)
+	}
+	unreadable, err := ix.Unreadable(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unreadable) != 1 || unreadable[0].ID != session {
+		t.Fatalf("a transcript braids could not read went unreported: %+v", unreadable)
+	}
+}
+
+// A conversation braids has already read and can no longer read must keep its
+// row whatever else changes, because that lane's history is the thing the
+// report exists to protect.
+func TestAKnownLaneIsNeverDroppedForHavingNoTurns(t *testing.T) {
+	root := t.TempDir()
+	projects := filepath.Join(root, "projects", "-p")
+	if err := os.MkdirAll(projects, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const session = "a1b2c3d4-0000-4000-8000-000000000004"
+	path := filepath.Join(projects, session+".jsonl")
+	good := `{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-09-01T10:00:00Z",` +
+		`"message":{"role":"user","content":"hello, and here is a good deal more text ` +
+		`so that the state written over it later is unmistakably shorter"}}` + "\n"
+	if err := os.WriteFile(path, []byte(good), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	src := claudecode.New(filepath.Join(root, "projects"))
+	ix, err := Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Close() //nolint:errcheck // test cleanup
+
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	if got := laneOf(t, ctx, ix, session); got.Messages != 1 {
+		t.Fatalf("the conversation indexed as %d messages", got.Messages)
+	}
+
+	// Now the file becomes something braids reads nothing from. It has to
+	// shrink, so the read cannot be a tail off the end of what was already
+	// indexed: that would keep the messages already stored and never ask the
+	// question. A whole re-read that yields nothing is the dangerous case.
+	state := `{"type":"mode","mode":"normal","sessionId":"` + session + `"}` + "\n"
+	if err := os.WriteFile(path, []byte(state), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ix.Sync(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	lanes, err := ix.Lanes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, l := range lanes {
+		if l.ID == session {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a conversation braids had already read was dropped from the index")
+	}
+}
+
+// A phantom already in the index has to be cleared without a rebuild.
+//
+// The file it came from is session state and will never change again, so the
+// pass that would notice never runs: an untouched lane is skipped before it is
+// read. Somebody who indexed with an older braids would otherwise keep the
+// empty duplicate in their map for good.
+func TestAPhantomFromAnOlderIndexIsClearedOut(t *testing.T) {
+	root := t.TempDir()
+	projects := filepath.Join(root, "projects", "-p")
+	if err := os.MkdirAll(projects, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const state = "a1b2c3d4-0000-4000-8000-000000000005"
+	path := filepath.Join(projects, state+".jsonl")
+	body := `{"type":"ai-title","aiTitle":"ask before running bash","sessionId":"` + state + `"}` + "\n" +
+		`{"type":"cost-state","sessionId":"` + state + `","totalCostUSD":0.26}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	ix, err := Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ix.Close() //nolint:errcheck // test cleanup
+
+	// Exactly what an older braids left behind: a row whose size and mtime
+	// match the file on disk, so the next sync has no reason to read it.
+	if _, err := ix.db.ExecContext(ctx,
+		`INSERT INTO lanes (id,source,project,path,title,cwd,created,updated,size,msg_count,part_count)
+		 VALUES (?,?,?,?,?,?,?,?,?,0,0)`,
+		state, "claudecode", "-p", path, "ask before running bash", "",
+		fi.ModTime().Unix(), fi.ModTime().Unix(), fi.Size()); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ix.Sync(ctx, claudecode.New(filepath.Join(root, "projects"))); err != nil {
+		t.Fatal(err)
+	}
+	lanes, err := ix.Lanes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range lanes {
+		if l.ID == state {
+			t.Fatalf("the phantom survived a sync that never had to read its file")
+		}
+	}
+	unreadable, err := ix.Unreadable(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unreadable) != 0 {
+		t.Errorf("still reporting %d lanes as unreadable", len(unreadable))
+	}
+}

@@ -598,3 +598,37 @@ func metaFrom(line []byte) (title, cwd string) {
 	}
 	return title, cwd
 }
+
+// HasTurns reports whether a transcript holds any conversational record.
+//
+// Every record that belongs to the conversation carries a uuid and no piece of
+// bookkeeping does. That holds across all eighteen record types Claude Code
+// writes, and it is the same test the reader already applies to decide what to
+// skip, so the two cannot disagree about what counts as a turn.
+//
+// It stops at the first one it finds, so the usual answer costs a line or two
+// rather than a file.
+func (s *Source) HasTurns(ctx context.Context, lane model.Lane) (bool, error) {
+	f, err := os.Open(lane.Path)
+	if err != nil {
+		return false, fmt.Errorf("open lane %s: %w", lane.ID, err)
+	}
+	defer f.Close() //nolint:errcheck // read-only
+
+	scanner := newScanner(f)
+	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		var r struct {
+			UUID string `json:"uuid"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &r) == nil && r.UUID != "" {
+			return true, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return false, fmt.Errorf("read lane %s: %w", lane.ID, err)
+	}
+	return false, nil
+}

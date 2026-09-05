@@ -454,6 +454,15 @@ func (ix *Index) Rebuild(ctx context.Context, src store.Source) (Stats, error) {
 		if err != nil {
 			return Stats{}, err
 		}
+		// As in Sync: session state is not a conversation. Every lane here is
+		// being read afresh, so there is no older reading to protect.
+		if msgs == 0 && lane.Size > 0 && !hasTurns(ctx, src, lane) {
+			if err := deleteLane(ctx, tx, lane.ID); err != nil {
+				return Stats{}, err
+			}
+			stats.Lanes--
+			continue
+		}
 		stats.Messages += msgs
 		stats.Parts += parts
 	}
@@ -515,6 +524,19 @@ func (ix *Index) Sync(ctx context.Context, src store.Source) (Stats, error) {
 		// Compare at second precision: that is what the index stores, so
 		// comparing the raw ModTime would mark every lane changed, every time.
 		if known && was.Size == lane.Size && was.Updated.Unix() == lane.Updated.Unix() {
+			// An untouched file is normally nothing to do. The exception is a
+			// row an older braids wrote for something that was never a
+			// conversation: the file will never change again, so without this
+			// the phantom would sit in the map until a full rebuild. Only ever
+			// asked about a lane that holds nothing, so a healthy history pays
+			// nothing for it.
+			if was.Messages == 0 && lane.Size > 0 && !hasTurns(ctx, src, lane) {
+				if err := deleteLane(ctx, tx, lane.ID); err != nil {
+					return Stats{}, err
+				}
+				stats.Lanes--
+				continue
+			}
 			stats.Messages += was.Messages
 			stats.Parts += was.Parts
 			continue
@@ -522,6 +544,23 @@ func (ix *Index) Sync(ctx context.Context, src store.Source) (Stats, error) {
 		msgs, parts, err := indexLane(ctx, tx, src, lane, was, known)
 		if err != nil {
 			return Stats{}, err
+		}
+		// A file that yielded nothing and never held a turn is session state,
+		// not a conversation, and listing it would put an empty second copy of
+		// a real conversation in the map under the same title.
+		//
+		// Never for a lane that has ever yielded a message. One braids could
+		// read and no longer can is the symptom this must not swallow: that
+		// one keeps its row, keeps its history, and gets reported. Testing
+		// what the lane held before rather than whether it is new also lets a
+		// phantom indexed by an earlier version be cleared out on the next
+		// pass, without a rebuild.
+		if msgs == 0 && was.Messages == 0 && lane.Size > 0 && !hasTurns(ctx, src, lane) {
+			if err := deleteLane(ctx, tx, lane.ID); err != nil {
+				return Stats{}, err
+			}
+			stats.Lanes--
+			continue
 		}
 		stats.Messages += msgs
 		stats.Parts += parts
@@ -542,6 +581,24 @@ func (ix *Index) Sync(ctx context.Context, src store.Source) (Stats, error) {
 	}
 	stats.Duration = time.Since(start)
 	return stats, nil
+}
+
+// hasTurns asks the source whether a transcript is a conversation at all.
+//
+// Both the unknowable cases answer yes. A source that cannot tell, and a read
+// that failed, must leave the lane alone: dropping a conversation because a
+// question about it could not be answered is far worse than keeping an empty
+// one, and Unreadable will speak up about what remains.
+func hasTurns(ctx context.Context, src store.Source, lane model.Lane) bool {
+	asker, ok := src.(store.Conversational)
+	if !ok {
+		return true
+	}
+	turns, err := asker.HasTurns(ctx, lane)
+	if err != nil {
+		return true
+	}
+	return turns
 }
 
 // enrich fills in the details that need the transcript open. They are cosmetic

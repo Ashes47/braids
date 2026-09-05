@@ -86,6 +86,23 @@ type Tailer interface {
 	MessagesFrom(ctx context.Context, lane model.Lane, from Tail, visit Visit) (Tail, error)
 }
 
+// Conversational reports whether a transcript holds any part of a conversation
+// at all, as against only the session state a harness keeps beside one.
+//
+// Claude Code writes both into the same directory with the same extension. A
+// session that is resumed leaves behind a file holding its title, its mode and
+// its cost and nothing else, while the turns themselves are recorded under the
+// id it was resumed from. Read as a conversation that file is empty, which is
+// indistinguishable from a conversation braids has lost the ability to read,
+// and braids used to report it as exactly that: a possible format change,
+// please open an issue. It is neither.
+//
+// A source that cannot tell the two apart does not implement this, and braids
+// keeps every file it finds rather than guessing one away.
+type Conversational interface {
+	HasTurns(ctx context.Context, lane model.Lane) (bool, error)
+}
+
 // Measurer re-measures a conversation's work products.
 //
 // They change without the transcript changing — deleting a scratch file leaves

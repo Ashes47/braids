@@ -6,7 +6,7 @@ LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 PKGS    := ./...
 
 .PHONY: all build install run reindex test race lint vet fmt tidy cover clean ci \
-	site site-build pages frames
+	site site-build pages frames responsive
 
 all: build
 
@@ -67,6 +67,12 @@ site: pages
 pages:
 	python3 site/build.py
 	python3 site/docs.py
+
+# responsive checks that no page runs off the side of a phone. It drives a
+# real browser, so it is not part of `make ci`, which has to run where there
+# is no browser to drive.
+responsive: pages
+	python3 scripts/responsive.py
 
 # frames recaptures the screenshots, which needs the binary. They are real
 # braids output taken against a fake ~/.claude, never drawn by hand. The width

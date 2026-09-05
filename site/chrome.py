@@ -60,7 +60,9 @@ def frame(name: str, caption: str = "", cmd: str = "", then: str = "") -> str:
                + "</div>")
     cap = f'<figcaption>{caption}</figcaption>' if caption else ""
     return (f'<figure class="frame"><div class="shell">{bar}'
-            f'<img src="/assets/frames/{name}.png" alt="{alt}" loading="lazy">'
+            f'<a class="full" href="/assets/frames/{name}.png" '
+            f'title="Open this screen at full size">'
+            f'<img src="/assets/frames/{name}.png" alt="{alt}" loading="lazy"></a>'
             f'</div>{cap}</figure>')
 
 
@@ -84,14 +86,16 @@ NAV = """<nav><div class="wrap">
     <span class="name">braids</span>
   </a>
   <span class="spacer"></span>
-  <a class="link" href="#find">Find</a>
-  <a class="link" href="#explain">Explain</a>
-  <a class="link" href="#branch">Branch</a>
-  <a class="link" href="#map">Map</a>
-  <a class="link" href="#install">Install</a>
-  <a class="link" href="docs/">Docs</a>
-  <a class="link" href="https://github.com/Ashes47/braids">GitHub</a>
-  <a class="link" href="#star">★ Star</a>
+  <div class="links">
+    <a class="link" href="#find">Find</a>
+    <a class="link" href="#explain">Explain</a>
+    <a class="link" href="#branch">Branch</a>
+    <a class="link" href="#map">Map</a>
+    <a class="link" href="#install">Install</a>
+    <a class="link" href="docs/">Docs</a>
+    <a class="link" href="https://github.com/Ashes47/braids">GitHub</a>
+    <a class="link" href="#star">★ Star</a>
+  </div>
 </div></nav>"""
 
 FOOTER = """<footer><div class="wrap">
@@ -153,6 +157,20 @@ def footer(home: str = "") -> str:
     return retarget(FOOTER, home)
 
 
+def scrollableTables(markup: str) -> str:
+    """Put every table in a container that can scroll sideways.
+
+    A table of commands does not fit a phone and must not be squeezed into
+    one: the first column is a command, and a command broken across lines is
+    a command you cannot read. So the table keeps its natural width and the
+    container scrolls. Done here rather than at each call site, because a
+    table written later would otherwise quietly overflow the page.
+    """
+    markup = markup.replace("<table>", '<div class="tablewrap"><table>')
+    markup = re.sub(r'<table class="([^"]*)">', r'<div class="tablewrap"><table class="\1">', markup)
+    return markup.replace("</table>", "</table></div>")
+
+
 def page(*, title: str, description: str, body: str, css: str,
          og_title: str = "", og_description: str = "", home: str = "") -> str:
     """One complete, self-contained HTML page.
@@ -162,6 +180,7 @@ def page(*, title: str, description: str, body: str, css: str,
     does not phone home either.
     """
     a = home + "assets"
+    body = scrollableTables(body)
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -223,6 +242,7 @@ nav .brand:hover .name { color:var(--accent); }
 nav .name { font-family:var(--mono); font-weight:600; letter-spacing:.02em; color:var(--ink);
             transition:color .12s ease; }
 nav .spacer { flex:1; }
+nav .links { display:flex; align-items:center; gap:20px; min-width:0; }
 nav a.link { color:var(--dim); font-size:14px; }
 nav a.link:hover { color:var(--ink); text-decoration:none; }
 nav a.link.on { color:var(--accent); }
@@ -236,7 +256,6 @@ header pre.ascii {
   margin:0; color:var(--accent); white-space:pre;
 }
 header pre.ascii .tag { color:var(--dim); }
-@media (max-width:640px) { header pre.ascii { display:none; } }
 
 /* A section that has a page of its own says so, once, at the end of it. */
 p.more { margin:18px 0 0; font-size:14.5px; }
@@ -312,6 +331,8 @@ figure.frame .cmdbar .prompt { color:var(--faint); }
 figure.frame .cmdbar b { color:var(--ink); font-weight:600; }
 figure.frame .cmdbar .then { color:var(--faint); }
 figure.frame .cmdbar kbd { font-size:11px; padding:0 5px; }
+figure.frame a.full { display:block; }
+figure.frame a.full:hover { text-decoration:none; }
 figure.frame img { display:block; width:100%; height:auto; }
 /* A text capture is narrow enough to read at the page's own size. */
 figure.frame.capture pre {
@@ -330,6 +351,11 @@ pre.sh .c { color:var(--faint); }
 code {
   font-family:var(--mono); font-size:.9em; background:var(--panel);
   border:1px solid var(--line); border-radius:5px; padding:1px 5px;
+  /* A path written inline is one long word. On a narrow screen it has to be
+     allowed to break, or it carries the whole page sideways with it; anywhere
+     only breaks a word that would not otherwise fit, so wider screens are
+     left as they were. */
+  overflow-wrap:anywhere;
 }
 kbd {
   font-family:var(--mono); font-size:.85em; background:var(--panel);
@@ -347,7 +373,8 @@ kbd {
 .card:hover h4 a { color:var(--accent); text-decoration:none; }
 .card:hover h4 a::after { opacity:1; }
 .card p { margin:0; color:var(--dim); font-size:14.5px; max-width:none; }
-table { border-collapse:collapse; width:100%; margin-top:22px; font-size:14.5px; }
+.tablewrap { overflow-x:auto; -webkit-overflow-scrolling:touch; margin-top:22px; }
+table { border-collapse:collapse; width:100%; font-size:14.5px; }
 th, td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
 th { color:var(--faint); font-weight:500; font-family:var(--mono); font-size:12px;
      letter-spacing:.06em; text-transform:uppercase; }
@@ -380,8 +407,43 @@ footer .icons a {
   transition:color .12s ease;
 }
 footer .icons a:hover { color:var(--ink); text-decoration:none; }
+/* ---- narrow screens ----
+   These rules answer measurements rather than guesses. scripts/responsive.py
+   loads every page in a frame 390 CSS pixels wide and reports any element
+   whose box crosses the edge of it. Before this block two things did, on
+   every page: the nav laid eight links in a row that could not wrap, and the
+   tables held a first column set never to break. Nothing else did, which is
+   why nothing else is touched here. */
+@media (max-width:760px) {
+  .wrap { padding:0 18px; }
+
+  /* The nav keeps all eight links and lets them scroll, rather than hiding
+     some behind a button, which would need script on a page that has none.
+     The brand stays put because it is outside the scrolling group. */
+  nav .wrap { gap:12px; height:54px; }
+  nav .spacer { display:none; }
+  nav .links {
+    flex:1; gap:17px; overflow-x:auto; scrollbar-width:none;
+    -webkit-overflow-scrolling:touch;
+  }
+  nav .links::-webkit-scrollbar { display:none; }
+  nav a.link { white-space:nowrap; }
+
+  header { padding:40px 0 0; }
+  header .marks { gap:18px; margin-bottom:22px; }
+  header .mark { height:68px; }
+
+  section { padding:40px 0; }
+  /* The command is the one thing on the page a reader has to be able to copy,
+     so it wraps onto a second line rather than running off the screen. */
+  .install { flex-wrap:wrap; font-size:12.5px; padding:10px 12px; }
+  .cta { gap:10px; margin:22px 0 6px; }
+  .btn { padding:10px 14px; }
+  ul.plain li { padding-left:22px; }
+}
+
 @media (max-width:640px) {
   figure.frame pre { font-size:9.5px; }
-  header { padding:44px 0 0; }
+  header pre.ascii { display:none; }
 }
 """

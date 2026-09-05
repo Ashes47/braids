@@ -15,8 +15,17 @@ import (
 // so a test can put a conversation either side of that moment on purpose.
 func repoWithCommit(t *testing.T, when time.Time, subject string) (repo, file string) {
 	t.Helper()
-	repo = t.TempDir()
-	file = filepath.Join(repo, "service.go")
+	return commitInto(t, t.TempDir(), when, subject)
+}
+
+// commitInto is the same, in a directory the caller chose, so a test can put a
+// repository inside a workspace rather than alone in a temporary directory.
+func commitInto(t *testing.T, repo string, when time.Time, subject string) (string, string) {
+	t.Helper()
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(repo, "service.go")
 	if err := os.WriteFile(file, []byte("package service\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -340,5 +349,122 @@ func TestInTree(t *testing.T) {
 		if !inTree(resolved, inside) || !inTree(root, filepath.Join(resolved, "internal", "core")) {
 			t.Error("a path and its resolved form disagreed")
 		}
+	}
+}
+
+// A workspace is one directory holding several checkouts, and a session opened
+// there sits above all of them. The working directory alone cannot say which
+// repository such a session was about, so explain used to discard it and
+// report nothing for every file in every nested repository. It now keeps the
+// ones that named the file.
+func TestExplainFindsAWorkspaceSessionThatNamesTheFile(t *testing.T) {
+	commit := time.Date(2026, 8, 21, 15, 0, 0, 0, time.UTC)
+	workspace := t.TempDir()
+	repo, file := commitInto(t, filepath.Join(workspace, "checkout"), commit, "narrow the lock")
+
+	root := t.TempDir()
+	transcript(t, root, "s1", "checkout stalls under load", workspace, map[time.Time]string{
+		commit.Add(-30 * time.Minute): "service.go holds the lock across a network call",
+		commit.Add(-5 * time.Minute):  "moved it inside the tax client in service.go",
+	})
+	db := filepath.Join(t.TempDir(), "index.db")
+	runCmd(t, "index", "--root", root, "--db", db)
+
+	out := runCmd(t, "explain", "--db", db, file)
+	if !strings.Contains(out, "checkout stalls under load") {
+		t.Errorf("a workspace session that names the file was dropped:\n%s", out)
+	}
+	// And it has to be marked as the weaker tie rather than passed off as a
+	// session that ran in the repository.
+	if !strings.Contains(out, "workspace above it") {
+		t.Errorf("the workspace tie was not labelled:\n%s", out)
+	}
+	if !strings.Contains(out, "names the file 2 times") {
+		t.Errorf("the count of mentions was not reported:\n%s", out)
+	}
+	_ = repo
+}
+
+// The other half, and the reason the mention is required at all: a workspace
+// holds many repositories, and without this a single session at its root would
+// be offered as evidence about every file in all of them.
+func TestExplainIgnoresAWorkspaceSessionThatNeverNamesTheFile(t *testing.T) {
+	commit := time.Date(2026, 8, 21, 15, 0, 0, 0, time.UTC)
+	workspace := t.TempDir()
+	_, file := commitInto(t, filepath.Join(workspace, "checkout"), commit, "narrow the lock")
+
+	root := t.TempDir()
+	transcript(t, root, "s1", "rewriting the billing importer", workspace, map[time.Time]string{
+		commit.Add(-30 * time.Minute): "the importer drops rows with a null account",
+		commit.Add(-5 * time.Minute):  "added a fallback and a test for it",
+	})
+	db := filepath.Join(t.TempDir(), "index.db")
+	runCmd(t, "index", "--root", root, "--db", db)
+
+	out := runCmd(t, "explain", "--db", db, file)
+	if strings.Contains(out, "rewriting the billing importer") {
+		t.Errorf("a workspace session that never named the file was offered:\n%s", out)
+	}
+	if !strings.Contains(out, "no conversations") {
+		t.Errorf("explain should have said it has nothing, got:\n%s", out)
+	}
+}
+
+// A session that ran inside the repository is placed by its directory and owes
+// no mention of anything.
+func TestExplainKeepsARepoSessionThatNeverNamesTheFile(t *testing.T) {
+	commit := time.Date(2026, 8, 21, 15, 0, 0, 0, time.UTC)
+	repo, file := repoWithCommit(t, commit, "narrow the lock")
+
+	root := t.TempDir()
+	transcript(t, root, "s1", "checkout stalls under load", repo, map[time.Time]string{
+		commit.Add(-5 * time.Minute): "moved the lock inside the tax client",
+	})
+	db := filepath.Join(t.TempDir(), "index.db")
+	runCmd(t, "index", "--root", root, "--db", db)
+
+	out := runCmd(t, "explain", "--db", db, file)
+	if !strings.Contains(out, "checkout stalls under load") {
+		t.Errorf("a session that ran in the repository was dropped:\n%s", out)
+	}
+	if strings.Contains(out, "workspace above it") {
+		t.Errorf("a session that ran in the repository was called a workspace tie:\n%s", out)
+	}
+}
+
+// The JSON says which of the two placed each conversation, because an agent
+// reading this has to be able to tell the strong tie from the weak one.
+func TestExplainJSONSaysHowEachWasMatched(t *testing.T) {
+	commit := time.Date(2026, 8, 21, 15, 0, 0, 0, time.UTC)
+	workspace := t.TempDir()
+	_, file := commitInto(t, filepath.Join(workspace, "checkout"), commit, "narrow the lock")
+
+	root := t.TempDir()
+	transcript(t, root, "s1", "checkout stalls", workspace, map[time.Time]string{
+		commit.Add(-5 * time.Minute): "the fix is in service.go",
+	})
+	db := filepath.Join(t.TempDir(), "index.db")
+	runCmd(t, "index", "--root", root, "--db", db)
+
+	var got struct {
+		Commits []struct {
+			Near []struct {
+				Via  string `json:"matched"`
+				Says int    `json:"names_the_file"`
+			} `json:"conversations"`
+		} `json:"commits"`
+	}
+	if err := json.Unmarshal([]byte(runCmd(t, "explain", "--db", db, "--json", file)), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Commits) == 0 || len(got.Commits[0].Near) == 0 {
+		t.Fatalf("explain --json found nothing: %+v", got)
+	}
+	near := got.Commits[0].Near[0]
+	if !strings.Contains(near.Via, "workspace") {
+		t.Errorf("matched said %q, which does not name the workspace tie", near.Via)
+	}
+	if near.Says != 1 {
+		t.Errorf("names_the_file was %d, want 1", near.Says)
 	}
 }

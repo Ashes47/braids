@@ -53,6 +53,26 @@ type nearby struct {
 	Preview string    `json:"preview"`
 	At      time.Time `json:"at"`
 	Resume  string    `json:"open"`
+	Via     string    `json:"matched"`
+	Says    int       `json:"names_the_file,omitempty"`
+}
+
+// How a conversation came to count as evidence about a file.
+//
+// A session that ran inside the repository is placed by its working directory
+// alone. A session that ran above it, at the root of a workspace holding
+// several checkouts, is not: the directory says which workspace and no more,
+// so that conversation only counts if it actually named the file.
+const (
+	viaRepo      = "ran in the repository"
+	viaWorkspace = "ran in the workspace above it, and names this file"
+)
+
+// tie is a conversation and the reason it is being offered as evidence.
+type tie struct {
+	index.LaneInfo
+	Via  string
+	Says int
 }
 
 func cmdExplain(args []string, out *printer) error {
@@ -94,15 +114,9 @@ func cmdExplain(args []string, out *printer) error {
 	defer ix.Close() //nolint:errcheck // read-only
 
 	ctx := context.Background()
-	all, err := ix.LanesWithCwd(ctx)
+	lanes, err := tiedTo(ctx, ix, repo, path)
 	if err != nil {
 		return err
-	}
-	var lanes []index.LaneInfo
-	for _, lane := range all {
-		if inTree(repo, lane.Cwd) {
-			lanes = append(lanes, lane)
-		}
 	}
 	for i := range commits {
 		commits[i].Near, err = conversationsAround(ctx, ix, lanes, commits[i].At, *window)
@@ -120,6 +134,53 @@ func cmdExplain(args []string, out *printer) error {
 	}
 	printExplanation(rest[0], lanes, commits, *window, out)
 	return out.Err()
+}
+
+// tiedTo picks the conversations that could say something about this file.
+//
+// The working directory answers this outright when a session ran inside the
+// repository. It does not when a session ran above it: a workspace holding a
+// dozen checkouts is one directory, and a session opened there is equally
+// close to all of them, so taking the directory at its word would attach the
+// same conversations to every repository in the workspace. For those, the
+// question becomes whether the conversation ever named the file, which is
+// both narrower and closer to what is being asked.
+func tiedTo(ctx context.Context, ix *index.Index, repo, path string) ([]tie, error) {
+	all, err := ix.LanesWithCwd(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []tie
+	var above []index.LaneInfo
+	for _, lane := range all {
+		switch {
+		case inTree(repo, lane.Cwd):
+			out = append(out, tie{LaneInfo: lane, Via: viaRepo})
+		case inTree(lane.Cwd, repo):
+			above = append(above, lane)
+		}
+	}
+	if len(above) == 0 {
+		return out, nil
+	}
+
+	// The file as it would have been written about: the path relative to the
+	// repository, and the bare name, which is how it gets referred to once
+	// somebody is already working in that directory.
+	names := []string{filepath.Base(path)}
+	if rel, err := filepath.Rel(repo, path); err == nil {
+		names = append(names, filepath.ToSlash(rel))
+	}
+	says, err := ix.LanesMentioning(ctx, names)
+	if err != nil {
+		return nil, err
+	}
+	for _, lane := range above {
+		if n := says[lane.ID]; n > 0 {
+			out = append(out, tie{LaneInfo: lane, Via: viaWorkspace, Says: n})
+		}
+	}
+	return out, nil
 }
 
 // repoOf finds the repository a directory belongs to.
@@ -200,7 +261,7 @@ func commitsTouching(repo, path string, limit int) ([]change, error) {
 // wrote forty turns in the hour before a commit is a likelier account of it
 // than one that wrote a single line three hours earlier. Ties go to whichever
 // spoke last.
-func conversationsAround(ctx context.Context, ix *index.Index, lanes []index.LaneInfo,
+func conversationsAround(ctx context.Context, ix *index.Index, lanes []tie,
 	at time.Time, window time.Duration) ([]nearby, error) {
 	var found []nearby
 	for _, lane := range lanes {
@@ -217,6 +278,8 @@ func conversationsAround(ctx context.Context, ix *index.Index, lanes []index.Lan
 			Project: lane.Project,
 			Turns:   around.Turns,
 			Resume:  "braids --lane " + idPrefix(lane.ID),
+			Via:     lane.Via,
+			Says:    lane.Says,
 		}
 		if around.Spoken {
 			n.Gap = humanGap(at.Sub(around.Spoke.At))
@@ -244,6 +307,14 @@ func idPrefix(id string) string {
 	return id[:8]
 }
 
+// mentions counts how often a conversation wrote a file's name.
+func mentions(n int) string {
+	if n == 1 {
+		return "once"
+	}
+	return fmt.Sprintf("%d times", n)
+}
+
 // collapse puts a preview on one line, since a turn's first words can wrap.
 func collapse(s string) string { return strings.Join(strings.Fields(s), " ") }
 
@@ -263,14 +334,28 @@ func humanGap(d time.Duration) string {
 	}
 }
 
-func printExplanation(name string, lanes []index.LaneInfo, commits []change,
+func printExplanation(name string, lanes []tie, commits []change,
 	window time.Duration, out *printer) {
+	inside := 0
+	for _, l := range lanes {
+		if l.Via == viaRepo {
+			inside++
+		}
+	}
+	workspace := len(lanes) - inside
+
 	out.printf("%s\n", name)
-	out.printf("%d commits, against %d conversations that ran in this repository\n",
-		len(commits), len(lanes))
+	out.printf("%d commits, against %d conversations\n", len(commits), len(lanes))
+	if inside > 0 {
+		out.printf("  %d ran in this repository\n", inside)
+	}
+	if workspace > 0 {
+		out.printf("  %d ran in a workspace above it and name this file\n", workspace)
+	}
 	if len(lanes) == 0 {
-		out.printf("\nbraids has indexed no conversations with this repository as their\n" +
-			"working directory, so it has nothing to offer about this file.\n")
+		out.printf("\nbraids has indexed no conversations that ran in this repository, and\n" +
+			"none from a directory above it that name this file, so it has nothing\n" +
+			"to offer about it.\n")
 		return
 	}
 	for _, c := range commits {
@@ -286,6 +371,10 @@ func printExplanation(name string, lanes []index.LaneInfo, commits []change,
 				break
 			}
 			out.printf("    %s  ·  %s  ·  %d turns in the window\n", n.Title, n.Project, n.Turns)
+			if n.Via == viaWorkspace {
+				out.printf("      ran above this repository, and names the file %s\n",
+					mentions(n.Says))
+			}
 			if n.Preview != "" {
 				out.printf("      last said %s, at turn %d:\n", n.Gap, n.Seq)
 				out.printf("        %s\n", truncate(collapse(n.Preview), 66))
@@ -297,4 +386,8 @@ func printExplanation(name string, lanes []index.LaneInfo, commits []change,
 	}
 	out.printf("\nThese conversations were live when those commits landed. braids does not\n")
 	out.printf("know that they caused them; it knows when things happened and where.\n")
+	if workspace > 0 {
+		out.printf("The ones marked as running above this repository were placed by naming\n")
+		out.printf("the file, not by their working directory, which is weaker evidence.\n")
+	}
 }

@@ -914,6 +914,50 @@ func (ix *Index) LanesWithCwd(ctx context.Context) ([]LaneInfo, error) {
 	return out, rows.Err()
 }
 
+// LanesMentioning counts, per conversation, how often any of these phrases
+// was written in it.
+//
+// This exists because a working directory does not always say which repository
+// a conversation was about. A session opened at the root of a workspace sits
+// above every repository checked out inside it, so the directory places the
+// session in the workspace and no closer. Asking whether the conversation
+// actually named the file under discussion gets much nearer the truth, and the
+// count grades it: a session that wrote the name three hundred times was
+// working on that file, and one that wrote it once mentioned it in passing.
+//
+// Each phrase is matched as a phrase, so "pipeline/src/run.ts" has to appear
+// with its words in that order rather than scattered across a message.
+func (ix *Index) LanesMentioning(ctx context.Context, phrases []string) (map[string]int, error) {
+	var terms []string
+	for _, phrase := range phrases {
+		// A phrase is quoted in FTS5, and a quote inside one is doubled.
+		if phrase = strings.TrimSpace(phrase); phrase != "" {
+			terms = append(terms, `"`+strings.ReplaceAll(phrase, `"`, `""`)+`"`)
+		}
+	}
+	if len(terms) == 0 {
+		return map[string]int{}, nil
+	}
+	rows, err := ix.db.QueryContext(ctx,
+		`SELECT lane_id, COUNT(*) FROM parts WHERE parts MATCH ? GROUP BY lane_id`,
+		strings.Join(terms, " OR "))
+	if err != nil {
+		return nil, fmt.Errorf("search for a mention of %v: %w", phrases, err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only
+
+	out := map[string]int{}
+	for rows.Next() {
+		var lane string
+		var n int
+		if err := rows.Scan(&lane, &n); err != nil {
+			return nil, fmt.Errorf("scan a mention count: %w", err)
+		}
+		out[lane] = n
+	}
+	return out, rows.Err()
+}
+
 // scanMessages reads the turn columns every message query selects.
 func scanMessages(rows *sql.Rows) ([]MessageRow, error) {
 	var out []MessageRow

@@ -104,9 +104,32 @@ article .say p { margin:0; max-width:none; }
                 letter-spacing:.08em; text-transform:uppercase; margin-bottom:3px; }
 .pager a.next { text-align:right; }
 @media (max-width:820px) {
-  .docs { grid-template-columns:minmax(0,1fr); gap:22px; }
-  .side { position:static; max-height:none; }
+  .docs { grid-template-columns:minmax(0,1fr); gap:20px; padding:24px 0 56px; }
+  .side { position:static; max-height:none; overflow:visible; }
+  /* Where you are inside a page is answered by scrolling on a phone, so the
+     heading list goes and only the choice among ten documents stays. */
   .side .onthis { display:none; }
+
+  /* Stacked, that choice is a column of ten links sitting between the reader
+     and the document they opened. Laid on its side it is one line they can
+     swipe, and the article starts where the screen does. */
+  .side .group {
+    display:flex; align-items:center; gap:8px; margin-bottom:0;
+    overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch;
+  }
+  .side .group::-webkit-scrollbar { display:none; }
+  .side h6 { margin:0 2px 0 0; white-space:nowrap; }
+  .side a.page {
+    white-space:nowrap; padding:5px 12px; font-size:13.5px;
+    border:1px solid var(--line); border-radius:999px;
+  }
+  .side a.page.on { border-color:var(--accent); color:var(--accent); }
+  .side a.page.on::before { display:none; }
+
+  article h2 { margin-top:34px; scroll-margin-top:66px; }
+  /* Two half-width boxes at the foot of a phone screen are two cramped boxes. */
+  .pager { flex-direction:column; margin-top:40px; }
+  .pager a.next { text-align:left; }
 }
 """
 
@@ -844,6 +867,21 @@ braids explain internal/core/index/index.go --json
   lane id so the next command can use it.
 </p>
 {say("It does not claim the conversation caused the commit, and neither should anything reading it. What it offers is where to look, which is the honest thing braids can compute without reading a word of meaning.")}
+<h3>Sessions that ran above the repository</h3>
+<p>
+  A working directory answers this outright when the session ran inside the
+  repository. It does not when several checkouts sit in one workspace and the
+  session was opened at the top of it: that directory is equally close to all
+  of them, so taking it at its word would offer the same conversations as
+  evidence about every repository in the workspace.
+</p>
+<p>
+  Those sessions count only if they named the file, which is both narrower and
+  nearer to what you asked. In <code>--json</code>, <code>matched</code> says
+  which of the two placed each conversation and <code>names_the_file</code>
+  counts the mentions. The second is the weaker of the two, and the text output
+  marks it as such rather than quietly mixing them.
+</p>
 
 <h2 id="skill">The skill</h2>
 <p>
@@ -1158,6 +1196,18 @@ def pager(index: int) -> str:
 # is a page that phones home to underline a heading.
 SPY = """
 <script>
+// On a narrow screen the list of documents lies on its side and scrolls, so
+// the page you are on can start out past the right-hand edge, and the strip
+// then says nothing about where you are. Bring it into view. Only when the
+// strip actually scrolls, and never vertically: block:'nearest' keeps the
+// article where the reader left it.
+(function () {
+  var here = document.querySelector('.side a.page.on');
+  var strip = here && here.parentElement;
+  if (here && strip && strip.scrollWidth > strip.clientWidth) {
+    here.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }
+})();
 (function () {
   var heads = [].slice.call(document.querySelectorAll('article h2[id]'));
   var links = {};

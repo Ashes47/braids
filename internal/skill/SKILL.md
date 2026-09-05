@@ -74,6 +74,12 @@ actually said in them.
 **It does not know that those conversations caused those commits, and neither
 do you.** Report it as where to look, never as why the code is the way it is.
 
+A conversation qualifies one of two ways, and `matched` in the JSON says
+which. A session whose working directory was inside the repository is placed
+by that alone. A session that ran above it, at the root of a workspace holding
+several checkouts, is placed only if it named the file, and `names_the_file`
+counts how often. The second is weaker: say so when you report it.
+
 ## Other things it answers
 
 ```sh

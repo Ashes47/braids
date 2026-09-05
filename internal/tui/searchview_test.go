@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/lipgloss/v2"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Ashes47/braids/internal/core/artifacts"
@@ -331,5 +333,67 @@ func TestSearchHeaderNamesWhatItNarrowedTo(t *testing.T) {
 		if got := narrowing(text, when); got != want {
 			t.Errorf("narrowing(%q) = %q, want %q", text, got, want)
 		}
+	}
+}
+
+// A search that can be bounded by date has to say what date each result is,
+// or since: and until: are filters you cannot check the effect of.
+func TestSearchShowsWhenAndDropsItOnANarrowTerminal(t *testing.T) {
+	at := time.Date(2026, 9, 4, 18, 23, 0, 0, time.Local)
+	if got := hitWhen(index.Hit{At: at}); got != "09-04 18:23" {
+		t.Errorf("hitWhen = %q", got)
+	}
+	// Year one is not a date, it is a missing one.
+	if got := hitWhen(index.Hit{}); got != "" {
+		t.Errorf("a zero time rendered as %q", got)
+	}
+
+	m, _ := searchModel(t, nil, nil)
+	m.width, m.height = 130, 24
+	if !m.showsWhen() {
+		t.Error("a wide terminal is not showing the date")
+	}
+	wide := m.renderHit(index.Hit{Of: index.FoundTurn, LaneTitle: "a lane", At: at, Snippet: "x"}, false)
+	if !strings.Contains(plain(wide), "09-04 18:23") {
+		t.Errorf("no date in a wide row: %q", plain(wide))
+	}
+
+	// Narrow, the date goes first, because a result whose text you cannot read
+	// is no result at all.
+	m.width = 70
+	if m.showsWhen() {
+		t.Error("a narrow terminal is still spending columns on the date")
+	}
+	narrow := m.renderHit(index.Hit{Of: index.FoundTurn, LaneTitle: "a lane", At: at, Snippet: "x"}, false)
+	if strings.Contains(plain(narrow), "09-04") {
+		t.Errorf("the date survived a narrow terminal: %q", plain(narrow))
+	}
+	if got := lipgloss.Width(plain(narrow)); got > m.contentWidth()+1 {
+		t.Errorf("a narrow row is %d columns, wider than the %d it has",
+			got, m.contentWidth())
+	}
+}
+
+// An empty field is not a failure, it is where the filters are taught. They
+// are worth nothing if nobody knows they are there.
+func TestAnEmptySearchTeachesTheFilters(t *testing.T) {
+	m, _ := searchModel(t, nil, nil)
+	m.width, m.height = 100, 20
+	m = m.openSearch()
+	said := plain(strings.Join(m.searchNothing(), "\n"))
+	for _, want := range []string{"project:", "since:", "kind:", "type:"} {
+		if !strings.Contains(said, want) {
+			t.Errorf("the empty search never mentions %q:\n%s", want, said)
+		}
+	}
+
+	// Once something is typed, it answers about that instead.
+	m.search.input.text = "nothing at all like this"
+	said = plain(strings.Join(m.searchNothing(), "\n"))
+	if !strings.Contains(said, "nothing matches") {
+		t.Errorf("a query with no hits said: %s", said)
+	}
+	if strings.Contains(said, "project:") {
+		t.Error("the help is still showing over a real query")
 	}
 }

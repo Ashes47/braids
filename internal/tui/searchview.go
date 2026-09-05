@@ -32,6 +32,12 @@ const (
 	hitLaneWidth = 22
 	hitTurnWidth = 7
 	hitKindWidth = 11
+	// hitWhenWidth holds "09-04 18:23". When a search can be bounded by date,
+	// the results have to say which date they are.
+	hitWhenWidth = 11
+	// hitWhenFloor is the width below which the date goes, so a narrow
+	// terminal spends what it has on the words that matched.
+	hitWhenFloor = 84
 )
 
 // openSearch starts a search, scoped to the conversation being read if any.
@@ -198,9 +204,12 @@ func (m Model) renderSearch() string {
 			b.WriteString(m.framed(blank) + "\n")
 		}
 	case len(s.hits) == 0:
-		b.WriteString(m.framed(padRight(" "+m.theme.Empty.Render(m.searchEmpty()), m.contentWidth())))
-		b.WriteString("\n")
-		for range m.bodyHeight() - 1 {
+		lines := m.searchNothing()
+		for _, line := range lines {
+			b.WriteString(m.framed(padRight(" "+line, m.contentWidth())))
+			b.WriteString("\n")
+		}
+		for range m.bodyHeight() - len(lines) {
 			b.WriteString(m.framed(blank) + "\n")
 		}
 	default:
@@ -221,11 +230,24 @@ func (m Model) renderSearch() string {
 	return b.String()
 }
 
-func (m Model) searchEmpty() string {
-	if strings.TrimSpace(m.search.input.text) == "" {
-		return "type to search every message and tool call"
+// searchNothing is what the panel says when it has no results to show. An
+// empty field is not a failure, it is the moment to say what can be typed
+// into it: the filters are worth nothing if nobody knows they are there, and
+// this is the only screen where they apply.
+func (m Model) searchNothing() []string {
+	if strings.TrimSpace(m.search.input.text) != "" {
+		return []string{m.theme.Empty.Render(
+			fmt.Sprintf("nothing matches %q", m.search.input.text))}
 	}
-	return fmt.Sprintf("nothing matches %q", m.search.input.text)
+	return []string{
+		m.theme.Empty.Render("type to search every message, tool call, memory and work product"),
+		"",
+		m.theme.Empty.Render("narrow it in the same line:"),
+		m.theme.Dim.Render("  project:braids") + m.theme.Empty.Render("     one project"),
+		m.theme.Dim.Render("  since:30d") + m.theme.Empty.Render("          or a date: since:2026-08-01, until:…"),
+		m.theme.Dim.Render("  kind:tool_result") + m.theme.Empty.Render("   text, thinking, tool_use, tool_result"),
+		m.theme.Dim.Render("  type:memory") + m.theme.Empty.Render("        conversation, memory, artifact"),
+	}
 }
 
 func (m Model) searchTitle() string {
@@ -309,16 +331,28 @@ func orDash(s string) string {
 func (m Model) searchColumns() string {
 	// Mirrors renderHit exactly: " " + type + " " + where + " " + turn + " "
 	// + kind + " " + match.
+	when := ""
+	if m.showsWhen() {
+		when = padRight("WHEN", hitWhenWidth) + " "
+	}
 	return m.theme.Column.Render(" " + padRight("TYPE", hitTypeWidth) + " " +
-		padRight("WHERE", hitLaneWidth) + " " +
+		padRight("WHERE", hitLaneWidth) + " " + when +
 		padLeft("TURN", hitTurnWidth) + " " + padRight("KIND", hitKindWidth) + " " +
 		padRight("MATCH", m.hitTextWidth()))
 }
 
 // hitTextWidth is what is left for the matched text.
 func (m Model) hitTextWidth() int {
-	return max(m.contentWidth()-5-hitTypeWidth-hitLaneWidth-hitTurnWidth-hitKindWidth, 8)
+	room := m.contentWidth() - 5 - hitTypeWidth - hitLaneWidth - hitTurnWidth - hitKindWidth
+	if m.showsWhen() {
+		room -= hitWhenWidth + 1
+	}
+	return max(room, 8)
 }
+
+// showsWhen reports whether there is room for the date. It is the first column
+// to go, because a result you cannot read the text of is no result at all.
+func (m Model) showsWhen() bool { return m.contentWidth() >= hitWhenFloor }
 
 // hitWhere names the thing found: the conversation for a turn, the memory or
 // the work product's path for the others.
@@ -370,19 +404,32 @@ func (m Model) renderHit(hit index.Hit, selected bool) string {
 
 	typeCell := padRight(hitTypeLabel(hit), hitTypeWidth)
 	laneCell := padRight(truncate(hitWhere(hit), hitLaneWidth), hitLaneWidth)
+	whenCell := ""
+	if m.showsWhen() {
+		whenCell = padRight(hitWhen(hit), hitWhenWidth) + " "
+	}
 	turnCell := padLeft(turn, hitTurnWidth)
 	kindCell := padRight(truncate(kind, hitKindWidth), hitKindWidth)
 	textCell := padRight(truncate(oneLine(hit.Snippet), m.hitTextWidth()), m.hitTextWidth())
 
-	plain := " " + typeCell + " " + laneCell + " " + turnCell + " " + kindCell + " " + textCell
+	plain := " " + typeCell + " " + laneCell + " " + whenCell + turnCell + " " + kindCell + " " + textCell
 	if selected {
 		return m.theme.Selected.Width(m.contentWidth()).Render(plain)
 	}
 	return " " + m.hitTypeStyle(hit).Render(typeCell) + " " +
-		m.theme.Value.Render(laneCell) + " " +
+		m.theme.Value.Render(laneCell) + " " + m.theme.Faint.Render(whenCell) +
 		m.theme.Faint.Render(turnCell) + " " +
 		m.theme.Dim.Render(kindCell) + " " +
 		m.theme.Title.Render(textCell)
+}
+
+// hitWhen is when the thing found happened, in the same shape the command
+// line prints. A zero time is left blank rather than drawn as year one.
+func hitWhen(hit index.Hit) string {
+	if hit.At.IsZero() {
+		return ""
+	}
+	return hit.At.Format("01-02 15:04")
 }
 
 // jumpToMemory opens the memory screen with the found memory under the cursor.

@@ -480,6 +480,13 @@ braids search "project:braids since:30d lock"
   the same words work there, with the header saying what it narrowed to. A flag
   wins where both are given.
 </p>
+<p>
+  Pressing <kbd>/</kbd> with nothing typed lists them, which is where anyone
+  actually finds out they exist, and the results carry the date each thing
+  happened so a bound by date can be checked rather than taken on trust. On a
+  narrow terminal the date is the first column to go, because a result whose
+  text you cannot read is no result at all.
+</p>
 {say("A word that looks like a filter but cannot be read as one stays part of the query. That matters because the field searches on every keystroke: halfway through typing <code>since:30d</code> you have <code>since:3</code>, and a parser that failed there would blank the screen while you type.")}
 
 <h2 id="ranking">How it ranks, and why that took two goes</h2>

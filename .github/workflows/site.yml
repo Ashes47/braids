@@ -37,7 +37,15 @@ jobs:
       # built from the generator, the captured frames and assets/, none of
       # which are committed twice. A broken generator fails here rather than
       # deploying a stale page.
+      #
+      # Everything under site/ is then uploaded, so the generators must leave
+      # nothing there that is not a page. Importing chrome.py writes a
+      # __pycache__ beside it, and that directory was being published: the
+      # site served /__pycache__/chrome.cpython-312.pyc, which is the
+      # generator's own bytecode and nobody's business.
       - run: python3 site/build.py && python3 site/docs.py
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
       # enablement lets the workflow turn Pages on itself. Without it, a run
       # that happens before Pages is enabled in Settings fails with "Get Pages
       # site failed" — which is a confusing way to say "not switched on yet".

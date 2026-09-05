@@ -65,8 +65,8 @@ site: pages
 
 # pages rebuilds the landing page and the docs from frames already captured.
 pages:
-	python3 site/build.py
-	python3 site/docs.py
+	PYTHONDONTWRITEBYTECODE=1 python3 site/build.py
+	PYTHONDONTWRITEBYTECODE=1 python3 site/docs.py
 
 # responsive checks that no page runs off the side of a phone. It drives a
 # real browser, so it is not part of `make ci`, which has to run where there

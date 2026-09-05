@@ -464,6 +464,24 @@ braids search "fork" --json
     ("--json", "machine readable, with whole IDs"),
 ])}
 
+<h2 id="typed">The same filters, typed</h2>
+<p>
+  Flags are right for a script and wrong for a person mid-sentence, so the
+  filters can also be typed into the query itself, which is what the search
+  screen takes:
+</p>
+{sh("""
+braids search "project:braids since:30d lock"
+""")}
+<p>
+  <code>project:</code>, <code>lane:</code>, <code>since:</code> (or
+  <code>after:</code>), <code>until:</code> (or <code>before:</code>),
+  <code>kind:</code> and <code>type:</code>. Press <kbd>/</kbd> in braids and
+  the same words work there, with the header saying what it narrowed to. A flag
+  wins where both are given.
+</p>
+{say("A word that looks like a filter but cannot be read as one stays part of the query. That matters because the field searches on every keystroke: halfway through typing <code>since:30d</code> you have <code>since:3</code>, and a parser that failed there would blank the screen while you type.")}
+
 <h2 id="ranking">How it ranks, and why that took two goes</h2>
 <p>
   The index is SQLite FTS5 and the ranking is bm25, which prefers short
@@ -822,12 +840,14 @@ braids explain internal/core/index/index.go --json
 
 <h2 id="skill">The skill</h2>
 <p>
-  The repository carries a Claude Code skill that teaches all of this. Copy it
-  where Claude looks for skills:
+  braids carries a Claude Code skill that teaches all of this, and installs it
+  for you:
 </p>
 {sh("""
-git clone https://github.com/Ashes47/braids /tmp/braids
-cp -r /tmp/braids/skills/braids ~/.claude/skills/
+braids skill --install     # into ~/.claude/skills/braids
+braids skill               # what is installed, and whether it is current
+braids skill --show        # print it instead
+braids skill --remove
 """)}
 <p>
   It says when to reach for braids and, as importantly, when not to: searching
@@ -938,6 +958,7 @@ REFERENCE = f"""
     ("braids memories", "what a project remembers, and what it has lost"),
     ("braids explain FILE", "which conversations were live when this file last changed"),
     ("braids hooks", "install, remove or inspect the hook"),
+    ("braids skill", "install, remove or inspect the Claude Code skill"),
     ("braids version", "the version, the commit, and how old this build is"),
     ("braids help", "everything, briefly"),
 ])}
@@ -1002,7 +1023,9 @@ REFERENCE = f"""
     ("--reclaim", "work: with --orphans, move them to the bin"),
     ("--project NAME", "memories: only this project"),
     ("--root DIR", "memories: transcript root"),
-    ("--install", "hooks: ask sessions to report when they block"),
+    ("--install", "hooks and skill: put it in place"),
+    ("--show", "skill: print it instead of installing it"),
+    ("--dir DIR", "skill: skills directory, default <code>~/.claude/skills</code>"),
     ("--remove", "hooks: stop asking"),
     ("--settings PATH", "hooks: settings file, default <code>~/.claude/settings.json</code>"),
 ])}

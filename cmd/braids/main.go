@@ -17,7 +17,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -67,6 +66,7 @@ usage:
   braids promote --lane ID --agent ID    turn a subagent into its own conversation
   braids merge --lane ID --from ID       join a branch back, as a new conversation
   braids hooks [--install|--remove]      let sessions report when they block
+  braids skill [--install|--remove]      teach Claude Code to use braids
   braids version
 
 map keys (the keys that open another screen; each screen lists its own):
@@ -96,6 +96,8 @@ search flags:
                    it is, and work products are matched by name, not contents
   --kind LIST      text,thinking,tool_use,tool_result (comma separated)
   --limit N        maximum hits (default 20)
+  The same filters can be typed into the query, which is what the search
+  screen takes: project:braids since:30d kind:text lock
 
 common flags:
   --db PATH        index location (default $BRAIDS_DB or ~/.braids/index.db)
@@ -151,6 +153,8 @@ func run(args []string, w io.Writer) error {
 		return cmdMemories(args[1:], out)
 	case "explain":
 		return cmdExplain(args[1:], out)
+	case "skill":
+		return cmdSkill(args[1:], out)
 	case "version", "-v", "--version":
 		out.mark(brand.Small())
 		out.printf("braids %s (%s)\n", version, commit)
@@ -187,7 +191,7 @@ func run(args []string, w io.Writer) error {
 // dispatch above, so a command cannot be added without being offered here.
 var known = []string{
 	"map", "index", "search", "lanes", "branch", "agents", "work", "memories",
-	"explain", "promote", "merge", "hooks", "hook", "version", "help",
+	"explain", "promote", "merge", "hooks", "hook", "skill", "version", "help",
 }
 
 // nearest returns the command a mistyped name most likely meant, or an empty
@@ -627,7 +631,15 @@ func cmdMap(args []string, out *printer) error {
 		Spawn:    spawn,
 		Terminal: terminal,
 		Search: func(query, scope string) ([]index.Hit, error) {
-			return ix.Search(ctx, index.Query{Text: query, Lane: scope, Limit: 200})
+			// The field takes the same filters the flags do, so `project:braids
+			// since:30d lock` narrows here exactly as it does on the command
+			// line, and either can be pasted into the other.
+			q := index.ParseQuery(query, time.Now())
+			q.Limit = 200
+			if scope != "" {
+				q.Lane = scope
+			}
+			return ix.Search(ctx, q)
 		},
 		Branch: func(laneID string, turn int, name string, workspace bool) (string, error) {
 			id, err := branchAt(ctx, ix, provenance, laneID, turn, name)
@@ -763,53 +775,41 @@ func cmdIndex(args []string, out *printer) error {
 	return out.Err()
 }
 
-// parseWhen reads a point in time the way people type one at a terminal:
-// either a date, or how long ago. A bare date means the whole of that day, so
-// --since and --until with the same date is that day and not an empty range.
-func parseWhen(text string, now time.Time, endOfDay bool) (time.Time, error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return time.Time{}, nil
+// merge lays the flags over what the query text asked for, so `--project x`
+// and `project:x` do the same thing and a flag wins when both are given.
+func merge(typed, flags index.Query) index.Query {
+	out := typed
+	if flags.Lane != "" {
+		out.Lane = flags.Lane
 	}
-	if day, err := time.ParseInLocation("2006-01-02", text, time.Local); err == nil {
-		if endOfDay {
-			return day.AddDate(0, 0, 1).Add(-time.Second), nil
-		}
-		return day, nil
+	if flags.Project != "" {
+		out.Project = flags.Project
 	}
-	if stamp, err := time.Parse(time.RFC3339, text); err == nil {
-		return stamp, nil
+	if !flags.Since.IsZero() {
+		out.Since = flags.Since
 	}
-	if ago, err := parseAge(text); err == nil {
-		return now.Add(-ago), nil
+	if !flags.Until.IsZero() {
+		out.Until = flags.Until
 	}
-	return time.Time{}, fmt.Errorf("cannot read %q as a date or an age "+
-		"(try 2026-08-01, or 30d, 6w, 12h)", text)
+	out.Kinds = append(out.Kinds, flags.Kinds...)
+	out.Types = append(out.Types, flags.Types...)
+	out.Limit = flags.Limit
+	return out
 }
 
-// parseAge reads "30d", "6w", "12h", "45m" as a duration. Go's own parser
-// stops at hours, and days are what anyone searching their own history counts
-// in.
-func parseAge(text string) (time.Duration, error) {
-	if len(text) < 2 {
-		return 0, fmt.Errorf("too short")
+// whenFlag reads a --since or --until, and says which flag was wrong when it
+// cannot. The reading itself lives with the query parser, so a date typed into
+// the search field and one passed on the command line mean the same thing.
+func whenFlag(name, text string, now time.Time, endOfDay bool) (time.Time, error) {
+	if strings.TrimSpace(text) == "" {
+		return time.Time{}, nil
 	}
-	unit := text[len(text)-1]
-	n, err := strconv.Atoi(text[:len(text)-1])
-	if err != nil || n < 0 {
-		return 0, fmt.Errorf("not a number of units")
+	when, ok := index.When(text, now, endOfDay)
+	if !ok {
+		return time.Time{}, fmt.Errorf("cannot read %s %q as a date or an age "+
+			"(try 2026-08-01, or 30d, 6w, 12h)", name, text)
 	}
-	switch unit {
-	case 'm':
-		return time.Duration(n) * time.Minute, nil
-	case 'h':
-		return time.Duration(n) * time.Hour, nil
-	case 'd':
-		return time.Duration(n) * 24 * time.Hour, nil
-	case 'w':
-		return time.Duration(n) * 7 * 24 * time.Hour, nil
-	}
-	return 0, fmt.Errorf("unknown unit %q", string(unit))
+	return when, nil
 }
 
 // reportStalled says when a transcript grew and produced nothing.
@@ -882,20 +882,20 @@ func cmdSearch(args []string, out *printer) error {
 	if strings.TrimSpace(query) == "" {
 		return errors.New("search needs a query (try: braids search blobstore)")
 	}
-	parsed, err := parseKinds(*kinds)
+	parsed, err := index.ParseKinds(*kinds)
 	if err != nil {
 		return err
 	}
-	wanted, err := parseTypes(*types)
+	wanted, err := index.ParseTypes(*types)
 	if err != nil {
 		return err
 	}
 	now := time.Now()
-	from, err := parseWhen(*since, now, false)
+	from, err := whenFlag("--since", *since, now, false)
 	if err != nil {
 		return err
 	}
-	to, err := parseWhen(*until, now, true)
+	to, err := whenFlag("--until", *until, now, true)
 	if err != nil {
 		return err
 	}
@@ -911,8 +911,9 @@ func cmdSearch(args []string, out *printer) error {
 
 	start := time.Now()
 	hits, err := ix.Search(context.Background(),
-		index.Query{Text: query, Lane: *lane, Project: *project, Since: from, Until: to,
-			Kinds: parsed, Types: wanted, Limit: *limit})
+		merge(index.ParseQuery(query, now),
+			index.Query{Lane: *lane, Project: *project, Since: from, Until: to,
+				Kinds: parsed, Types: wanted, Limit: *limit}))
 	if err != nil {
 		return err
 	}
@@ -1782,33 +1783,6 @@ func cmdLanes(args []string, out *printer) error {
 	return out.Err()
 }
 
-// parseKinds validates the --kind flag, refusing unknown kinds rather than
-// silently returning nothing.
-func parseKinds(s string) ([]model.PartKind, error) {
-	if strings.TrimSpace(s) == "" {
-		return nil, nil
-	}
-	valid := map[string]model.PartKind{
-		string(model.PartText):       model.PartText,
-		string(model.PartThinking):   model.PartThinking,
-		string(model.PartToolUse):    model.PartToolUse,
-		string(model.PartToolResult): model.PartToolResult,
-	}
-	var kinds []model.PartKind
-	for _, raw := range strings.Split(s, ",") {
-		name := strings.TrimSpace(raw)
-		if name == "" {
-			continue
-		}
-		k, ok := valid[name]
-		if !ok {
-			return nil, fmt.Errorf("unknown kind %q (want text, thinking, tool_use or tool_result)", name)
-		}
-		kinds = append(kinds, k)
-	}
-	return kinds, nil
-}
-
 func laneLabel(h index.Hit) string {
 	if h.LaneTitle != "" {
 		return truncate(h.LaneTitle, 28)
@@ -2146,32 +2120,6 @@ func printMemories(sets []memory.Set, out *printer) error {
 		}
 	}
 	return out.Err()
-}
-
-// parseTypes reads the --type list: what sort of thing to look in. Empty means
-// all of them, so a plain search stays global.
-func parseTypes(s string) ([]index.Found, error) {
-	if strings.TrimSpace(s) == "" {
-		return nil, nil
-	}
-	valid := map[string]index.Found{
-		string(index.FoundTurn):     index.FoundTurn,
-		string(index.FoundMemory):   index.FoundMemory,
-		string(index.FoundArtifact): index.FoundArtifact,
-	}
-	var types []index.Found
-	for _, raw := range strings.Split(s, ",") {
-		name := strings.TrimSpace(raw)
-		if name == "" {
-			continue
-		}
-		t, ok := valid[name]
-		if !ok {
-			return nil, fmt.Errorf("unknown type %q (want conversation, memory or artifact)", name)
-		}
-		types = append(types, t)
-	}
-	return types, nil
 }
 
 // typeLabel is the one-word column saying what a hit is.

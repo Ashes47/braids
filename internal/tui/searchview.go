@@ -258,12 +258,44 @@ func (m Model) searchFacts() []fact {
 	if s.scope != "" {
 		scope = "this conversation"
 	}
-	return []fact{
+	facts := []fact{
 		{"Query", orDash(s.input.text)},
 		{"Scope", scope},
 		{"Hits", fmt.Sprintf("%d", len(s.hits))},
 		{"Took", timing},
 	}
+	// A field that has quietly narrowed itself looks like a field that has
+	// stopped working, so what it narrowed to is said out loud.
+	if narrowed := narrowing(s.input.text, m.now()); narrowed != "" {
+		facts = append(facts, fact{"Narrowed to", narrowed})
+	}
+	return facts
+}
+
+// narrowing describes the filters typed into the query, in the order they
+// would be read. An empty string means the query is only words.
+func narrowing(text string, now time.Time) string {
+	q := index.ParseQuery(text, now)
+	var parts []string
+	if q.Project != "" {
+		parts = append(parts, "project "+q.Project)
+	}
+	if q.Lane != "" {
+		parts = append(parts, "lane "+truncate(q.Lane, 8))
+	}
+	if !q.Since.IsZero() {
+		parts = append(parts, "since "+q.Since.Format("2006-01-02"))
+	}
+	if !q.Until.IsZero() {
+		parts = append(parts, "until "+q.Until.Format("2006-01-02"))
+	}
+	for _, k := range q.Kinds {
+		parts = append(parts, string(k))
+	}
+	for _, t := range q.Types {
+		parts = append(parts, string(t))
+	}
+	return strings.Join(parts, " · ")
 }
 
 // orDash keeps an empty fact readable rather than blank.

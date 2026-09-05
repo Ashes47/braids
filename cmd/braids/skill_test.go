@@ -14,7 +14,7 @@ import (
 // fix it, so it must not describe a surface that does not exist. This reads it
 // and checks every command and flag against the program itself.
 func TestSkillOnlyTeachesCommandsThatExist(t *testing.T) {
-	path := filepath.Join("..", "..", "skills", "braids", "SKILL.md")
+	path := filepath.Join("..", "..", "internal", "skill", "SKILL.md")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read the skill: %v", err)
@@ -77,7 +77,7 @@ func commandTakes(t *testing.T, command, flag string) bool {
 // And the reverse: a command worth teaching should be taught. This is a
 // reminder rather than a rule, so it names what is missing without failing.
 func TestSkillMentionsTheCommandsWorthTeaching(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join("..", "..", "skills", "braids", "SKILL.md"))
+	body, err := os.ReadFile(filepath.Join("..", "..", "internal", "skill", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

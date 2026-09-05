@@ -176,13 +176,17 @@ nothing you delete is gone the moment you regret it.
 
 ## A skill for Claude
 
-`skills/braids/SKILL.md` teaches Claude to use braids: when to search history,
-how to read the JSON, and how to branch from what it finds. Copy it into
-`~/.claude/skills/` and Claude will reach for braids when the user refers to
-earlier work, asks why something is the way it is, or is about to propose
-something that may already have been tried. A test checks every command and
-flag in that file against the program, so it cannot drift from what braids
-actually takes.
+```sh
+braids skill --install
+```
+
+That writes a Claude Code skill into `~/.claude/skills/braids`, teaching Claude
+when to search your history, how to read the JSON, and how to branch from what
+it finds. It fires when you refer to earlier work, ask why something is the way
+it is, or propose something that may already have been tried, and not
+otherwise. `braids skill` says whether the installed one is still current, since
+an older braids leaves an older skill behind. A test checks every command and
+flag in it against the program, so it cannot drift from what braids takes.
 
 ## Driving it from an agent
 
@@ -221,6 +225,7 @@ braids branch  --lane ID --at TURN [--workspace]
 braids promote --lane ID --agent ID     turn a subagent into its own conversation
 braids merge   --lane ID --from ID [--plan]
 braids hooks [--install|--remove]       let sessions report when they block
+braids skill [--install|--remove]      teach Claude Code to use braids
 braids version
 ```
 

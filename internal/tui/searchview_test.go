@@ -314,3 +314,22 @@ func TestSearchNamesTheKindAndOpensItsScreen(t *testing.T) {
 		t.Errorf("cursor is on %+v, want nodes.json", entry)
 	}
 }
+
+// A field that has quietly narrowed itself looks like a field that has stopped
+// working, so the header says what it narrowed to.
+func TestSearchHeaderNamesWhatItNarrowedTo(t *testing.T) {
+	when := time.Date(2026, 9, 4, 12, 0, 0, 0, time.Local)
+	for text, want := range map[string]string{
+		"project:braids lock":             "project braids",
+		"since:2026-08-01 lock":           "since 2026-08-01",
+		"kind:tool_result lock":           "tool_result",
+		"type:memory lock":                "memory",
+		"lock across a network call":      "",
+		"since:3 lock":                    "",
+		"project:braids since:2026-08-01": "project braids · since 2026-08-01",
+	} {
+		if got := narrowing(text, when); got != want {
+			t.Errorf("narrowing(%q) = %q, want %q", text, got, want)
+		}
+	}
+}

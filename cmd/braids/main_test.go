@@ -12,14 +12,11 @@ import (
 	"strings"
 	"testing"
 
-	"time"
-
 	"github.com/Ashes47/braids/internal/perms"
 
 	_ "modernc.org/sqlite"
 
 	"github.com/Ashes47/braids/internal/brand"
-	"github.com/Ashes47/braids/internal/core/model"
 )
 
 // fixtureRoot writes a minimal Claude Code transcript tree.
@@ -167,20 +164,6 @@ func TestMapRefusesToOpenWithNothingIndexed(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "braids index") {
 		t.Errorf("err = %v, want it to suggest running braids index", err)
-	}
-}
-
-func TestParseKinds(t *testing.T) {
-	got, err := parseKinds(" text , tool_use ")
-	if err != nil {
-		t.Fatalf("parseKinds: %v", err)
-	}
-	want := []model.PartKind{model.PartText, model.PartToolUse}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("parseKinds = %v, want %v", got, want)
-	}
-	if k, err := parseKinds("   "); err != nil || k != nil {
-		t.Errorf("blank kinds = %v, %v; want nil, nil", k, err)
 	}
 }
 
@@ -666,40 +649,6 @@ func TestMemoriesMarksAnAbsentOriginAsNothing(t *testing.T) {
 	// --root also makes the command reachable anywhere, like index and work.
 	if !strings.Contains(out, "no-origin") || !strings.Contains(out, "with-origin") {
 		t.Errorf("--root did not read the set:\n%s", out)
-	}
-}
-
-// A date or an age, because both are what people type at a terminal. A bare
-// date means the whole of that day, so the same date on both bounds is that
-// day rather than an empty range.
-func TestParseWhenReadsDatesAndAges(t *testing.T) {
-	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.Local)
-	for _, c := range []struct {
-		in       string
-		endOfDay bool
-		want     time.Time
-	}{
-		{"2026-08-01", false, time.Date(2026, 8, 1, 0, 0, 0, 0, time.Local)},
-		{"2026-08-01", true, time.Date(2026, 8, 1, 23, 59, 59, 0, time.Local)},
-		{"30d", false, now.AddDate(0, 0, -30)},
-		{"6w", false, now.Add(-6 * 7 * 24 * time.Hour)},
-		{"12h", false, now.Add(-12 * time.Hour)},
-		{"45m", false, now.Add(-45 * time.Minute)},
-		{"", false, time.Time{}},
-	} {
-		got, err := parseWhen(c.in, now, c.endOfDay)
-		if err != nil {
-			t.Errorf("parseWhen(%q): %v", c.in, err)
-			continue
-		}
-		if !got.Equal(c.want) {
-			t.Errorf("parseWhen(%q, endOfDay=%v) = %v, want %v", c.in, c.endOfDay, got, c.want)
-		}
-	}
-	for _, bad := range []string{"yesterday", "last tuesday", "5", "3y", "-2d", "d"} {
-		if _, err := parseWhen(bad, now, false); err == nil {
-			t.Errorf("parseWhen(%q) was accepted", bad)
-		}
 	}
 }
 

@@ -169,6 +169,9 @@ func writeBranch(ctx context.Context, path, newID string, req store.BranchReques
 	if err != nil {
 		return errors.Join(fmt.Errorf("write branch: %w", err), tmp.Close())
 	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("flush branch: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close branch: %w", err)
 	}
@@ -342,6 +345,9 @@ func writePromoted(ctx context.Context, path, newID, title string, lines []line)
 	}()
 	if err != nil {
 		return errors.Join(fmt.Errorf("write promoted lane: %w", err), tmp.Close())
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("flush promoted lane: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close promoted lane: %w", err)

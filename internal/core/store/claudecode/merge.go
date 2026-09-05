@@ -235,6 +235,9 @@ func writeMerged(ctx context.Context, path, newID, name string, base, unique []l
 	if err != nil {
 		return errors.Join(fmt.Errorf("write merged lane: %w", err), tmp.Close())
 	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("flush merged lane: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close merged lane: %w", err)
 	}

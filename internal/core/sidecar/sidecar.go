@@ -112,6 +112,9 @@ func (s *Store[T]) flush() error {
 	if _, err := tmp.Write(body); err != nil {
 		return errors.Join(fmt.Errorf("write %s: %w", s.path, err), tmp.Close())
 	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("flush %s: %w", s.path, err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close %s: %w", s.path, err)
 	}

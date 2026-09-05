@@ -330,13 +330,44 @@ func writeRows(path string, header []string, rows []indexRow) error {
 
 // rewrite replaces a memory's contents, keeping the mode it already had. These
 // are the harness's files; braids is editing them, not adopting them.
+// rewrite replaces a memory's contents without ever leaving a half-written one
+// on disk.
+//
+// A memory is something the user wrote and cannot get back, so it is written
+// beside the original and moved over it: an interrupted write loses the
+// temporary file rather than the memory. The flush before the move is what
+// makes that true after a crash as well as after an error, since renaming is
+// atomic for the name and promises nothing about the bytes.
+//
+// The mode of the file that is already there is preserved, because how a user
+// has chosen to protect their own notes is not braids' decision to make.
 func rewrite(path string, body []byte) error {
 	mode := os.FileMode(0o600)
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
 	}
-	if err := os.WriteFile(path, body, mode); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".memory-*")
+	if err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
+	}
+	name := tmp.Name()
+	defer os.Remove(name) //nolint:errcheck // best effort once renamed
+
+	if _, err := tmp.Write(body); err != nil {
+		return errors.Join(fmt.Errorf("write %s: %w", path, err), tmp.Close())
+	}
+	if err := tmp.Sync(); err != nil {
+		return errors.Join(fmt.Errorf("flush %s: %w", path, err), tmp.Close())
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", path, err)
+	}
+	// CreateTemp makes it 0600; the memory keeps the mode it had.
+	if err := os.Chmod(name, mode); err != nil {
+		return fmt.Errorf("set the mode of %s: %w", path, err)
+	}
+	if err := os.Rename(name, path); err != nil {
+		return fmt.Errorf("replace %s: %w", path, err)
 	}
 	return nil
 }

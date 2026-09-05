@@ -1643,3 +1643,32 @@ func TestAPhantomFromAnOlderIndexIsClearedOut(t *testing.T) {
 		t.Errorf("still reporting %d lanes as unreadable", len(unreadable))
 	}
 }
+
+// A file in the index's place that is not an index has to say so in terms
+// somebody can act on. Every byte of the index is derived from transcripts, so
+// the answer is always the same: delete it and index again.
+func TestOpeningSomethingThatIsNotAnIndexSaysWhatToDo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "index.db")
+	// Bytes that are definitely not a database, of the size a partial write
+	// or a full disk would leave behind.
+	junk := make([]byte, 4096)
+	for i := range junk {
+		junk[i] = byte(i % 251)
+	}
+	if err := os.WriteFile(path, junk, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ix, err := Open(path)
+	if err == nil {
+		ix.Close() //nolint:errcheck // test cleanup
+		t.Fatal("opened a file that is not an index")
+	}
+	if !errors.Is(err, ErrNotAnIndex) {
+		t.Errorf("said %q, which does not tell the reader what to do", err)
+	}
+	// And it must not leak the pragma it happened to fail on.
+	if strings.Contains(err.Error(), "PRAGMA") {
+		t.Errorf("the message leaks an internal statement: %q", err)
+	}
+}

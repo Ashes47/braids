@@ -73,6 +73,9 @@ func Install(skills string) (State, error) {
 	if _, err := tmp.WriteString(content); err != nil {
 		return s, errors.Join(fmt.Errorf("write the skill: %w", err), tmp.Close())
 	}
+	if err := tmp.Sync(); err != nil {
+		return s, fmt.Errorf("flush the skill: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return s, fmt.Errorf("write the skill: %w", err)
 	}

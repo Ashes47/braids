@@ -261,6 +261,11 @@ func connect(path string) (*sql.DB, error) {
 		`PRAGMA busy_timeout=5000`,
 	} {
 		if _, err := db.Exec(pragma); err != nil {
+			// SQLite only looks at the file when the first statement runs, so
+			// a file that is not a database fails here rather than at Open.
+			if strings.Contains(err.Error(), "file is not a database") {
+				return nil, errors.Join(fmt.Errorf("%w: %s", ErrNotAnIndex, path), db.Close())
+			}
 			return nil, errors.Join(fmt.Errorf("apply %s: %w", pragma, err), db.Close())
 		}
 	}
@@ -328,6 +333,15 @@ func restrict(path string) error {
 // wearing the shape of a right one, which is the thing this codebase refuses
 // to do anywhere else.
 var ErrSchemaChanged = errors.New("the index was written by another version of braids (run: braids index)")
+
+// ErrNotAnIndex is a file in the index's place that is not one.
+//
+// The index is derived: every byte of it can be rebuilt from the transcripts,
+// so the answer is always to delete it and index again. Saying that is the
+// whole job, and it is worth doing because the alternative surfaces as
+// "apply PRAGMA journal_mode=WAL: file is not a database (26)", which tells
+// somebody whose disk filled up mid-write nothing they can act on.
+var ErrNotAnIndex = errors.New("this is not a braids index (delete it and run: braids index)")
 
 // outOfDate reports whether the stored schema is one this build understands.
 func outOfDate(db *sql.DB) (bool, error) {

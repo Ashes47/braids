@@ -204,6 +204,9 @@ func write(path string, settings map[string]json.RawMessage) error {
 	if _, err := tmp.Write(append(body, '\n')); err != nil {
 		return errors.Join(fmt.Errorf("write settings: %w", err), tmp.Close())
 	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("flush settings: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close settings: %w", err)
 	}

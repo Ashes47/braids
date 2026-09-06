@@ -33,7 +33,7 @@ func TestBackingOutOfAMemoryOpenedFromSearch(t *testing.T) {
 				}},
 			}}, nil
 		},
-		Search: func(query, scope string) ([]index.Hit, error) {
+		Search: func(_, _ string) ([]index.Hit, error) {
 			return []index.Hit{{
 				Of: index.FoundMemory, Name: "shard-manifest",
 				Project: "storefront", At: now,

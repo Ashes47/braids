@@ -28,10 +28,16 @@ BODY = f"""
   </div>
   <h1>You worked this out already.<br>braids finds where.</h1>
   <p class="lede">
-    Every Claude Code session on your machine, searchable in a few
-    milliseconds: what you asked, what came back, what a tool returned, what a
-    project remembers. Find the turn where you worked something out, then start
-    a new conversation from exactly there.
+    The fix you found three weeks ago. The conversation where the race
+    condition finally made sense. The branch you abandoned because something
+    else worked.
+  </p>
+  <p class="lede">
+    <strong>All of it is still on your machine</strong>, in the transcripts
+    Claude Code already writes. braids makes it findable: every session, every
+    turn, every tool call, every memory a project keeps, searchable in a few
+    milliseconds. Find where you worked something out, then start a new
+    conversation from exactly there.
   </p>
   <p class="lede">
     braids never talks to a model. It arranges the conversations you have with

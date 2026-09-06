@@ -408,11 +408,19 @@ MAP = f"""
 
 <h2 id="live">It keeps up on its own</h2>
 <p>
-  The map watches the transcript directory, the memory directories and the
-  index. When a session writes a turn while you are looking at it, braids reads
-  only the bytes that were added, off the drawing thread, and the row updates
-  in place. Reading the whole file again would take about 3.3 seconds on a
-  145 MB conversation. Reading the tail takes about 40 ms.
+  Opening the map catches it up first. Nothing touches the index while braids
+  is closed, so without this the map showed whatever was true the last time it
+  was open: a week away, and it stayed a week out of date until something
+  happened to a file while you were watching it. On a history of 66,000
+  messages that catch-up costs about 70&nbsp;ms, because a transcript whose
+  size and modification time have not moved is never opened.
+</p>
+<p>
+  After that it watches the transcript directory, the memory directories and
+  the index. When a session writes a turn while you are looking at it, braids
+  reads only the bytes that were added, off the drawing thread, and the row
+  updates in place. Reading the whole file again would take about 3.3 seconds
+  on a 145 MB conversation. Reading the tail takes about 40 ms.
 </p>
 {say("If you sit on the spine of a live conversation, new turns appear as they land. The cursor stays where you put it.")}
 

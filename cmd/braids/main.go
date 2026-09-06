@@ -409,6 +409,27 @@ func openExisting(path string) (*index.Index, error) {
 // openOrRebuild is the map's way in. It may replace an index written by
 // another version, because unlike a search it reads every transcript again
 // before it draws anything, so nobody is shown an empty screen.
+// freshen brings the index up to date with the transcripts on disk.
+//
+// Cheap by construction: a transcript whose size and mtime have not moved
+// costs a stat and is not opened, and one that has only grown is read from
+// where the last read stopped. A history of 66,000 messages settles in under
+// half a second, nearly all of it stat calls.
+//
+// Memories are included because they are the thing somebody writes and then
+// immediately searches for, and deciding whether to bother is a directory
+// listing. Work products are not: measuring them means walking every file a
+// session left behind, so they wait for `braids index`.
+func freshen(ctx context.Context, ix *index.Index, src *claudecode.Source) error {
+	if _, err := ix.Sync(ctx, src); err != nil {
+		return err
+	}
+	if _, err := ix.SyncMemories(ctx, src); err != nil {
+		return err
+	}
+	return nil
+}
+
 func openOrRebuild(path string) (*index.Index, error) {
 	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("no index at %s (run: braids index)", path)
@@ -659,14 +680,7 @@ func cmdMap(args []string, out *printer) error {
 			return id, nil
 		},
 		Refresh: func() (*graph.Forest, error) {
-			if _, err := ix.Sync(ctx, src); err != nil {
-				return nil, err
-			}
-			// Memories are what you write and then immediately search for, so
-			// they are kept current here. Deciding whether to bother is a
-			// directory listing; work products are not, so they wait for
-			// `braids index`.
-			if _, err := ix.SyncMemories(ctx, src); err != nil {
+			if err := freshen(ctx, ix, src); err != nil {
 				return nil, err
 			}
 			return tui.Forest(ctx, ix, provenance.All(), names.All())
@@ -691,6 +705,18 @@ func cmdMap(args []string, out *printer) error {
 			return err
 		}
 		out.printf("read %d conversations\n", len(forest.ByID))
+	}
+	// Nothing touches the index while braids is closed, so opening the map used
+	// to show whatever was true the last time it was open: a week away and the
+	// map was a week out of date until something happened to a file while you
+	// were watching it. Catch up before drawing anything, printed or not.
+	//
+	// The branch above has already done this after a format change, and doing
+	// it twice would be a second pass over every transcript to find nothing.
+	if !ix.Recreated() {
+		if err := freshen(ctx, ix, src); err != nil {
+			return err
+		}
 	}
 	if !*print {
 		return tui.Run(ctx, ix, opts)

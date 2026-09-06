@@ -19,6 +19,18 @@ braids version
 If that fails, braids is not installed and nothing below applies. Say so rather
 than guessing at history.
 
+Then, once, the first time you are going to use braids in a session:
+
+```sh
+braids index
+```
+
+Nothing keeps the index current while you work. The map does it when somebody
+opens it, and nobody has it open during your session, so without this a search
+can answer `0 hits` about a conversation that happened this morning, which
+reads exactly like "this never happened". It costs about a second. Once per
+session, not once per search.
+
 ## When to reach for it
 
 Three situations.
@@ -49,6 +61,10 @@ on this machine and nothing else.
 Do not search when the user has already told you the answer. If they say "we
 use exponential backoff here", that is the answer. Going to look it up again is
 not diligence.
+
+Do not search for this conversation. "Earlier" often means earlier today, in
+the session you are already in, and you have that: it is your context. braids
+is for the sessions you were not in, or were in and have forgotten.
 
 ## The shape of a lookup
 
@@ -172,6 +188,10 @@ was being said in that directory at the time). For each commit it names the
 conversations that were live in the window before it and the last thing
 actually said in them.
 
+`--window` is how long before a commit a turn still counts as context, three
+hours by default. Widen it when the work was spread over a day and narrow it
+when a repository is busy.
+
 **It does not know that those conversations caused those commits, and neither
 do you.** Report it as where to look, never as why the code is the way it is.
 
@@ -194,9 +214,43 @@ Finding it is not the job. What you do next is.
   what they asked.** They may know something the transcript does not. A
   conversation from three weeks ago does not overrule the person in front of
   you.
-- **Say when you looked and found nothing.** "Nothing in your history mentions
-  a retry policy for this" is a real answer, and it is worth a line. Silence is
-  indistinguishable from never having checked.
+- **What silence means depends on why you looked.** One other wording, then
+  stop either way, but not the same way. If the user pointed at earlier work,
+  say you looked and found nothing: they may have the wrong project in mind, or
+  have said it somewhere braids cannot see, and either way they need to know
+  the search happened. If you were only checking before proposing something,
+  carry on and say nothing. An absence of history is not a finding, and
+  announcing one on every question turns a useful check into noise.
+- **When the code and the history disagree, say so.** This is the most valuable
+  thing braids can hand you and it is easy to walk past: the implementation in
+  front of you does X, and a session three weeks ago rejected X for a reason.
+  Do not assume the old decision still holds, because code changes for reasons
+  that never reach a transcript. Do not let it pass either. Put both in front
+  of the user and let them say which is out of date.
+
+## Carrying work across conversations
+
+Branching is one of three, and the skill used to teach only that one. All three
+write a new conversation and leave what they came from untouched, and all three
+print the `claude --resume` command for it. **Give that command to the user.**
+braids does not resume anything and neither should you: a new conversation is
+theirs to open, in their terminal, when they want it.
+
+```sh
+braids merge --lane LANE --from BRANCH --name "the lock, narrowed" --json
+braids promote --lane LANE --agent AGENT --json
+```
+
+`merge` brings a branch back, as a new conversation holding the base and then
+the branch's turns spliced on. Use it when a branch worked and the work should
+continue on the main thread. `--plan` reports what would come over and stops,
+which is worth doing first when the branch is long.
+
+`promote` turns a subagent into a conversation of its own. It takes no name:
+the subagent already has the task it was given, and that is what the new
+conversation is called. `braids agents --lane LANE` lists them; a subagent that did substantial work is otherwise
+reachable only through the conversation that spawned it, and promoting it gives
+it a thread the user can resume directly.
 
 ## Other things it answers
 
@@ -213,8 +267,8 @@ braids hooks --json                    # whether waiting states are trustworthy
 - **Quote evidence, never assert history.** Say "the conversation on 21 August
   says X, at turn 1842" rather than "the project decided X". braids reports
   what was said; it does not know what was concluded.
-- **Do not run `braids index` speculatively.** The map keeps the index current
-  by itself. If a read says there is no index, tell the user to run it once.
+- **Index once a session, before the first search.** See the top of this file:
+  nothing else keeps it current while you work.
 - **IDs come back whole in JSON on purpose.** Pass them through unchanged; do
   not shorten them for display and then try to reuse them.
 - **An empty result is `[]`, not an error.** Nothing found means nothing found.

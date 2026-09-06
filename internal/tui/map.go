@@ -625,7 +625,7 @@ func (m Model) startRename() Model {
 	if m.renameFn == nil || m.cursor >= len(m.visible) {
 		return m.withNotice("nothing to rename here", true)
 	}
-	m.naming = filterInput{active: true, text: m.visible[m.cursor].node.Lane.Title}
+	m.naming = typing(m.visible[m.cursor].node.Lane.Title)
 	m.notice = ""
 	return m
 }
@@ -1062,7 +1062,7 @@ func (m Model) renamePrompt() string {
 	}
 	return " " + m.theme.Rail.Render("  "+g.Last) + " " +
 		m.theme.Accent.Render(label) +
-		m.theme.Value.Render(padRight(truncate(m.naming.text, width)+"▏", width+1)) + " " +
+		m.theme.Value.Render(padRight(caretIn(m.naming, width), width+1)) + " " +
 		m.theme.Label.Render(hint)
 }
 

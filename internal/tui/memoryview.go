@@ -319,8 +319,10 @@ func (m Model) renderMemories() string {
 func (m Model) memoryStatus() string {
 	s := m.memories
 	if s.naming.active {
-		return m.theme.Accent.Render("rename to: ") + m.theme.Value.Render(s.naming.text) +
-			m.theme.Accent.Render("▏") + m.theme.Label.Render("  enter renames · esc cancels")
+		before, after := s.naming.split()
+		return m.theme.Accent.Render("rename to: ") + m.theme.Value.Render(before) +
+			m.theme.Accent.Render("▏") + m.theme.Value.Render(after) +
+			m.theme.Label.Render("  enter renames · esc cancels")
 	}
 	if s.notice != "" {
 		return m.noticeStyle(s.failed).Render(truncate(s.notice, m.width-2))
@@ -736,7 +738,7 @@ func (m Model) startMemoryRename() Model {
 	if !ok || m.renameMemoryFn == nil {
 		return m
 	}
-	m.memories.naming = filterInput{active: true, text: entry.Name}
+	m.memories.naming = typing(entry.Name)
 	return m
 }
 

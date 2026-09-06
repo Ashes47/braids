@@ -458,8 +458,10 @@ func (m Model) noticeStyle(failed bool) lipgloss.Style {
 
 // typingLine shows the filter being typed, on either screen.
 func (m Model) typingLine(f filterInput) string {
-	return " " + m.theme.Column.Render("/") + m.theme.Value.Render(f.text) +
-		m.theme.Column.Render("▏") + "  " + m.theme.Label.Render("enter keep · esc clear")
+	before, after := f.split()
+	return " " + m.theme.Column.Render("/") + m.theme.Value.Render(before) +
+		m.theme.Column.Render("▏") + m.theme.Value.Render(after) +
+		"  " + m.theme.Label.Render("enter keep · esc clear")
 }
 
 // shorten replaces the home directory with ~ so a path fits the facts block.

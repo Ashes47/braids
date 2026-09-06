@@ -399,7 +399,7 @@ func (m Model) namePrompt() string {
 	}
 	return " " + m.theme.Rail.Render("  "+g.Last) + " " +
 		kind.Render(label) +
-		m.theme.Value.Render(padRight(truncate(s.naming.text, width)+"▏", width+1)) + " " +
+		m.theme.Value.Render(padRight(caretIn(s.naming, width), width+1)) + " " +
 		m.theme.Label.Render(hint)
 }
 
@@ -702,7 +702,7 @@ func (m Model) startBranch() Model {
 		// Branching here means branching from the turn before the compaction,
 		// which is what recovers the context it dropped.
 		if before, ok := s.turnBefore(row.seam.Seq); ok {
-			s.naming = filterInput{active: true, text: fmt.Sprintf("before-compaction-t%d", before.Seq)}
+			s.naming = typing(fmt.Sprintf("before-compaction-t%d", before.Seq))
 			s.notice, s.failed = "", false
 			s.cursor = s.indexOfTurn(before.Seq)
 			return m
@@ -719,7 +719,7 @@ func (m Model) startBranch() Model {
 		s.notice, s.failed = "pick a single turn to branch from, not a collapsed run", true
 		return m
 	}
-	s.naming = filterInput{active: true, text: suggestName(seg)}
+	s.naming = typing(suggestName(seg))
 	s.notice, s.failed = "", false
 	return m
 }

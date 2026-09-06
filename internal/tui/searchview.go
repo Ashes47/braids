@@ -46,7 +46,7 @@ func (m Model) openSearch() Model {
 	if m.mode == spineMode && m.spine != nil {
 		scope = m.spine.lane.ID
 	}
-	m.search = &searchState{input: filterInput{active: true}, scope: scope}
+	m.search = &searchState{input: typing(""), scope: scope}
 	m.returnTo = m.mode
 	m.mode = searchMode
 	return m
@@ -224,8 +224,9 @@ func (m Model) renderSearch() string {
 	}
 	b.WriteString(m.panelBottom())
 	b.WriteString("\n")
-	b.WriteString(" " + m.theme.Column.Render("/") + m.theme.Value.Render(s.input.text) +
-		m.theme.Column.Render("▏") + "  " +
+	typed, rest := s.input.split()
+	b.WriteString(" " + m.theme.Column.Render("/") + m.theme.Value.Render(typed) +
+		m.theme.Column.Render("▏") + m.theme.Value.Render(rest) + "  " +
 		m.theme.Label.Render("↵ open · tab scope · esc back"))
 	return b.String()
 }
@@ -445,7 +446,7 @@ func (m Model) jumpToMemory(hit index.Hit) Model {
 	}
 	// Filtering to the name is what puts the cursor on it, and leaves the
 	// filter visible so it is obvious why the list is short.
-	m.memories.filter.text = hit.Name
+	m.memories.filter = filterInput{text: hit.Name, cursor: len([]rune(hit.Name))}
 	m.applyMemoryFilter()
 	// Searching for a memory means wanting to read it, not to look at a row
 	// describing it.
@@ -496,6 +497,8 @@ func (m Model) filterPrompt(f filterInput) string {
 	if !f.active {
 		return ""
 	}
-	return m.theme.Accent.Render("filter: ") + m.theme.Value.Render(f.text) +
-		m.theme.Accent.Render("▏") + m.theme.Label.Render("  enter keeps it · esc clears")
+	before, after := f.split()
+	return m.theme.Accent.Render("filter: ") + m.theme.Value.Render(before) +
+		m.theme.Accent.Render("▏") + m.theme.Value.Render(after) +
+		m.theme.Label.Render("  enter keeps it · esc clears")
 }

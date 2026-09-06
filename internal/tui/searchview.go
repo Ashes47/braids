@@ -54,6 +54,17 @@ func (m Model) openSearch() Model {
 
 func (m Model) searchKey(key string) Model {
 	s := m.search
+	if s == nil {
+		// The mode says search and there is no search behind it. That is a
+		// bug wherever it came from, and the one thing this must not do is
+		// read from nothing and take the session down with it. Leave for the
+		// screen underneath, and for the map if that is search too.
+		m.mode = m.returnTo
+		if m.mode == searchMode {
+			m.mode = mapMode
+		}
+		return m
+	}
 	switch key {
 	case "esc":
 		m.mode = m.returnTo
@@ -131,6 +142,22 @@ func (m *Model) clampSearch() {
 // jumpToHit opens the conversation a result belongs to, positioned at the turn
 // that matched. Landing somewhere and seeing the surrounding thread is the
 // whole point: a result on its own says nothing about what came before it.
+// leaveSearch closes the search screen before another one opens over it.
+//
+// The screens reachable from a hit remember the mode they were opened from,
+// so that going back returns there. Opening one while the mode is still
+// searchMode makes it remember a screen that is about to stop existing: going
+// back then lands on a search with no state behind it, and the next key press
+// reads from nothing. Reported as a crash, from a memory opened out of a
+// global search and then backed out of.
+func (m Model) leaveSearch() Model {
+	m.search = nil
+	if m.mode == searchMode {
+		m.mode = m.returnTo
+	}
+	return m
+}
+
 func (m Model) jumpToHit() Model {
 	s := m.search
 	if s.cursor >= len(s.hits) {
@@ -148,7 +175,7 @@ func (m Model) jumpToHit() Model {
 		if r.node.Lane.ID != hit.LaneID {
 			continue
 		}
-		m.search = nil
+		m = m.leaveSearch()
 		m.stack = nil
 		m.cursor = i
 		m.clamp()
@@ -439,7 +466,7 @@ func (m Model) jumpToMemory(hit index.Hit) Model {
 		m.search.err = errors.New("memories are unavailable")
 		return m
 	}
-	m.search = nil
+	m = m.leaveSearch()
 	m = m.openMemories()
 	if m.memories == nil {
 		return m
@@ -466,7 +493,7 @@ func (m Model) jumpToArtifact(hit index.Hit) Model {
 		if r.node.Lane.ID != hit.LaneID {
 			continue
 		}
-		m.search = nil
+		m = m.leaveSearch()
 		m.cursor = i
 		m.clamp()
 		m = m.openWork()

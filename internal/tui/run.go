@@ -80,6 +80,10 @@ func RenderShot(forest *graph.Forest, opts Options, shot Shot) string {
 
 // keyPress builds the message a keystroke arrives as. Named keys are spelled
 // the way the hints spell them.
+//
+// Everything not named here becomes its first rune, which is right for a
+// letter and silently wrong for a name: "left" arrived as "l" until the arrows
+// were added, so nothing driving this could ever press one.
 func keyPress(key string) tea.KeyPressMsg {
 	switch key {
 	case "enter", "↵":
@@ -92,6 +96,20 @@ func keyPress(key string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":
 		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "left":
+		return tea.KeyPressMsg{Code: tea.KeyLeft}
+	case "right":
+		return tea.KeyPressMsg{Code: tea.KeyRight}
+	case "home":
+		return tea.KeyPressMsg{Code: tea.KeyHome}
+	case "end":
+		return tea.KeyPressMsg{Code: tea.KeyEnd}
+	case "backspace":
+		return tea.KeyPressMsg{Code: tea.KeyBackspace}
+	case "delete":
+		return tea.KeyPressMsg{Code: tea.KeyDelete}
+	case "space":
+		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 	}
 	return tea.KeyPressMsg{Code: []rune(key)[0], Text: key}
 }

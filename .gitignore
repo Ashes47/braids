@@ -10,6 +10,11 @@ coverage.out
 __pycache__/
 *.pyc
 
+# Research notes and scratch work. Kept locally on purpose: these are working
+# documents about other people's software, written from one machine's data,
+# and they go stale without anyone noticing.
+/docs/
+
 # Generated site output. The generator, the frames and assets/ are the sources;
 # these are rebuilt by `make site` and by the Pages workflow.
 /site/index.html

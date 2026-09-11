@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "PermissionRequest": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "braids hook" }] }],
+    "Notification":      [{ "matcher": "*", "hooks": [{ "type": "command", "command": "braids hook" }] }],
+    "Stop":              [{ "matcher": "*", "hooks": [{ "type": "command", "command": "braids hook" }] }],
+    "SubagentStop":      [{ "matcher": "*", "hooks": [{ "type": "command", "command": "braids hook" }] }],
+    "SessionStart":      [{ "matcher": "*", "hooks": [{ "type": "command", "command": "braids hook" }] }],
+    "SessionEnd":        [{ "matcher": "*", "hooks": [{ "type": "command", "command": "braids hook" }] }]
+  }
+}

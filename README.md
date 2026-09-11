@@ -188,6 +188,21 @@ otherwise. `braids skill` says whether the installed one is still current, since
 an older braids leaves an older skill behind. A test checks every command and
 flag in it against the program, so it cannot drift from what braids takes.
 
+### Or as a plugin
+
+The same skill, plus the hooks, installs from inside Claude Code:
+
+```
+/plugin marketplace add Ashes47/braids
+/plugin install braids
+```
+
+The plugin cannot install the binary, so do that first or Claude will simply
+be told braids is not here. Its hooks call `braids hook` from your PATH, which
+does nothing when there is none, and a hook that does nothing does not disturb
+a session. The plugin's copy of the skill is generated from the one the binary
+embeds, and a test fails when they drift.
+
 ## Driving it from an agent
 
 Every command that reports something takes `--json`, so braids is usable by the

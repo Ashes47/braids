@@ -1,0 +1,9 @@
+{
+  "name": "braids",
+  "description": "Search every Claude Code conversation on this machine, read the turns around what you find, and branch from that exact point. Local, and never talks to a model.",
+  "author": { "name": "Ashes47", "email": "ashes4799@gmail.com" },
+  "homepage": "https://braids.chat",
+  "repository": "https://github.com/Ashes47/braids",
+  "license": "MIT",
+  "keywords": ["history", "search", "conversations", "branch", "local", "offline"]
+}

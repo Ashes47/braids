@@ -6,7 +6,7 @@ LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 PKGS    := ./...
 
 .PHONY: all build install run reindex test race lint vet fmt tidy cover clean ci \
-	site site-build pages frames responsive
+	site site-build pages frames responsive plugin
 
 all: build
 
@@ -67,6 +67,15 @@ site: pages
 pages:
 	PYTHONDONTWRITEBYTECODE=1 python3 site/build.py
 	PYTHONDONTWRITEBYTECODE=1 python3 site/docs.py
+
+# plugin regenerates what the Claude Code plugin ships. The skill is embedded
+# in the binary and copied into the plugin, because a plugin is a directory and
+# go:embed cannot reach outside its own package. A test fails when the two
+# drift, and this is what settles it.
+plugin:
+	cp internal/skill/SKILL.md plugins/braids/skills/braids/SKILL.md
+	@command -v claude >/dev/null && claude plugin validate ./plugins/braids || \
+		echo "claude is not installed, so the manifest was not validated"
 
 # responsive checks that no page runs off the side of a phone. It drives a
 # real browser, so it is not part of `make ci`, which has to run where there

@@ -1,0 +1,21 @@
+{
+  "name": "braids",
+  "owner": {
+    "name": "Ashes47",
+    "email": "ashes4799@gmail.com"
+  },
+  "description": "Find the reasoning in your past Claude Code sessions, and carry on from it.",
+  "plugins": [
+    {
+      "name": "braids",
+      "source": "./plugins/braids",
+      "description": "Search every Claude Code conversation on this machine, read the turns around what you find, and branch a new conversation from that exact point. Teaches Claude when to reach for your history and, as importantly, when not to. Reads the transcripts Claude Code already writes; never talks to a model and makes no network calls. Needs the braids binary: curl -fsSL https://braids.chat/install.sh | sh",
+      "author": { "name": "Ashes47" },
+      "homepage": "https://braids.chat",
+      "repository": "https://github.com/Ashes47/braids",
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": ["history", "search", "conversations", "sessions", "branch", "memory", "local", "offline"]
+    }
+  ]
+}

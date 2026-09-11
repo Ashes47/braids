@@ -107,6 +107,32 @@ func TestSkillCoversEveryKindOfHit(t *testing.T) {
 	}
 }
 
+// The skill is edited by appending, and appending leaves the old answer
+// standing next to the new one. It happened: `OR` was taught in the searching
+// section while the rules still said to run the search again with the other
+// word, so the file gave two different answers to the same question.
+//
+// These are phrasings of advice that has been superseded. They are cheap to
+// check and the failure they catch is one nobody notices by reading, because
+// each half looks right on its own.
+func TestSkillDoesNotCarrySupersededAdvice(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "internal", "skill", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.ToLower(strings.ReplaceAll(string(body), "\r\n", "\n"))
+	for phrase, why := range map[string]string{
+		"try the other word":              "OR covers the alternatives in one query now",
+		"one other wording":               "OR covers the alternatives in one query now",
+		"braids index once":               "doctor says whether the index needs it",
+		"the map keeps the index current": "not while an agent is working, which is the point",
+	} {
+		if strings.Contains(text, phrase) {
+			t.Errorf("the skill still says %q; %s", phrase, why)
+		}
+	}
+}
+
 // And the reverse: a command worth teaching should be taught. This is a
 // reminder rather than a rule, so it names what is missing without failing.
 func TestSkillMentionsTheCommandsWorthTeaching(t *testing.T) {

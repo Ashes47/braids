@@ -45,25 +45,6 @@ Three situations.
 3. **You are about to propose an approach that may already have been tried.**
    One search is cheaper than repeating a week somebody already spent.
 
-## Arriving somewhere
-
-Before any of that, when you are starting work in a project and want to know
-what state it is in:
-
-```sh
-braids brief --json
-```
-
-The conversations touched here recently, how many are owed a reply, one line
-of what each was last saying, and what the project remembers. It is bounded:
-the most recent few and a clipped line each, never a transcript. It scopes to
-the directory you are in, so it answers "what is going on here" rather than
-"what is going on".
-
-This is worth running once when the user opens a subject rather than on every
-question, and it is not a substitute for searching. It says what is recent,
-not what is relevant.
-
 ## When not to
 
 Most of the time. History is not context to gather by reflex. A search that was
@@ -87,6 +68,25 @@ not diligence.
 Do not search for this conversation. "Earlier" often means earlier today, in
 the session you are already in, and you have that: it is your context. braids
 is for the sessions you were not in, or were in and have forgotten.
+
+## Arriving somewhere
+
+Before any of that, when you are starting work in a project and want to know
+what state it is in:
+
+```sh
+braids brief --json
+```
+
+The conversations touched here recently, how many are owed a reply, one line
+of what each was last saying, and what the project remembers. It is bounded:
+the most recent few and a clipped line each, never a transcript. It scopes to
+the directory you are in, so it answers "what is going on here" rather than
+"what is going on".
+
+This is worth running once when the user opens a subject rather than on every
+question, and it is not a substitute for searching. It says what is recent,
+not what is relevant.
 
 ## The shape of a lookup
 
@@ -263,8 +263,9 @@ Finding it is not the job. What you do next is.
   what they asked.** They may know something the transcript does not. A
   conversation from three weeks ago does not overrule the person in front of
   you.
-- **What silence means depends on why you looked.** One other wording, then
-  stop either way, but not the same way. If the user pointed at earlier work,
+- **What silence means depends on why you looked.** Widen the query once, as
+  above, then stop either way, but do not stop the same way. If the user
+  pointed at earlier work,
   say you looked and found nothing: they may have the wrong project in mind, or
   have said it somewhere braids cannot see, and either way they need to know
   the search happened. If you were only checking before proposing something,
@@ -330,5 +331,6 @@ braids hooks --json                    # the hook alone, in more detail than doc
 - **An empty result is `[]`, not an error.** Nothing found means nothing found.
 - **Errors go to stderr and exit 1.** A non-zero exit is a real failure, not an
   empty answer.
-- **One search, then read.** If a search finds nothing, try one other wording
-  and stop. Six phrasings of the same query is not research.
+- **One search, then read.** Put the alternative wordings in that one search
+  with `OR` rather than running it again and again. Six separate phrasings of
+  the same query is not research, and it is not how this is done here.

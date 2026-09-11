@@ -1130,7 +1130,7 @@ REFERENCE = f"""
     ("--lane ID", "conversation to carry on from"),
     ("--from ID", "branch whose turns are brought over"),
     ("--name NAME", "name for the merged conversation"),
-    ("--plan", "report what would come over, and stop"),
+    ("--plan", "report what would come over, including how many of the branch's turns failed, and stop"),
 ])}
 <h3>braids explain</h3>
 {table(["Flag", "What it does"], [

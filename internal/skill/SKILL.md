@@ -273,8 +273,14 @@ braids promote --lane LANE --agent AGENT --json
 
 `merge` brings a branch back, as a new conversation holding the base and then
 the branch's turns spliced on. Use it when a branch worked and the work should
-continue on the main thread. `--plan` reports what would come over and stops,
-which is worth doing first when the branch is long.
+continue on the main thread.
+
+**`--plan` first, and read the failures.** It reports what would come over and
+stops. `incoming_failed_turns` counts the branch's turns whose tool call came
+back an error and `incoming_last_failed_turn` says where the last one was, so
+a branch whose final act was a failing test can be seen before it is joined
+rather than after. Near the end means unfinished; early and then quiet means
+recovered from. Say which it is.
 
 `promote` turns a subagent into a conversation of its own. It takes no name:
 the subagent already has the task it was given, and that is what the new

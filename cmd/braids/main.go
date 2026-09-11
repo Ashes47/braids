@@ -1301,13 +1301,23 @@ func cmdMerge(args []string, out *printer) error {
 	if err != nil {
 		return err
 	}
+	// How the branch's tool calls went. A plan that counts turns and says
+	// nothing about whether they worked invites joining a branch whose last
+	// act was a failing test, which braids has recorded all along.
+	failed, err := ix.Failures(ctx, incoming.ID)
+	if err != nil {
+		return err
+	}
 	if *dry && *asJSON {
-		return out.emit(mergePlanOut(base.ID, incoming.ID, plan, ""))
+		return out.emit(mergePlanOut(base.ID, incoming.ID, plan, "", failed))
 	}
 	if !*asJSON {
 		out.printf("%s: %d turns, %d of them not in %s\n%s: %d turns not in %s\n",
 			orUnnamed(base.Title), plan.BaseTurns, plan.BaseOnlyTurns, orUnnamed(incoming.Title),
 			orUnnamed(incoming.Title), plan.IncomingTurns, orUnnamed(base.Title))
+		if note := failureNote(failed, orUnnamed(incoming.Title)); note != "" {
+			out.printf("%s", note)
+		}
 		if !plan.Worthwhile() {
 			out.printf("\nnothing to join: one already contains the other\n")
 		}
@@ -1324,11 +1334,34 @@ func cmdMerge(args []string, out *printer) error {
 		return err
 	}
 	if *asJSON {
-		return out.emit(mergePlanOut(base.ID, incoming.ID, plan, merged.ID))
+		return out.emit(mergePlanOut(base.ID, incoming.ID, plan, merged.ID, failed))
 	}
 	out.printf("  new conversation %s\n  resume with: claude --resume %s\n", merged.ID, merged.ID)
 	return out.Err()
 }
+
+// failureNote says how a branch's tool calls went, and only when it is worth
+// saying. Silence means nothing failed, which is the common case and needs no
+// line of its own.
+//
+// How near the end the last failure was is the part that matters. A branch
+// that failed something early and recovered is ordinary work; one whose last
+// few turns failed is a branch to look at before joining it.
+func failureNote(f index.Failures, name string) string {
+	if f.Total == 0 {
+		return ""
+	}
+	if f.Turns-f.Last <= failedNearEnd {
+		return fmt.Sprintf("%s ends badly: %s failed, the last at turn %d of %d\n",
+			name, plural(f.Total, "turn"), f.Last, f.Turns)
+	}
+	return fmt.Sprintf("%s: %s failed, the last at turn %d of %d\n",
+		name, plural(f.Total, "turn"), f.Last, f.Turns)
+}
+
+// failedNearEnd is how close to a branch's last turn a failure has to be
+// before it reads as unfinished work rather than something recovered from.
+const failedNearEnd = 5
 
 // mergeRequest resolves both sides of a merge.
 func mergeRequest(ctx context.Context, ix *index.Index, base, incoming, name string) (store.MergeRequest, error) {

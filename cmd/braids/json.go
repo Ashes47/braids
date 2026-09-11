@@ -116,7 +116,9 @@ func jsonFlag(fs *flag.FlagSet) *bool {
 // mergePlanOut reports both sides of a join. A caller deciding whether to merge
 // needs the same two numbers a person does: what each side has that the other
 // does not. Lane is empty for a plan, and the new conversation once joined.
-func mergePlanOut(base, incoming string, plan store.MergePlan, lane string) any {
+func mergePlanOut(base, incoming string, plan store.MergePlan, lane string,
+	failed index.Failures,
+) any {
 	return struct {
 		Lane          string `json:"lane,omitempty"`
 		Base          string `json:"base"`
@@ -125,7 +127,12 @@ func mergePlanOut(base, incoming string, plan store.MergePlan, lane string) any 
 		BaseOnlyTurns int    `json:"base_only_turns"`
 		IncomingTurns int    `json:"incoming_turns"`
 		Worthwhile    bool   `json:"worthwhile"`
-	}{lane, base, incoming, plan.BaseTurns, plan.BaseOnlyTurns, plan.IncomingTurns, plan.Worthwhile()}
+		// How the branch's tool calls went. A merge decided on counts alone
+		// is a merge decided without knowing whether the work succeeded.
+		IncomingFailed     int `json:"incoming_failed_turns"`
+		IncomingLastFailed int `json:"incoming_last_failed_turn,omitempty"`
+	}{lane, base, incoming, plan.BaseTurns, plan.BaseOnlyTurns, plan.IncomingTurns,
+		plan.Worthwhile(), failed.Total, failed.Last}
 }
 
 // orEmpty renders a nil slice as [] rather than null, so a caller can iterate

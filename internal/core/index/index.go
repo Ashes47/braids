@@ -1165,6 +1165,41 @@ func toolsOf(m model.Message) string {
 	return strings.Join(names, ",")
 }
 
+// Failures counts the turns of a conversation whose tool call came back an
+// error, and says where the last one was.
+//
+// A branch is offered for merging on counts alone: how many turns come over,
+// how many are shared. Counts say nothing about whether the work succeeded. A
+// branch whose last act was a failing test is a branch worth looking at before
+// it is joined back, and braids has recorded that on every message since the
+// beginning without ever reading it back.
+type Failures struct {
+	// Total is how many turns failed.
+	Total int
+	// Last is the turn number of the most recent failure, 0 when none failed.
+	Last int
+	// Turns is the conversation's length, so a caller can see how near the end
+	// the last failure was.
+	Turns int
+}
+
+// Failures reports how a conversation's tool calls went. Two aggregates rather
+// than a read of the lane: a merge plan should not cost twenty thousand rows.
+func (ix *Index) Failures(ctx context.Context, laneID string) (Failures, error) {
+	var f Failures
+	if err := ix.db.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(MAX(seq), 0) FROM messages
+		 WHERE lane_id = ? AND failed = 1`, laneID).Scan(&f.Total, &f.Last); err != nil {
+		return f, fmt.Errorf("count failed turns of %s: %w", laneID, err)
+	}
+	if err := ix.db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(seq), 0) FROM messages WHERE lane_id = ?`,
+		laneID).Scan(&f.Turns); err != nil {
+		return f, fmt.Errorf("measure %s: %w", laneID, err)
+	}
+	return f, nil
+}
+
 // Turn is one turn of a conversation with what was actually said in it.
 //
 // The map draws turns from MessageRow, which carries a preview: enough to

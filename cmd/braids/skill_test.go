@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -145,5 +146,55 @@ func TestSkillMentionsTheCommandsWorthTeaching(t *testing.T) {
 		if !strings.Contains(text, "braids "+command) {
 			t.Errorf("the skill never mentions `braids %s`", command)
 		}
+	}
+}
+
+// Nothing tracked here should name the home directory of whoever wrote it.
+//
+// A scratch benchmark written during an investigation was committed with the
+// author's own /Users/<name>/.braids/index.db in it and rode along through
+// five releases. It never failed, because it skipped when that path was
+// absent, which is every machine but the one that wrote it. A test that is
+// inert everywhere is worse than none: it counts towards the suite and checks
+// nothing.
+//
+// It looks for this machine's home directory rather than for anything that
+// looks like a home directory. Fixtures legitimately say /Users/me and
+// /Users/x, and telling those apart from a real name needs a list somebody
+// has to keep. The real mistake is always your own path, and that is exactly
+// what this can ask about.
+func TestNothingTrackedNamesYourHomeDirectory(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" || home == "/" {
+		t.Skip("no home directory to look for")
+	}
+	root := filepath.Join("..", "..")
+	// -C the repository root, because `git ls-files` reports paths relative
+	// to where it runs and this runs in cmd/braids. The first version joined
+	// those onto "../..", found nothing, read nothing, and passed: an inert
+	// test, which is the thing this exists to catch.
+	out, err := exec.Command("git", "-C", root, "ls-files").Output()
+	if err != nil {
+		t.Skip("git is unavailable, so the tracked files cannot be listed")
+	}
+	read := 0
+	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if name == "" || strings.HasSuffix(name, ".png") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			continue
+		}
+		read++
+		for n, line := range strings.Split(string(body), "\n") {
+			if strings.Contains(line, home) {
+				t.Errorf("%s:%d names your home directory: %q",
+					name, n+1, strings.TrimSpace(line))
+			}
+		}
+	}
+	if read < 50 {
+		t.Errorf("only read %d tracked files, so this checked almost nothing", read)
 	}
 }

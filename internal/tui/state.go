@@ -76,6 +76,37 @@ func stateOf(lane index.LaneInfo, live *hooks.Event, now time.Time) laneState {
 	}
 }
 
+// Waiting counts the conversations owed a reply, ignoring any that have not
+// been touched within the window.
+//
+// Exported because the number is worth having outside a terminal, and taking
+// a window because the map's meaning is wrong away from the map. On the map,
+// a conversation abandoned three weeks ago mid-thought is genuinely still an
+// open loop and belongs in the count. On a status line the same number never
+// moves, so it reads as decoration rather than as something to act on. A
+// window makes it decay.
+//
+// The rule itself stays here, so the two can never disagree about what
+// waiting means, only about how far back to look.
+func Waiting(lanes []index.LaneInfo, live map[string]hooks.Event, now time.Time,
+	within time.Duration,
+) int {
+	n := 0
+	for _, lane := range lanes {
+		if within > 0 && now.Sub(lane.Updated) > within {
+			continue
+		}
+		var event *hooks.Event
+		if e, ok := live[lane.ID]; ok {
+			event = &e
+		}
+		if waiting(lane, event, now) {
+			n++
+		}
+	}
+	return n
+}
+
 // waiting reports whether a conversation is owed something by a person.
 func waiting(lane index.LaneInfo, live *hooks.Event, now time.Time) bool {
 	switch stateOf(lane, live, now) {

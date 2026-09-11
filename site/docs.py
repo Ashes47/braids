@@ -1070,6 +1070,7 @@ REFERENCE = f"""
     ("braids explain FILE", "which conversations were live when this file last changed"),
     ("braids show --lane ID", "read the turns of a conversation, around one turn"),
     ("braids doctor", "every health check braids can run on itself, in one place"),
+    ("braids status", "how many conversations are owed a reply, in one line"),
     ("braids hooks", "install, remove or inspect the hook"),
     ("braids skill", "install, remove or inspect the Claude Code skill"),
     ("braids version", "the version, the commit, and how old this build is"),
@@ -1107,6 +1108,25 @@ REFERENCE = f"""
     ("--kind LIST", "text, thinking, tool_use, tool_result"),
     ("--limit N", "maximum hits, default 20"),
 ])}
+<h3>braids status</h3>
+{table(["Flag", "What it does"], [
+    ("--within D", "only conversations touched this recently, default 24h, 0 for all"),
+    ("--always", "print a line even when nothing is waiting"),
+])}
+<p>
+  It is built for Claude Code's <code>statusLine</code>, so it prints nothing
+  when nothing is waiting and never fails: no index is not an error, it is
+  nothing to say. Add it to <code>~/.claude/settings.json</code>:
+</p>
+{sh("""
+{ "statusLine": { "type": "command", "command": "braids status" } }
+""")}
+<p>
+  The window is the difference between a number worth glancing at and one that
+  never changes. The map counts a conversation abandoned three weeks ago
+  mid-thought, and is right to, because it is still an open loop. On a status
+  line that same number never moves.
+</p>
 <h3>braids show</h3>
 {table(["Flag", "What it does"], [
     ("--lane ID", "conversation to read"),

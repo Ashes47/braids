@@ -1142,7 +1142,7 @@ func (m Model) rowParts(r row) (plain, styled string) {
 		// which is usually, so they are not drawn as quietly as a byte count.
 		rightStyled += m.theme.Dim.Render(cell) + "  "
 	}
-	age := padLeft(humanAge(m.now().Sub(lane.Updated)), ageWidth)
+	age := padLeft(HumanAge(m.now().Sub(lane.Updated)), ageWidth)
 	rightPlain += age
 	rightStyled += m.theme.Dim.Render(age)
 	if layout.status {
@@ -1312,8 +1312,12 @@ func humanBytes(n int64) string { return format.Bytes(n) }
 // homeDir is a variable so tests can pin it.
 var homeDir = os.UserHomeDir
 
-// humanAge renders a duration the way someone scanning for staleness reads it.
-func humanAge(d time.Duration) string {
+// HumanAge renders a duration the way someone scanning for staleness reads it.
+//
+// Exported so anything printing an age outside the map prints the same one.
+// Two formatters would drift, and an age is exactly the kind of thing nobody
+// notices has drifted until two screens disagree about one conversation.
+func HumanAge(d time.Duration) string {
 	switch {
 	case d < time.Minute:
 		return "now"

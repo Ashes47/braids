@@ -45,6 +45,25 @@ Three situations.
 3. **You are about to propose an approach that may already have been tried.**
    One search is cheaper than repeating a week somebody already spent.
 
+## Arriving somewhere
+
+Before any of that, when you are starting work in a project and want to know
+what state it is in:
+
+```sh
+braids brief --json
+```
+
+The conversations touched here recently, how many are owed a reply, one line
+of what each was last saying, and what the project remembers. It is bounded:
+the most recent few and a clipped line each, never a transcript. It scopes to
+the directory you are in, so it answers "what is going on here" rather than
+"what is going on".
+
+This is worth running once when the user opens a subject rather than on every
+question, and it is not a substitute for searching. It says what is recent,
+not what is relevant.
+
 ## When not to
 
 Most of the time. History is not context to gather by reflex. A search that was

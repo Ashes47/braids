@@ -320,8 +320,8 @@ func TestHumanAge(t *testing.T) {
 		{50 * time.Hour, "2d"},
 	}
 	for _, tt := range tests {
-		if got := humanAge(tt.d); got != tt.want {
-			t.Errorf("humanAge(%v) = %q, want %q", tt.d, got, tt.want)
+		if got := HumanAge(tt.d); got != tt.want {
+			t.Errorf("HumanAge(%v) = %q, want %q", tt.d, got, tt.want)
 		}
 	}
 }

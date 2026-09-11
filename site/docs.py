@@ -1071,6 +1071,7 @@ REFERENCE = f"""
     ("braids show --lane ID", "read the turns of a conversation, around one turn"),
     ("braids doctor", "every health check braids can run on itself, in one place"),
     ("braids status", "how many conversations are owed a reply, in one line"),
+    ("braids brief", "the state of play in the project you are standing in"),
     ("braids hooks", "install, remove or inspect the hook"),
     ("braids skill", "install, remove or inspect the Claude Code skill"),
     ("braids version", "the version, the commit, and how old this build is"),

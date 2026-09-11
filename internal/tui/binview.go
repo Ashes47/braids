@@ -253,7 +253,7 @@ func deletedAt(age string) string {
 
 func (m Model) renderBinRow(entry trash.Entry, selected bool) string {
 	name := padRight(truncate(entry.Label, m.binNameWidth()), m.binNameWidth())
-	when := padLeft(deletedAt(humanAge(m.now().Sub(entry.At))), binWhenWidth)
+	when := padLeft(deletedAt(HumanAge(m.now().Sub(entry.At))), binWhenWidth)
 	size := padLeft(humanBytes(entry.Bytes), binSizeWidth)
 	expiry := padLeft(expiryOf(entry, m.now()), binExpiryWidth)
 
@@ -271,7 +271,7 @@ func expiryOf(entry trash.Entry, now time.Time) string {
 	if left <= 0 {
 		return "any moment"
 	}
-	return "in " + humanAge(left)
+	return "in " + HumanAge(left)
 }
 
 // expiryStyle warns as the deadline approaches, so a conversation does not

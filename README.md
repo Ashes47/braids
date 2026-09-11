@@ -224,6 +224,7 @@ braids explain FILE                     which conversations were live when
 braids show    --lane ID [--at TURN]    read the turns around one turn
 braids doctor                           whether braids can be believed
 braids status                           how many conversations await a reply
+braids brief   [--project NAME]         the state of play where you are
                [--kind text] [--plain]  ...only what was said, without colour
 braids branch  --lane ID --at TURN [--workspace]
 braids promote --lane ID --agent ID     turn a subagent into its own conversation

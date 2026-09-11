@@ -75,3 +75,42 @@ func TestTheMarketplacePointsAtSomethingReal(t *testing.T) {
 		}
 	}
 }
+
+// Installing braids twice is easy and invisible. The plugin brings the skill,
+// `braids skill --install` writes another, and Claude loads the same
+// instructions under two names while nothing says so, because from Claude
+// Code's side they are two skills that happen to agree.
+//
+// Found by installing the plugin from the marketplace onto a machine that
+// already had the skill, and asking a session what it had.
+func TestAPluginCopyIsFound(t *testing.T) {
+	plugins := t.TempDir()
+	// The cache nests a marketplace, a plugin and a revision before the
+	// skills directory, so the search cannot assume a depth.
+	deep := filepath.Join(plugins, "cache", "braids", "braids", "17587872eef9", "skills", "braids")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := PluginPath(plugins); got != "" {
+		t.Errorf("found %q with no skill file there", got)
+	}
+	want := filepath.Join(deep, "SKILL.md")
+	if err := os.WriteFile(want, []byte("---\nname: braids\n---\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := PluginPath(plugins); got != want {
+		t.Errorf("PluginPath = %q, want %q", got, want)
+	}
+}
+
+// A directory with no plugins at all, and one that does not exist, are both
+// simply no plugin rather than an error: this is asked on every `braids
+// skill` and must never be the thing that fails.
+func TestNoPluginCopyIsNotAnError(t *testing.T) {
+	if got := PluginPath(t.TempDir()); got != "" {
+		t.Errorf("an empty plugins directory gave %q", got)
+	}
+	if got := PluginPath(filepath.Join(t.TempDir(), "nothing", "here")); got != "" {
+		t.Errorf("a missing plugins directory gave %q", got)
+	}
+}

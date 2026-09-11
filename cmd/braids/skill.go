@@ -64,12 +64,31 @@ func cmdSkill(args []string, out *printer) error {
 		return err
 	}
 
+	// The plugin ships this same skill. Having both means Claude loads the
+	// instructions twice, as `braids` and as `braids:braids`, and nothing
+	// else on the machine will ever mention it: from Claude Code's side they
+	// are two unrelated skills that happen to agree.
+	plugged := ""
+	if home, err := os.UserHomeDir(); err == nil {
+		plugged = skill.PluginPath(filepath.Join(home, ".claude", "plugins"))
+	}
+
 	if *asJSON {
 		return out.emit(struct {
-			Path      string `json:"path"`
-			Installed bool   `json:"installed"`
-			Current   bool   `json:"current"`
-		}{state.Path, state.Installed, state.Current})
+			Path       string `json:"path"`
+			Installed  bool   `json:"installed"`
+			Current    bool   `json:"current"`
+			PluginPath string `json:"plugin_path,omitempty"`
+			Twice      bool   `json:"installed_twice"`
+		}{state.Path, state.Installed, state.Current, plugged,
+			plugged != "" && state.Installed})
+	}
+	if plugged != "" && state.Installed {
+		out.printf("the plugin already carries this skill: %s\n", plugged)
+		out.printf("Both are loaded, as `braids` and `braids:braids`, which is\n")
+		out.printf("the same instructions twice. Keep one:\n")
+		out.printf("  braids skill --remove      leave the plugin to it\n")
+		out.printf("  /plugin uninstall braids   keep this one\n\n")
 	}
 	switch {
 	case *install:

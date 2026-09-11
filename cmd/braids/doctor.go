@@ -249,7 +249,17 @@ func skillCheck() checkup {
 	if err != nil {
 		return checkup{"skill", false, err.Error(), "braids skill --install"}
 	}
+	plugged := skill.PluginPath(filepath.Join(home, ".claude", "plugins"))
 	switch {
+	case plugged != "" && state.Installed:
+		// Both. Claude loads the same instructions twice, under `braids` and
+		// `braids:braids`, and nothing else says so because from Claude
+		// Code's side they are two skills that happen to agree.
+		return checkup{"skill", false,
+			"installed twice, by hand and by the plugin, so Claude loads it under two names",
+			"braids skill --remove, and keep the plugin"}
+	case plugged != "":
+		return checkup{"skill", true, "installed by the plugin", ""}
 	case !state.Installed:
 		return checkup{"skill", false, "not installed", "braids skill --install"}
 	case !state.Current:

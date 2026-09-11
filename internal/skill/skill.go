@@ -10,6 +10,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,4 +110,35 @@ func Remove(skills string) (bool, error) {
 // arrives with CRLF and is otherwise the same skill.
 func normalise(s string) string {
 	return strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n"))
+}
+
+// PluginPath is where a plugin-installed copy of this skill would sit, given
+// the directory Claude Code keeps plugins in. Empty when there is none.
+//
+// Installing braids twice is easy to do and impossible to see: the plugin
+// brings the skill, `braids skill --install` writes another, and Claude ends
+// up loading the same instructions under two names, `braids` and
+// `braids:braids`. Nothing warns, because from Claude Code's side they are
+// two unrelated skills that happen to say the same thing.
+//
+// A bounded walk rather than a glob, because the cache nests a marketplace, a
+// plugin and a revision before the skills directory, and that shape is not
+// braids' to depend on.
+func PluginPath(plugins string) string {
+	found := ""
+	want := filepath.Join("skills", Name, FileName)
+	_ = filepath.WalkDir(plugins, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || found != "" {
+			return nil //nolint:nilerr // an unreadable corner is not an answer
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(path, want) {
+			found = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
 }

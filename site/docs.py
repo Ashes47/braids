@@ -495,6 +495,29 @@ braids search "fork" --json
     ("--json", "machine readable, with whole IDs"),
 ])}
 
+<h2 id="syntax">The query syntax</h2>
+<p>
+  Search is SQLite's FTS5 over what was written, and its whole query syntax
+  works. The one worth knowing first is that bare words are <em>and</em>:
+  <code>payment retry</code> asks for both, which is narrower than either word
+  alone and is the usual reason a search comes back empty about a conversation
+  that is really there.
+</p>
+{table(["Query", "Matches"], [
+    ("a b", "both, in any order"),
+    ("a OR b", "either. This is how you cover a synonym"),
+    ("a NOT b", "a, excluding anything that also has b"),
+    ("\"a b\"", "that phrase, in that order"),
+    ("a*", "prefix: <code>deploy*</code> matches deployed and deployment"),
+    ("NEAR(a b, 10)", "both, within ten words of each other"),
+])}
+<p>
+  Anything with an operator, a quote, a bracket or a star is handed to FTS5 as
+  written. Everything else is treated as words to find, so a plain question
+  needs no escaping.
+</p>
+{say("Raise <code>--limit</code> when you use <code>OR</code>. The limit is shared across the whole query, so a rare word gets crowded out by a common one: on a real history of 28 conversations, five alternatives found fifteen of them at <code>--limit 500</code> and seven at the default of twenty.")}
+
 <h2 id="read">Reading what a hit points at</h2>
 <p>
   A hit is a pointer, not an answer. It names a conversation, the turn the

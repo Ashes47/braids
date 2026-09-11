@@ -105,9 +105,36 @@ so search the words that would literally be in the transcript.
 - **Use identifiers.** File names, error text, function names, flags. These are
   the best queries braids takes, because they appear verbatim in tool calls and
   nowhere else.
-- **A synonym is a different query.** `retry` will not find a conversation that
-  only ever said `backoff`. If a search finds nothing, try the other word once,
-  then stop.
+### Cover the synonyms in one query
+
+Words are matched and not meanings, so `retry` does not find a conversation
+that only ever said `backoff`. Put the alternatives in one query rather than
+searching twice:
+
+```sh
+braids search "retry OR backoff OR \"exponential backoff\"" --limit 200 --json
+```
+
+**Raise the limit when you do.** The limit is shared across the whole query, so
+a rare word gets crowded out by a common one: on a real history, five
+alternatives found fifteen conversations at `--limit 500` and seven at the
+default of twenty. More alternatives need more room.
+
+The whole of SQLite's FTS5 syntax works here:
+
+| | |
+|---|---|
+| `a b` | **both**, in any order |
+| `a OR b` | either |
+| `a NOT b` | a, excluding anything that also has b |
+| `"a b"` | that phrase, in that order |
+| `a*` | prefix, so `deploy*` matches deployed and deployment |
+| `NEAR(a b, 10)` | both, within ten words of each other |
+
+**Bare words are AND.** `payment retry` requires both, which is narrower than
+either word alone, and is the most common reason a search comes back empty
+about a conversation that is really there. Two words is a narrowing, not a
+widening. `OR` is the widening.
 
 Narrow when you can:
 

@@ -1069,6 +1069,7 @@ REFERENCE = f"""
     ("braids memories", "what a project remembers, and what it has lost"),
     ("braids explain FILE", "which conversations were live when this file last changed"),
     ("braids show --lane ID", "read the turns of a conversation, around one turn"),
+    ("braids doctor", "every health check braids can run on itself, in one place"),
     ("braids hooks", "install, remove or inspect the hook"),
     ("braids skill", "install, remove or inspect the Claude Code skill"),
     ("braids version", "the version, the commit, and how old this build is"),

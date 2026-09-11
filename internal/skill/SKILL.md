@@ -10,26 +10,29 @@ questions about them from the command line. It never talks to a model and makes
 no network calls: everything it reports is read out of files the harness
 already wrote, through a local index. A search takes milliseconds.
 
-Check it is there before relying on it:
+Once, the first time you are going to use braids in a session:
 
 ```sh
-braids version
+braids doctor --json
 ```
 
-If that fails, braids is not installed and nothing below applies. Say so rather
-than guessing at history.
+If that fails to run at all, braids is not installed and nothing below
+applies. Say so rather than guessing at history.
 
-Then, once, the first time you are going to use braids in a session:
+It answers the only question worth asking before the first search, which is
+whether what braids tells you can be believed. Every check carries `ok` and,
+when it is false, a `fix` naming the command that settles it. **Run the fix
+for the index if it names one.** Nothing keeps the index current while you
+work: the map does it when somebody opens it, and nobody has it open during
+your session, so a search can otherwise answer `0 hits` about a conversation
+that happened this morning, which reads exactly like "this never happened".
 
-```sh
-braids index
-```
+The other checks are worth reading and rarely worth acting on unattended. A
+missing hook means waiting states cannot be trusted; a stale skill means these
+instructions are older than the braids running them. Say so and let the user
+decide.
 
-Nothing keeps the index current while you work. The map does it when somebody
-opens it, and nobody has it open during your session, so without this a search
-can answer `0 hits` about a conversation that happened this morning, which
-reads exactly like "this never happened". It costs about a second. Once per
-session, not once per search.
+Once per session, not once per search.
 
 ## When to reach for it
 
@@ -286,7 +289,7 @@ braids lanes --json                    # every conversation, with resume command
 braids agents --lane LANE --json       # subagents a conversation spawned
 braids memories --json                 # what a project remembers, and what it has lost
 braids work --lane LANE --json         # what a session wrote to disk
-braids hooks --json                    # whether waiting states are trustworthy
+braids hooks --json                    # the hook alone, in more detail than doctor gives
 ```
 
 ## Rules
@@ -294,8 +297,9 @@ braids hooks --json                    # whether waiting states are trustworthy
 - **Quote evidence, never assert history.** Say "the conversation on 21 August
   says X, at turn 1842" rather than "the project decided X". braids reports
   what was said; it does not know what was concluded.
-- **Index once a session, before the first search.** See the top of this file:
-  nothing else keeps it current while you work.
+- **Run `braids doctor --json` once a session, before the first search**, and
+  act on the index fix if it names one. See the top of this file: nothing else
+  keeps the index current while you work.
 - **IDs come back whole in JSON on purpose.** Pass them through unchanged; do
   not shorten them for display and then try to reuse them.
 - **An empty result is `[]`, not an error.** Nothing found means nothing found.

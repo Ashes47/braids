@@ -64,6 +64,7 @@ usage:
   braids explain FILE                    which conversations were live when
                                          this file last changed
   braids show --lane ID [--at TURN]      read the turns around one turn
+  braids doctor                          whether braids can be believed
   braids promote --lane ID --agent ID    turn a subagent into its own conversation
   braids merge --lane ID --from ID       join a branch back, as a new conversation
   braids hooks [--install|--remove]      let sessions report when they block
@@ -154,6 +155,8 @@ func run(args []string, w io.Writer) error {
 		return cmdMemories(args[1:], out)
 	case "show":
 		return cmdShow(args[1:], out)
+	case "doctor":
+		return cmdDoctor(args[1:], out)
 	case "explain":
 		return cmdExplain(args[1:], out)
 	case "skill":
@@ -194,7 +197,8 @@ func run(args []string, w io.Writer) error {
 // dispatch above, so a command cannot be added without being offered here.
 var known = []string{
 	"map", "index", "search", "lanes", "branch", "agents", "work", "memories",
-	"explain", "show", "promote", "merge", "hooks", "hook", "skill", "version", "help",
+	"explain", "show", "doctor", "promote", "merge", "hooks", "hook", "skill",
+	"version", "help",
 }
 
 // nearest returns the command a mistyped name most likely meant, or an empty

@@ -261,10 +261,15 @@ func printTurns(lane index.LaneInfo, first, last, found int, turns []showTurn, o
 	}
 }
 
-// plural says a count with its unit, in the one shape English needs.
+// plural says a count with its unit. Only the two rules braids needs: add an
+// s, unless the word ends in a consonant and a y, which becomes ies. Written
+// out because "83 memorys" shipped once.
 func plural(n int, unit string) string {
 	if n == 1 {
 		return fmt.Sprintf("%d %s", n, unit)
+	}
+	if len(unit) > 1 && unit[len(unit)-1] == 'y' && !strings.ContainsRune("aeiou", rune(unit[len(unit)-2])) {
+		return fmt.Sprintf("%d %sies", n, unit[:len(unit)-1])
 	}
 	return fmt.Sprintf("%d %ss", n, unit)
 }

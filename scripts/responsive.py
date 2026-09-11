@@ -81,10 +81,18 @@ f.onload = function () {
 
 
 def pages() -> list[str]:
-    """Every page in the built site, the landing page first."""
+    """Every page in the built site, the landing page first.
+
+    Found rather than listed. A page added later and not added here would be
+    the one nobody checks, which is how a page ends up running off the side of
+    a phone months after the rest stopped doing it.
+    """
     found = ["/"]
-    for f in sorted(SITE.glob("docs/**/index.html")):
-        found.append("/" + str(f.parent.relative_to(SITE)).replace("\\", "/") + "/")
+    for f in sorted(SITE.glob("**/index.html")):
+        where = f.parent.relative_to(SITE)
+        if str(where) == ".":
+            continue
+        found.append("/" + str(where).replace("\\", "/") + "/")
     return found
 
 

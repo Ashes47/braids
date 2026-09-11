@@ -43,7 +43,7 @@ jobs:
       # __pycache__ beside it, and that directory was being published: the
       # site served /__pycache__/chrome.cpython-312.pyc, which is the
       # generator's own bytecode and nobody's business.
-      - run: python3 site/build.py && python3 site/docs.py
+      - run: python3 site/build.py && python3 site/docs.py && (cd site && python3 privacy.py)
         env:
           PYTHONDONTWRITEBYTECODE: "1"
       # enablement lets the workflow turn Pages on itself. Without it, a run

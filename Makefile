@@ -67,6 +67,7 @@ site: pages
 pages:
 	PYTHONDONTWRITEBYTECODE=1 python3 site/build.py
 	PYTHONDONTWRITEBYTECODE=1 python3 site/docs.py
+	cd site && PYTHONDONTWRITEBYTECODE=1 python3 privacy.py
 
 # plugin regenerates what the Claude Code plugin ships. The skill is embedded
 # in the binary and copied into the plugin, because a plugin is a directory and

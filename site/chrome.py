@@ -113,6 +113,7 @@ FOOTER = """<footer><div class="wrap">
       <a href="https://github.com/Ashes47/braids/blob/main/SPEC.md">Design notes</a>
       <a href="https://github.com/Ashes47/braids/blob/main/CONTRIBUTING.md">Contributing</a>
       <a href="https://github.com/Ashes47/braids/blob/main/SECURITY.md">Security</a>
+      <a href="privacy/">Privacy</a>
     </div>
     <div>
       <h5>Code</h5>

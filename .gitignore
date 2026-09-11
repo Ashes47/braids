@@ -19,4 +19,5 @@ __pycache__/
 # these are rebuilt by `make site` and by the Pages workflow.
 /site/index.html
 /site/docs/
+/site/privacy/
 /site/assets/

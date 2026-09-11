@@ -265,12 +265,12 @@ Finding it is not the job. What you do next is.
   you.
 - **What silence means depends on why you looked.** Widen the query once, as
   above, then stop either way, but do not stop the same way. If the user
-  pointed at earlier work,
-  say you looked and found nothing: they may have the wrong project in mind, or
-  have said it somewhere braids cannot see, and either way they need to know
-  the search happened. If you were only checking before proposing something,
-  carry on and say nothing. An absence of history is not a finding, and
-  announcing one on every question turns a useful check into noise.
+  pointed at earlier work, say you looked and found nothing: they may have the
+  wrong project in mind, or have said it somewhere braids cannot see, and
+  either way they need to know the search happened. If you were only checking
+  before proposing something, carry on and say nothing. An absence of history
+  is not a finding, and announcing one on every question turns a useful check
+  into noise.
 - **When the code and the history disagree, say so.** This is the most valuable
   thing braids can hand you and it is easy to walk past: the implementation in
   front of you does X, and a session three weeks ago rejected X for a reason.

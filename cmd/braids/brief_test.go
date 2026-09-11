@@ -22,9 +22,17 @@ func briefHome(t *testing.T, lanes map[string][2]string) string {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
+		// A Windows path is full of backslashes, and a backslash in a JSON
+		// string is an escape. Interpolating one raw makes the record
+		// unparseable, nothing indexes, and the failure arrives as an empty
+		// brief rather than as a broken fixture.
+		where, err := json.Marshal(cwd)
+		if err != nil {
+			t.Fatal(err)
+		}
 		body := `{"type":"ai-title","aiTitle":"work in ` + project + `","sessionId":"` + session + `"}` + "\n" +
 			`{"type":"user","uuid":"u-` + session[:8] + `","parentUuid":null,"timestamp":"` +
-			at.Format(time.RFC3339) + `","cwd":"` + cwd + `","message":{"role":"user",` +
+			at.Format(time.RFC3339) + `","cwd":` + string(where) + `,"message":{"role":"user",` +
 			`"content":"the thing I was doing in ` + project + `"}}` + "\n"
 		path := filepath.Join(dir, session+".jsonl")
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {

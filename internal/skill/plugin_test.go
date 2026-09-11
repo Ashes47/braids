@@ -86,31 +86,88 @@ func TestTheMarketplacePointsAtSomethingReal(t *testing.T) {
 func TestAPluginCopyIsFound(t *testing.T) {
 	plugins := t.TempDir()
 	// The cache nests a marketplace, a plugin and a revision before the
-	// skills directory, so the search cannot assume a depth.
-	deep := filepath.Join(plugins, "cache", "braids", "braids", "17587872eef9", "skills", "braids")
-	if err := os.MkdirAll(deep, 0o755); err != nil {
+	// skills directory.
+	at := filepath.Join(plugins, "cache", "braids", "braids", "17587872eef9")
+	skills := filepath.Join(at, "skills", "braids")
+	if err := os.MkdirAll(skills, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got := PluginPath(plugins); got != "" {
-		t.Errorf("found %q with no skill file there", got)
-	}
-	want := filepath.Join(deep, "SKILL.md")
+	want := filepath.Join(skills, "SKILL.md")
 	if err := os.WriteFile(want, []byte("---\nname: braids\n---\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// On disk but not installed is not installed.
+	if got := PluginPath(plugins); got != "" {
+		t.Errorf("found %q with nothing recorded as installed", got)
+	}
+	writeInstalled(t, plugins, map[string]string{"braids@braids": at})
 	if got := PluginPath(plugins); got != want {
 		t.Errorf("PluginPath = %q, want %q", got, want)
 	}
 }
 
-// A directory with no plugins at all, and one that does not exist, are both
-// simply no plugin rather than an error: this is asked on every `braids
-// skill` and must never be the thing that fails.
+// The regression this was rewritten for. The first version walked the plugin
+// cache, which outlives an uninstall, so a machine that had tried the plugin
+// and removed it went on being told it had the skill twice. Confirmed by
+// uninstalling on a real machine and watching braids keep saying it.
+func TestAnUninstalledPluginIsNotFound(t *testing.T) {
+	plugins := t.TempDir()
+	at := filepath.Join(plugins, "cache", "braids", "braids", "17587872eef9")
+	skills := filepath.Join(at, "skills", "braids")
+	if err := os.MkdirAll(skills, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skills, "SKILL.md"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Something else is installed; braids is not, though its cache remains.
+	writeInstalled(t, plugins, map[string]string{
+		"other@somewhere": filepath.Join(plugins, "cache", "somewhere", "other", "1.0.0"),
+	})
+	if got := PluginPath(plugins); got != "" {
+		t.Errorf("a cache left behind by an uninstall was reported as installed: %q", got)
+	}
+}
+
+// Every failure is "no plugin". This runs on every `braids skill` and every
+// `braids doctor`, and a duplicate invented out of an unreadable file would
+// be worse than saying nothing.
 func TestNoPluginCopyIsNotAnError(t *testing.T) {
 	if got := PluginPath(t.TempDir()); got != "" {
 		t.Errorf("an empty plugins directory gave %q", got)
 	}
 	if got := PluginPath(filepath.Join(t.TempDir(), "nothing", "here")); got != "" {
 		t.Errorf("a missing plugins directory gave %q", got)
+	}
+	broken := t.TempDir()
+	if err := os.WriteFile(filepath.Join(broken, "installed_plugins.json"),
+		[]byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := PluginPath(broken); got != "" {
+		t.Errorf("an unreadable record gave %q", got)
+	}
+}
+
+// writeInstalled writes the record Claude Code keeps of what is installed, in
+// the shape it actually uses: a plugin key to a list of installs.
+func writeInstalled(t *testing.T, plugins string, at map[string]string) {
+	t.Helper()
+	type install struct {
+		InstallPath string `json:"installPath"`
+	}
+	record := struct {
+		Version int                  `json:"version"`
+		Plugins map[string][]install `json:"plugins"`
+	}{2, map[string][]install{}}
+	for name, path := range at {
+		record.Plugins[name] = []install{{InstallPath: path}}
+	}
+	body, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plugins, "installed_plugins.json"), body, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

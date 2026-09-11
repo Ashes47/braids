@@ -8,9 +8,9 @@ package skill
 
 import (
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,33 +112,51 @@ func normalise(s string) string {
 	return strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n"))
 }
 
-// PluginPath is where a plugin-installed copy of this skill would sit, given
-// the directory Claude Code keeps plugins in. Empty when there is none.
+// PluginPath is where a plugin-installed copy of this skill sits, or empty
+// when no installed plugin carries one.
 //
 // Installing braids twice is easy to do and impossible to see: the plugin
 // brings the skill, `braids skill --install` writes another, and Claude ends
 // up loading the same instructions under two names, `braids` and
 // `braids:braids`. Nothing warns, because from Claude Code's side they are
-// two unrelated skills that happen to say the same thing.
+// two unrelated skills that happen to agree.
 //
-// A bounded walk rather than a glob, because the cache nests a marketplace, a
-// plugin and a revision before the skills directory, and that shape is not
-// braids' to depend on.
+// It reads what is installed rather than what is on disk. The first version
+// of this walked the plugin cache, which outlives an uninstall: on a machine
+// that had tried the plugin and removed it, braids went on reporting a
+// duplicate that was not there. installed_plugins.json is the record that
+// actually changes when somebody uninstalls.
+//
+// Every failure here is "no plugin". This is asked on every `braids skill`
+// and on every `braids doctor`, and a warning invented out of an unreadable
+// file would be worse than no warning at all.
 func PluginPath(plugins string) string {
-	found := ""
-	want := filepath.Join("skills", Name, FileName)
-	_ = filepath.WalkDir(plugins, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || found != "" {
-			return nil //nolint:nilerr // an unreadable corner is not an answer
+	body, err := os.ReadFile(filepath.Join(plugins, installedPlugins))
+	if err != nil {
+		return ""
+	}
+	var record struct {
+		Plugins map[string][]struct {
+			InstallPath string `json:"installPath"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(body, &record); err != nil {
+		return ""
+	}
+	for _, installs := range record.Plugins {
+		for _, at := range installs {
+			if at.InstallPath == "" {
+				continue
+			}
+			path := filepath.Join(at.InstallPath, "skills", Name, FileName)
+			if _, err := os.Stat(path); err == nil {
+				return path
+			}
 		}
-		if d.IsDir() {
-			return nil
-		}
-		if strings.HasSuffix(path, want) {
-			found = path
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	return found
+	}
+	return ""
 }
+
+// installedPlugins is where Claude Code records the plugins that are actually
+// installed, as against the cache, which keeps what was downloaded.
+const installedPlugins = "installed_plugins.json"

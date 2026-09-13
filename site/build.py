@@ -47,10 +47,18 @@ BODY = f"""
     <a class="btn" href="https://github.com/Ashes47/braids">Star on GitHub</a>
   </div>
   <p class="note">
-    One binary. No daemon, no config file, nothing to sign up for. Prefer Go?
+    That picks the build for your machine and checks it against the published
+    checksums before it moves anything. One binary, no daemon, no config file,
+    nothing to sign up for. Prefer Go?
     <code>go install github.com/Ashes47/braids/cmd/braids@latest</code>
   </p>
   {frame("map", cmd="braids")}
+  <p class="sub" style="margin-top:22px">
+    <strong>Claude Code can already resume a conversation.</strong> It gives
+    you a list of them, newest first, and you pick one. braids searches inside
+    all of them, shows you which was cut from which, and starts a new one from
+    any turn of any of them, not just the end.
+  </p>
 </div></header>
 
 <section id="find"><div class="wrap">
@@ -76,9 +84,9 @@ BODY = f"""
            "Real output, against a fake repository and a fake ~/.claude.")}
   <p>
     It does not claim those conversations caused those commits, and it says so
-    outright. What it offers is where to look, which is the honest thing to
-    compute without reading a word of meaning. That is also why it costs a git
-    log and two columns rather than a model.
+    outright. It offers you where to look. That is all a git log and two
+    columns can honestly give you, and it is why this costs neither a model nor
+    a moment.
   </p>
   <p class="more"><a href="docs/reference/#commands">Every command braids has</a></p>
 </div></section>
@@ -100,6 +108,28 @@ BODY = f"""
     hashes it before and after to prove it.
   </p>
   <p class="more"><a href="docs/branching/">Branching, merging and promoting a subagent</a></p>
+</div></section>
+
+<section id="agents"><div class="wrap">
+  <h2><span class="kicker">Or let Claude</span>It can search its own past</h2>
+  <p class="sub">
+    Every command that reports something takes <code>--json</code>, with whole
+    IDs meant to be passed back. Install the skill and Claude Code reaches for
+    your history itself, at the moments worth reaching: when you refer to
+    earlier work, when you ask why something is the way it is, and before it
+    proposes something that may already have been tried.
+  </p>
+<pre class="sh">braids skill --install
+<span class="c"># or, from inside Claude Code</span>
+/plugin marketplace add Ashes47/braids</pre>
+  <p>
+    Most of what the skill teaches is when <em>not</em> to look. Searching your
+    history on every question is slow and usually beside the point, so it names
+    the cases the code in front of it already answers. And it never claims a
+    past conversation caused anything: it quotes what was said, with the turn
+    number, and leaves the conclusion to you.
+  </p>
+  <p class="more"><a href="docs/agents/">Everything an agent can read</a></p>
 </div></section>
 
 <section id="map"><div class="wrap">
@@ -159,12 +189,6 @@ BODY = f"""
       approval. One hook can. It merges with the hooks you already have, and
       removing it takes back only what it added.</p>
     </div>
-    <div class="card">
-      <h4><a href="docs/agents/">Agents can drive it</a></h4>
-      <p>Every command that reports something takes <code>--json</code> with
-      whole IDs, so Claude Code can search its own past conversations and
-      branch from the turn it finds.</p>
-    </div>
   </div>
 </div></section>
 
@@ -221,10 +245,9 @@ braids index   <span class="c"># read every transcript under ~/.claude</span>
 braids         <span class="c"># open the map</span>
 </pre>
   <p class="note">
-    Run that first line again to update. It asks the binary it would replace
-    what version it is, says <em>already installed</em> and stops if there is
-    nothing to do, and replaces braids where it already lives rather than
-    leaving a second copy somewhere else on your PATH.
+    Run that first line again to update. It replaces braids where it already
+    lives rather than leaving a second copy on your PATH, and says
+    <em>already installed</em> and stops when there is nothing to do.
   </p>
 
   <h3>Staying current</h3>

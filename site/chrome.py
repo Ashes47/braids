@@ -90,6 +90,7 @@ NAV = """<nav><div class="wrap">
     <a class="link" href="#find">Find</a>
     <a class="link" href="#explain">Explain</a>
     <a class="link" href="#branch">Branch</a>
+    <a class="link" href="#agents">Agents</a>
     <a class="link" href="#map">Map</a>
     <a class="link" href="#install">Install</a>
     <a class="link" href="docs/">Docs</a>
@@ -105,6 +106,7 @@ FOOTER = """<footer><div class="wrap">
       <a href="#find">Find</a>
       <a href="#explain">Explain</a>
       <a href="#branch">Branch</a>
+      <a href="#agents">Agents</a>
       <a href="#local">Local</a>
     </div>
     <div>

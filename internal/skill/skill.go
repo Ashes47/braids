@@ -8,12 +8,13 @@ package skill
 
 import (
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Ashes47/braids/internal/core/plugin"
 )
 
 //go:embed SKILL.md
@@ -131,32 +132,11 @@ func normalise(s string) string {
 // and on every `braids doctor`, and a warning invented out of an unreadable
 // file would be worse than no warning at all.
 func PluginPath(plugins string) string {
-	body, err := os.ReadFile(filepath.Join(plugins, installedPlugins))
-	if err != nil {
-		return ""
-	}
-	var record struct {
-		Plugins map[string][]struct {
-			InstallPath string `json:"installPath"`
-		} `json:"plugins"`
-	}
-	if err := json.Unmarshal(body, &record); err != nil {
-		return ""
-	}
-	for _, installs := range record.Plugins {
-		for _, at := range installs {
-			if at.InstallPath == "" {
-				continue
-			}
-			path := filepath.Join(at.InstallPath, "skills", Name, FileName)
-			if _, err := os.Stat(path); err == nil {
-				return path
-			}
+	for _, root := range plugin.Roots(plugins) {
+		path := filepath.Join(root, "skills", Name, FileName)
+		if _, err := os.Stat(path); err == nil {
+			return path
 		}
 	}
 	return ""
 }
-
-// installedPlugins is where Claude Code records the plugins that are actually
-// installed, as against the cache, which keeps what was downloaded.
-const installedPlugins = "installed_plugins.json"

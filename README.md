@@ -106,7 +106,9 @@ the screen has, and a mistyped one names the key you meant.
 Optionally, `braids hooks --install` asks Claude Code to report when a session
 is blocked on you, which is the one thing the files cannot say. It is opt-in, merges
 with whatever hooks you already have, and `--remove` takes back only what
-braids added.
+braids added. [The plugin](#or-as-a-plugin) brings the same hooks, so run this
+only if you did not install that way — `braids doctor` says so if you end up
+with both.
 
 ## What it does
 
@@ -264,6 +266,14 @@ Installing merges rather than writes: every hook already there is kept, a
 timestamped copy of the previous file is left beside it, `--remove` takes back
 only what braids added, and a settings file that cannot be parsed is refused
 rather than replaced by a guess.
+
+Do not run it if you installed [the plugin](#or-as-a-plugin), which brings the
+same hooks. Claude Code runs a plugin's hooks alongside the ones in your
+settings file and does not notice they are the same tool, so both fire and
+every event is recorded twice. Waiting states stay right, because they are read
+from the newest event for a session and a duplicate is the same event again, so
+nothing looks wrong: the log just grows at twice the rate, for good.
+`braids doctor` reports it and names the copy that is safe to remove.
 
 Everything else works without them. `braids hooks` says which mode you are in,
 and so does the map.

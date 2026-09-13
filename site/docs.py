@@ -840,6 +840,26 @@ braids hooks --json
 </p>
 {say("It merges. Hooks you already have on those events are left exactly where they are, and <code>--remove</code> takes back only the entries braids added, entry by entry.")}
 
+<h2 id="plugin">If you installed the plugin, you already have these</h2>
+<p>
+  The plugin registers the same six events, so running
+  <code>braids hooks --install</code> on top of it leaves two hooks on every
+  one. Claude Code runs a plugin's hooks alongside the ones in your settings
+  file and does not notice they are the same tool, so both fire and every
+  event is recorded twice.
+</p>
+<p>
+  Nothing looks wrong when this happens, which is the awkward part. Waiting
+  states are read from the newest event for a session, and a duplicate is the
+  same event again, so the map stays correct. What grows is
+  <code>~/.braids/events.jsonl</code>, at twice the rate, for good.
+  <code>braids doctor</code> reports it and names the copy that is safe to
+  remove.
+</p>
+{sh('''
+braids hooks --remove    # keep the plugin's, drop the ones in settings.json
+''')}
+
 <h2 id="identity">Identified by program, not by path</h2>
 <p>
   A braids hook is recognised by the program name in its command, not by the

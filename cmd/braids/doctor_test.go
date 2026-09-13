@@ -170,3 +170,152 @@ func TestDoctorExitsZeroWithNotes(t *testing.T) {
 		t.Errorf("doctor with notes to report returned an error: %v", err)
 	}
 }
+
+// writeHooks puts a braids hook on every event named, in a file shaped like
+// the hooks block of a settings file. A plugin's hooks.json has that shape
+// too, which is why one helper writes both.
+func writeHooks(t *testing.T, path, command string, events ...string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	byEvent := map[string]any{}
+	for _, event := range events {
+		byEvent[event] = []any{map[string]any{
+			"matcher": "*",
+			"hooks":   []any{map[string]any{"type": "command", "command": command}},
+		}}
+	}
+	body, err := json.Marshal(map[string]any{"hooks": byEvent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// installPlugin records a plugin as installed and returns its root, the way
+// Claude Code lays one out.
+func installPlugin(t *testing.T, home, name string) string {
+	t.Helper()
+	root := filepath.Join(home, ".claude", "plugins", "cache", name, name, "abc123")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(map[string]any{
+		"version": 2,
+		"plugins": map[string]any{
+			name + "@" + name: []any{map[string]any{
+				"scope":       "user",
+				"installPath": root,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, ".claude", "plugins", "installed_plugins.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// The case this was written for. Installing the plugin on a machine that had
+// already run `braids hooks --install` leaves two hooks on every event, and
+// Claude Code runs both: the events log grows at twice the rate for good.
+// Nothing else can see it -- waiting states are read from the newest event for
+// a session, so a duplicate is the same answer -- which is exactly why doctor
+// has to.
+func TestDoctorNoticesHooksInstalledTwice(t *testing.T) {
+	home := doctorHome(t, map[string]string{"a1b2c3d4-0000-4000-8000-0000000000e1": "hello"})
+	writeHooks(t, filepath.Join(home, ".claude", "settings.json"),
+		"/usr/local/bin/braids hook", "Stop", "SessionStart")
+	root := installPlugin(t, home, "braids")
+	writeHooks(t, filepath.Join(root, "hooks", "hooks.json"),
+		"braids hook", "Stop", "SessionStart")
+
+	got := doctorJSON(t, filepath.Join(t.TempDir(), "index.db"))["hook"]
+	if got.OK {
+		t.Fatalf("hooks installed twice reported ok: %+v", got)
+	}
+	if !strings.Contains(got.Detail, "twice") {
+		t.Errorf("detail does not say it is installed twice: %q", got.Detail)
+	}
+	if !strings.Contains(got.Detail, "2 events") {
+		t.Errorf("detail does not count the doubled events: %q", got.Detail)
+	}
+	if got.Fix != "braids hooks --remove, and keep the plugin" {
+		t.Errorf("fix = %q, which does not remove the copy that is safe to remove", got.Fix)
+	}
+}
+
+// The plugin alone is a complete installation and must not be nagged about.
+// It registers the same events `braids hooks --install` would, so a doctor
+// that only read the settings file called this "not installed" and sent
+// somebody to create the duplicate above.
+func TestDoctorAcceptsHooksFromThePluginAlone(t *testing.T) {
+	home := doctorHome(t, map[string]string{"a1b2c3d4-0000-4000-8000-0000000000e2": "hello"})
+	root := installPlugin(t, home, "braids")
+	writeHooks(t, filepath.Join(root, "hooks", "hooks.json"),
+		"braids hook", "Stop", "SessionStart", "SessionEnd")
+
+	got := doctorJSON(t, filepath.Join(t.TempDir(), "index.db"))["hook"]
+	if !got.OK {
+		t.Fatalf("the plugin's own hooks reported as a problem: %+v", got)
+	}
+	if !strings.Contains(got.Detail, "plugin") {
+		t.Errorf("detail does not say where they came from: %q", got.Detail)
+	}
+}
+
+// A plugin that is not braids registers hooks too. Reading every installed
+// plugin's hooks file and counting whatever is in it would call any of them a
+// duplicate braids.
+func TestDoctorIgnoresHooksBelongingToAnotherPlugin(t *testing.T) {
+	home := doctorHome(t, map[string]string{"a1b2c3d4-0000-4000-8000-0000000000e3": "hello"})
+	writeHooks(t, filepath.Join(home, ".claude", "settings.json"),
+		"/usr/local/bin/braids hook", "Stop")
+	root := installPlugin(t, home, "somethingelse")
+	writeHooks(t, filepath.Join(root, "hooks", "hooks.json"),
+		"somethingelse hook", "Stop")
+
+	got := doctorJSON(t, filepath.Join(t.TempDir(), "index.db"))["hook"]
+	if strings.Contains(got.Detail, "twice") {
+		t.Fatalf("another plugin's hooks counted as braids': %+v", got)
+	}
+	if strings.Contains(got.Fix, "--remove") {
+		t.Fatalf("offered to remove hooks that are not duplicated: %+v", got)
+	}
+}
+
+// An uninstalled plugin leaves its files in the cache. Walking the cache
+// rather than the record of what is installed reports a duplicate that is not
+// there, and the fix it offers removes hooks the machine needs.
+func TestDoctorIgnoresAnUninstalledPluginLeftInTheCache(t *testing.T) {
+	home := doctorHome(t, map[string]string{"a1b2c3d4-0000-4000-8000-0000000000e4": "hello"})
+	writeHooks(t, filepath.Join(home, ".claude", "settings.json"),
+		"/usr/local/bin/braids hook", "Stop")
+	stale := filepath.Join(home, ".claude", "plugins", "cache", "braids", "braids", "old")
+	writeHooks(t, filepath.Join(stale, "hooks", "hooks.json"), "braids hook", "Stop")
+	// Installed: nothing.
+	path := filepath.Join(home, ".claude", "plugins", "installed_plugins.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"version":2,"plugins":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := doctorJSON(t, filepath.Join(t.TempDir(), "index.db"))["hook"]
+	if strings.Contains(got.Detail, "twice") {
+		t.Fatalf("a cached, uninstalled plugin counted as installed: %+v", got)
+	}
+	if strings.Contains(got.Fix, "--remove") {
+		t.Fatalf("offered to remove the hooks this machine is relying on: %+v", got)
+	}
+}

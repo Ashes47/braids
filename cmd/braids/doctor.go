@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/Ashes47/braids/internal/core/hooks"
 	"github.com/Ashes47/braids/internal/core/index"
 	"github.com/Ashes47/braids/internal/core/memory"
+	"github.com/Ashes47/braids/internal/core/plugin"
 	"github.com/Ashes47/braids/internal/core/release"
 	"github.com/Ashes47/braids/internal/core/store/claudecode"
 	"github.com/Ashes47/braids/internal/skill"
@@ -223,7 +225,23 @@ func hookCheck() checkup {
 	if err != nil {
 		return checkup{"hook", false, err.Error(), "braids hooks --install"}
 	}
+	plugged := pluginHooks(filepath.Join(home, ".claude", "plugins"), command)
+	doubled := overlap(status.Events, plugged)
 	switch {
+	case len(doubled) > 0:
+		// Both. Claude Code runs the plugin's hooks and the ones in the
+		// settings file, and does not notice they are the same tool, so every
+		// event is recorded twice. Waiting states stay right -- they are read
+		// from the newest event for a session, and a duplicate is the same
+		// event again -- so nothing looks wrong anywhere else. The log simply
+		// grows at twice the rate, for good.
+		return checkup{"hook", false,
+			fmt.Sprintf("installed twice, by hand and by the plugin: %s recorded twice",
+				plural(len(doubled), "event")),
+			"braids hooks --remove, and keep the plugin"}
+	case len(status.Events) == 0 && len(plugged) > 0:
+		return checkup{"hook", true,
+			fmt.Sprintf("reporting %d events, installed by the plugin", len(plugged)), ""}
 	case len(status.Events) == 0:
 		return checkup{"hook", false,
 			"not installed, so braids cannot tell a running tool from one waiting on you",
@@ -236,6 +254,47 @@ func hookCheck() checkup {
 	default:
 		return checkup{"hook", true, fmt.Sprintf("reporting %d events", len(status.Events)), ""}
 	}
+}
+
+// pluginHooks returns the events an installed plugin attaches braids to.
+//
+// A plugin's hooks file carries the same shape as the hooks block of a
+// settings file, so Inspect reads one unchanged. An unreadable plugin is no
+// plugin: this runs on every doctor, and a duplicate invented out of a file
+// that could not be parsed would send somebody to uninstall something that is
+// not there.
+func pluginHooks(plugins, command string) []string {
+	on := map[string]bool{}
+	for _, root := range plugin.Roots(plugins) {
+		status, err := hooks.Inspect(filepath.Join(root, "hooks", "hooks.json"), command)
+		if err != nil {
+			continue
+		}
+		for _, event := range status.Events {
+			on[event] = true
+		}
+	}
+	out := make([]string, 0, len(on))
+	for event := range on {
+		out = append(out, event)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// overlap returns the strings in both lists, in the order of the first.
+func overlap(a, b []string) []string {
+	in := make(map[string]bool, len(b))
+	for _, s := range b {
+		in[s] = true
+	}
+	var out []string
+	for _, s := range a {
+		if in[s] {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // skillCheck catches the skill an older braids left in place. One that

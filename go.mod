@@ -1,10 +1,10 @@
 module github.com/Ashes47/braids
 
-go 1.25.0
+go 1.26.7
 
 require (
 	charm.land/bubbletea/v2 v2.0.9
-	charm.land/lipgloss/v2 v2.0.6
+	charm.land/lipgloss/v2 v2.1.0
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/fsnotify/fsnotify v1.10.1
 	modernc.org/sqlite v1.58.0
